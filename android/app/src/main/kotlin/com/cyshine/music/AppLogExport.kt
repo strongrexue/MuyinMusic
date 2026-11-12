@@ -19,14 +19,14 @@ internal object AppLogExport {
             "日志快照不存在"
         }
         val name =
-            "cyshine-${context.packageName.substringAfterLast('.')}-" +
+            "muyin-${context.packageName.substringAfterLast('.')}-" +
                 SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date()) +
                 ".txt"
-        val relative = "${Environment.DIRECTORY_DOWNLOADS}/CyShineMusic/logs"
+        val relative = "${Environment.DIRECTORY_DOWNLOADS}/MuyinMusic/logs"
         val folder =
             File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "CyShineMusic/logs",
+                "MuyinMusic/logs",
             )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver

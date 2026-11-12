@@ -16,8 +16,8 @@ class VivoMusicMetadata {
   static const pageKey = 'vivomusicmix_key_media_page';
   static const hasMoreKey = 'vivomusicmix_key_has_more';
   // Preserve song labels when the Bluetooth option uses lyrics as the title.
-  static const songTitleKey = 'cyshine.media.title';
-  static const songArtistKey = 'cyshine.media.artist';
+  static const songTitleKey = 'muyin.media.title';
+  static const songArtistKey = 'muyin.media.artist';
 
   static int loopModeFor(PlayerPlaybackMode mode) => switch (mode) {
     PlayerPlaybackMode.sequence => 1,

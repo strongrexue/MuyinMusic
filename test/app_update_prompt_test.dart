@@ -29,7 +29,7 @@ void main() {
   });
 
   const releaseUri =
-      'https://github.com/KevinllBin/CyShineMusic/releases/tag/v1.1.0';
+      'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.1.0';
 
   testWidgets('newer release shows dialog and later does not open GitHub', (
     tester,
@@ -55,7 +55,7 @@ void main() {
     expect(find.byKey(const ValueKey('app-update-dialog')), findsOneWidget);
     expect(find.text('发现新版本'), findsOneWidget);
     expect(find.textContaining('1.0.1  →  1.1.0'), findsOneWidget);
-    expect(find.textContaining('栖弦 1.1.0'), findsOneWidget);
+    expect(find.textContaining('沐音 1.1.0'), findsOneWidget);
     expect(outcome, isNull);
 
     await tester.tap(find.byKey(const ValueKey('app-update-later')));
@@ -98,7 +98,7 @@ void main() {
       release: _release(
         version: '1.0.1',
         pageUri:
-            'https://github.com/KevinllBin/CyShineMusic/releases/tag/v1.0.1',
+            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.0.1',
       ),
     );
     final launchedUris = <Uri>[];
@@ -191,7 +191,7 @@ AppRelease _release({required String version, required String pageUri}) {
     version: Version.parse(version),
     tagName: 'v$version',
     pageUri: Uri.parse(pageUri),
-    title: '栖弦 $version',
+    title: '沐音 $version',
   );
 }
 
@@ -203,7 +203,7 @@ Future<void> _pumpHarness(
 }) async {
   PackageInfo.setMockInitialValues(
     appName: appDisplayName,
-    packageName: 'com.cyshine.music',
+    packageName: 'com.muyin.muyinmusic',
     version: '1.0.1',
     buildNumber: '2',
     buildSignature: '',

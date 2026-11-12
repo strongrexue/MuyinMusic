@@ -16,7 +16,7 @@ void main() {
   );
   final artwork = Uri.parse('https://example.com/cover.jpg');
   const artworkHeaders = {
-    'User-Agent': 'CyShineMusic test',
+    'User-Agent': 'MuyinMusic test',
     'Referer': 'https://music.163.com/',
   };
   final base = MediaItem(

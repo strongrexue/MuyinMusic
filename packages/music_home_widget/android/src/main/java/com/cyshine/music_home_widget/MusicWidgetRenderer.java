@@ -91,7 +91,7 @@ final class MusicWidgetRenderer {
         text.setTextSize(Math.min(width * .080f, height * .085f));
         text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         text.setShadowLayer(unit * .008f, 0, unit * .003f, 0x60000000);
-        String heading = title.isEmpty() ? "栖弦音乐" : title;
+        String heading = title.isEmpty() ? "沐音音乐" : title;
         StaticLayout label = StaticLayout.Builder.obtain(heading, 0, heading.length(), text,
                         Math.max(1, Math.round(width * .64f)))
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)

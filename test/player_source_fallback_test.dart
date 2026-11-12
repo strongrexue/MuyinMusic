@@ -1275,7 +1275,7 @@ void main() {
     final harness = await _Harness.create(loadFailures: 0);
     addTearDown(harness.dispose);
     final directory = await Directory.systemTemp.createTemp(
-      'cyshine-player-shuffle-next-',
+      'muyin-player-shuffle-next-',
     );
     addTearDown(() => directory.delete(recursive: true));
     final entries = <DownloadHistoryEntry>[];
@@ -1301,7 +1301,7 @@ void main() {
       final harness = await _Harness.create(loadFailures: 0);
       addTearDown(harness.dispose);
       final directory = await Directory.systemTemp.createTemp(
-        'cyshine-player-standalone-next-',
+        'muyin-player-standalone-next-',
       );
       addTearDown(() => directory.delete(recursive: true));
       final file = File(
@@ -1325,7 +1325,7 @@ void main() {
     final harness = await _Harness.create(loadFailures: 0);
     addTearDown(harness.dispose);
     final directory = await Directory.systemTemp.createTemp(
-      'cyshine-player-expand-queue-',
+      'muyin-player-expand-queue-',
     );
     addTearDown(() => directory.delete(recursive: true));
     final expanded = <DownloadHistoryEntry>[];

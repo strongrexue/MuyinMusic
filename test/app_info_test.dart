@@ -7,7 +7,7 @@ void main() {
   test('app version label uses package version', () async {
     PackageInfo.setMockInitialValues(
       appName: appDisplayName,
-      packageName: 'com.cyshine.music',
+      packageName: 'com.muyin.muyinmusic',
       version: '1.0.0',
       buildNumber: '1',
       buildSignature: '',
@@ -18,6 +18,6 @@ void main() {
 
     await container.read(packageInfoProvider.future);
 
-    expect(container.read(appVersionLabelProvider), '栖弦 1.0.0');
+    expect(container.read(appVersionLabelProvider), '沐音 1.0.0');
   });
 }

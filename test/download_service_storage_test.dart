@@ -142,7 +142,7 @@ Future<
 >
 _fixture({bool sameFileName = false, HttpClientAdapter? adapter}) async {
   final root = await Directory.systemTemp.createTemp(
-    'cyshine-download-storage-',
+    'muyin-download-storage-',
   );
   final downloads = await Directory(p.join(root.path, 'music')).create();
   final documents = await Directory(p.join(root.path, 'documents')).create();

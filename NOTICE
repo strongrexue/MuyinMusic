@@ -1,0 +1,126 @@
+MuyinMusic (沐音) — Third-Party Notices
+========================================
+
+This file records the provenance and licensing of the software distributed in
+this repository. It is provided for informational purposes and is not legal
+advice.
+
+
+1. Origin
+---------
+MuyinMusic (沐音) is a second-development (二开) fork of:
+
+    CyShineMusic (栖弦)
+    https://github.com/KevinllBin/CyShineMusic
+    Copyright (c) 2026 KevinllBin
+    License: MIT  (see the root LICENSE file, reproduced verbatim)
+
+The baseline is upstream release v1.1.2 (git tag v1.1.2, commit 24a87ce).
+
+MuyinMusic modifications: Copyright (c) 2026 strongrexue and contributors.
+
+The root LICENSE file is kept byte-for-byte identical to upstream's MIT
+license, including the original copyright notice and permission notice, as
+required by the MIT license ("The above copyright notice and this permission
+notice shall be included in all copies or substantial portions of the
+Software").
+
+
+2. Changes made in this fork (relative to upstream v1.1.2)
+-----------------------------------------------------------
+- Re-branded the user-visible application identity:
+    applicationId : com.cyshine.music[.dev] -> com.muyin.muyinmusic[.dev]
+    app label     : 栖弦 / 栖弦dev          -> 沐音 / 沐音dev
+    display name, startup screen, shell header, home-widget strings,
+    vivo empty-queue hint, and other visible text.
+- Re-branded internal identifiers from cyshine / CyShineMusic to
+  muyin / MuyinMusic: log file names, download/cache/probe prefixes, FLAC
+  temp files, equalizer preset id and .speq file name, vivo metadata keys,
+  the audio-playback notification channel id, the default music download
+  directory, and the WebDAV sync directory.
+- Re-pointed the in-app online update checker to this repository's GitHub
+  Releases (https://github.com/strongrexue/MuyinMusic/releases/latest)
+  instead of upstream, and updated the update-dialog wording.
+- Added the license texts that upstream vendored without bundling (see
+  section 3), plus this NOTICE and CHANGELOG.md.
+- Rewrote README for this fork; removed the upstream QQ group number, QR
+  image, and GitHub links. The "no bundled music / user-configured legal
+  sources" disclaimer and the closing disclaimer are retained.
+
+Internal, non-user-visible identifiers are intentionally left unchanged:
+the Android namespace, Kotlin/Java package names and their ~30 file
+directories, the Dart package name `cy_shine_music` (500+ imports), native
+MethodChannel names, vendored-plugin package/channel names, and the
+`CyShineMusicApp` widget class name. Renaming them would require moving files
+and rewriting hundreds of references with no user-visible benefit; AGP keeps
+`applicationId` and `namespace` separate, so this is safe.
+
+
+3. Vendored packages and their licenses (mixed)
+----------------------------------------------
+This repository vendors several Flutter/Android packages under `packages/`.
+They carry DIFFERENT licenses. The most important is prism_ui (GPL-3.0-only),
+which is a strong copyleft license.
+
+  packages/prism_ui
+    Repository : https://github.com/chen08209/prism_ui
+    License    : GNU General Public License v3.0 only (GPL-3.0-only)
+    Full text  : packages/prism_ui/LICENSE  (GPLv3, added by this fork)
+    SPDX headers `// SPDX-License-Identifier: GPL-3.0-only` appear in its
+    sources (e.g. lib/icons/prism_glyphs.dart, lib/prism_palette.dart).
+    prism_ui additionally contains third-party code under other licenses:
+      - lib/hct/*                 : Copyright 2021 Google LLC, Apache-2.0
+      - lib/sliver_list/*         : MIT, Copyright (c) 2024 Matej Knopp,
+                                    Superlist and the contributors
+      - lib/shapes/shapes.dart    : MIT, Copyright (c) 2025 Agbama Gifted
+      - lib/navigator_resizable.dart : MIT, Copyright (c) 2024 Daichi Fujita
+      - shaders/ink_sparkle.frag : Copyright 2013 The Flutter Authors
+
+  packages/heroine
+    Repository : https://github.com/whynotmake-it/rivership
+                 (tree/main/packages/heroine)
+    Homepage   : https://whynotmake.it
+    License    : MIT, Copyright (c) 2024 Tim Lehmann for whynotmake.it
+    Full text  : packages/heroine/LICENSE  (MIT, added by this fork)
+
+  packages/audio_service
+    Repository : https://github.com/ryanheise/audio_service
+    License    : MIT, Copyright (c) 2018-2021 Ryan Heise and the project
+                 contributors
+    Full text  : packages/audio_service/LICENSE  (bundled by upstream)
+
+  packages/bass_player, packages/music_source_runtime,
+  packages/music_home_widget
+    App-specific Android plugins that are part of this application; they are
+    covered by the root MIT license of CyShineMusic / this fork.
+
+
+4. License of the distributed application (important)
+------------------------------------------------------
+Because prism_ui is linked into the same application / APK (a `path:`
+dependency statically compiled into the app), the distributed application is a
+work based on GPL-3.0 software. Under GPLv3 sections 5 and 6, anyone who
+receives an APK of this app must also be able to obtain the complete
+"Corresponding Source" of the whole work.
+
+We satisfy this by publishing the complete source of this repository at:
+
+    https://github.com/strongrexue/MuyinMusic
+
+Every GitHub Release that distributes an APK is built from a tagged commit in
+this same public repository, so recipients have the complete Corresponding
+Source for each build. Release notes link back to this NOTICE and CHANGELOG.
+
+The MIT-licensed portions (the CyShineMusic-derived app code, audio_service,
+heroine, and this fork's own modifications) remain under the MIT terms in the
+root LICENSE / packages/heroine/LICENSE / packages/audio_service/LICENSE. The
+GPLv3 requirement applies to the combined work as a whole when it is
+conveyed. This is a factual description of how the components are licensed,
+not a relicensing of prism_ui.
+
+
+5. Music content
+----------------
+This project does NOT bundle or distribute any music content. Users must
+configure their own custom sources and are responsible for confirming the
+legality of those sources (see README, "免责声明").

@@ -63,7 +63,7 @@ void main() {
     );
 
     setUp(() async {
-      root = await Directory.systemTemp.createTemp('cyshine-scan-cache-test-');
+      root = await Directory.systemTemp.createTemp('muyin-scan-cache-test-');
       parent = await Directory(p.join(root.path, 'music')).create();
       nested = await Directory(p.join(parent.path, 'nested')).create();
       extra = await Directory(p.join(root.path, 'extra')).create();
@@ -85,7 +85,7 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(pathProviderChannel, null);
       expect(p.isWithin(Directory.systemTemp.path, root.path), isTrue);
-      expect(p.basename(root.path), startsWith('cyshine-scan-cache-test-'));
+      expect(p.basename(root.path), startsWith('muyin-scan-cache-test-'));
       await root.delete(recursive: true);
     });
 

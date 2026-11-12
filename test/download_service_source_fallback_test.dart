@@ -21,7 +21,7 @@ void main() {
 
   test('a CDN 404 retries the next enabled source and completes', () async {
     final root = await Directory.systemTemp.createTemp(
-      'cyshine-download-fallback-',
+      'muyin-download-fallback-',
     );
     final downloads = Directory('${root.path}${Platform.pathSeparator}music');
     final cache = Directory('${root.path}${Platform.pathSeparator}cache');

@@ -69,7 +69,7 @@ void main() {
         ),
         isTrue,
       );
-      expect(requests.last.uri.path, '/root/CyShineMusic/sync-v1.json');
+      expect(requests.last.uri.path, '/root/MuyinMusic/sync-v1.json');
     },
   );
 

@@ -335,7 +335,7 @@ class BassPlayerPlugin :
         }
 
         wakeLock = (applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CyShineMusic:BassPlayback")
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MuyinMusic:BassPlayback")
             .apply { setReferenceCounted(false) }
         processingState = STATE_IDLE
         Log.i(TAG, "Initialized BASS $bassVersion, BASS_FX $bassFxVersion, formats=$pluginVersions")

@@ -62,3 +62,10 @@ CLAUDE.md
 # Gradle
 .gradle/
 **/.gradle/
+
+# Android signing secrets — never commit keystores or their properties.
+# Keep them locally under android/signing/ and back them up securely.
+# Losing a keystore makes future APKs unable to update apps signed by it.
+/android/signing/*.jks
+/android/signing/*.keystore
+/android/signing/*.properties

@@ -1,38 +1,32 @@
 <div align="center">
-  <img src="./logo.png" width="112" alt="CyShineMusic Logo">
-  <h1>CyShineMusic</h1>
-  <p>栖弦 - 面向 Android 的自定义源音乐播放器</p>
+  <img src="./logo.png" width="112" alt="沐音 Logo">
+  <h1>沐音 · MuyinMusic</h1>
+  <p>沐音 - 面向 Android 的自定义源音乐播放器</p>
   <p>
-    <a href="https://github.com/KevinllBin/CyShineMusic"><strong>项目主页</strong></a>
+    <a href="https://github.com/strongrexue/MuyinMusic"><strong>项目主页 / 源码</strong></a>
     ·
-    <a href="https://github.com/KevinllBin/CyShineMusic/issues">问题反馈</a>
+    <a href="https://github.com/strongrexue/MuyinMusic/releases">下载与更新</a>
   </p>
   <p>
-    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+    <a href="./LICENSE">MIT License（主体）</a>
+    ·
+    <a href="./NOTICE">第三方许可与署名（含 GPL-3.0 组件）</a>
   </p>
 </div>
 
 <div align="center">
-  <img src="./screenshots/showcase-player.png" width="760" alt="栖弦播放器展示，蓝色与绿色封面取色界面">
+  <img src="./screenshots/showcase-player.png" width="760" alt="沐音播放器展示，蓝色与绿色封面取色界面">
   <br>
-  <img src="./screenshots/showcase-lyrics.png" width="760" alt="栖弦逐字歌词展示，蓝色与粉色歌词界面">
+  <img src="./screenshots/showcase-lyrics.png" width="760" alt="沐音逐字歌词展示，蓝色与粉色歌词界面">
 </div>
 
 ## 项目简介
 
-CyShineMusic 是一个使用 Flutter 构建的 Android 音乐客户端，提供自定义源管理、音乐检索、下载管理、本地歌曲库和播放器能力。项目重点放在移动端体验、本地媒体整理、歌词展示和 Material 3 界面。
+沐音（MuyinMusic）是一个使用 Flutter 构建的 Android 音乐客户端，提供自定义源管理、音乐检索、下载管理、本地歌曲库和播放器能力。项目重点放在移动端体验、本地媒体整理、歌词展示和 Material 3 界面。
 
-项目不内置或分发任何音乐内容。用户需要自行配置可用的自定义源，并自行确认相关内容来源的合法性。
+本项目是 [CyShineMusic（栖弦）](https://github.com/KevinllBin/CyShineMusic) v1.1.2 的二开分支，用于自用及小范围朋友分享。源码公开发布于 [strongrexue/MuyinMusic](https://github.com/strongrexue/MuyinMusic)。
 
-## 交流群
-
-欢迎加入 QQ 群交流使用问题、功能建议和开发想法：`949229928`。
-
-<div align="center">
-  <img src="./screenshots/qq-group.jpg" width="260" alt="CyShineMusic QQ 交流群二维码">
-  <br>
-  <sub>QQ 群：949229928</sub>
-</div>
+**项目不内置或分发任何音乐内容。用户需要自行配置可用的自定义源，并自行确认相关内容来源的合法性。**
 
 ## 功能特性
 
@@ -45,6 +39,7 @@ CyShineMusic 是一个使用 Flutter 构建的 Android 音乐客户端，提供�
 - **本地播放器**：支持在线播放、本地播放、后台播放、系统媒体通知和耳机按键控制。
 - **播放队列**：支持上一首、下一首、随机、循环和播放队列管理。
 - **主题外观**：支持浅色、深色、跟随系统、动态取色和自定义主题色。
+- **在线更新**：应用内检查本仓库的 GitHub Releases 并引导下载更新包。
 - **调试工具**：提供应用内日志和基础网络设置，方便定位自定义源或下载问题。
 
 ## 截图
@@ -79,7 +74,7 @@ CyShineMusic 是一个使用 Flutter 构建的 Android 音乐客户端，提供�
 
 ## 开发环境
 
-- Flutter stable，Dart SDK `>=3.11.4 <4.0.0`
+- Flutter stable，Dart SDK `>=3.11.4 <4.0.0`（基线使用 Flutter 3.47.9 / Dart 3.13.7 验证）
 - Android SDK
 - Android 真机或模拟器
 
@@ -97,9 +92,10 @@ flutter build apk --target-platform=android-arm64
 ```
 
 构建渠道由当前 Git 分支自动决定：`main` 生成包名
-`com.cyshine.music`、应用名“栖弦”的正式版，`dev` 生成包名
-`com.cyshine.music.dev`、应用名“栖弦dev”的开发版，两者可同时安装。Release
-构建分别使用固定签名；签名文件配置见 `android/signing/README.md`。
+`com.muyin.muyinmusic`、应用名"沐音"的正式版，`dev` 生成包名
+`com.muyin.muyinmusic.dev`、应用名"沐音dev"的开发版，两者可同时安装。Release
+构建分别使用固定签名；签名文件配置见 `android/signing/README.md`。签名密钥由
+维护者本地保管，不随源码入库。
 
 构建产物位于：
 
@@ -138,20 +134,22 @@ lib/
 
 ## 贡献
 
-欢迎通过 [Issues](https://github.com/KevinllBin/CyShineMusic/issues) 提交问题或建议，也可以直接发起 Pull Request。提交前请至少运行：
+欢迎通过本仓库的 Issues 提交问题或建议，也可以直接发起 Pull Request。提交前请至少运行：
 
 ```powershell
 flutter analyze
 flutter test
 ```
 
-## 友情链接
-
-- [Linux.do 社区](https://linux.do/)
-
 ## 许可证
 
-本项目基于 [MIT License](./LICENSE) 开源。
+本项目为**混合许可**，详见 [NOTICE](./NOTICE)：
+
+- 应用主体（源自 CyShineMusic，MIT）及本分支的修改： [MIT License](./LICENSE)。上游原始版权行 `Copyright (c) 2026 KevinllBin` 按 MIT 要求原样保留。
+- `packages/prism_ui`：**GNU GPL v3.0 only**（[GPLv3 全文](./packages/prism_ui/LICENSE)），是强 copyleft 组件；其内部还包含 Apache-2.0 / MIT 的第三方代码。
+- `packages/heroine`、`packages/audio_service`：MIT（各自的 LICENSE 全文随附）。
+
+由于 prism_ui 被静态链接进同一个 APK，分发本应用时适用 GPLv3 的源码可获得要求。为此，本仓库公开发布**完整源码**，每个对外分发的 APK（GitHub Release）都对应本仓库中的一次带标签提交，接收者可据此取得完整的 Corresponding Source。
 
 ## 免责声明
 

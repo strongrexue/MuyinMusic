@@ -159,7 +159,7 @@ class ShellHeader extends ConsumerWidget {
       case '/debug':
         return '调试日志';
       default:
-        return '栖弦';
+        return '沐音';
     }
   }
 }

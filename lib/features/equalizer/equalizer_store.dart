@@ -274,13 +274,13 @@ class EqualizerSettings {
 
   String toSpeq() {
     final preset = EqualizerPreset(
-      id: presetId ?? 'cyshine.custom',
+      id: presetId ?? 'muyin.custom',
       label:
           equalizerPresets
               .where((candidate) => candidate.id == presetId)
               .firstOrNull
               ?.label ??
-          'CyShineMusic',
+          'MuyinMusic',
       inputGainDb: inputGainDb,
       outputGainDb: outputGainDb,
       bands: bands,

@@ -16,7 +16,7 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
   setUpAll(() async {
-    temp = await Directory.systemTemp.createTemp('cyshine-log-test-');
+    temp = await Directory.systemTemp.createTemp('muyin-log-test-');
     messenger.setMockMethodCallHandler(paths, (_) async => temp.path);
   });
 
@@ -110,7 +110,7 @@ void main() {
     'uncaught errors persist before returning with categories off',
     () async {
       final ordinaryLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${ordinaryLog.parent.path}/cyshine-crash.log');
+      final crashLog = File('${ordinaryLog.parent.path}/muyin-crash.log');
       final stack = StackTrace.fromString(
         '#0 crashFrame ${'x' * 1600}\n#1 finalUsefulFrame',
       );
@@ -195,7 +195,7 @@ void main() {
         );
       }
       final normalLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${normalLog.parent.path}/cyshine-crash.log');
+      final crashLog = File('${normalLog.parent.path}/muyin-crash.log');
       expect(await crashLog.length(), lessThanOrEqualTo(256 * 1024));
       final exported = await File(await AppLogger.exportFile()).readAsString();
       expect(exported, contains('bounded-marker-99'));
@@ -224,13 +224,13 @@ void main() {
       final log = await AppLogger.currentLogFile();
       expect(await log!.length(), lessThan(1024 * 1024));
       expect(
-        await File('${log.parent.path}/cyshine.prev.log').exists(),
+        await File('${log.parent.path}/muyin.prev.log').exists(),
         isTrue,
       );
       await AppLogger.clear();
       expect(await log.length(), 0);
       expect(
-        await File('${log.parent.path}/cyshine.prev.log').exists(),
+        await File('${log.parent.path}/muyin.prev.log').exists(),
         isFalse,
       );
     },
@@ -246,7 +246,7 @@ void main() {
         ui.PlatformDispatcher.instance.onError = previousPlatform;
       });
       final ordinaryLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${ordinaryLog.parent.path}/cyshine-crash.log');
+      final crashLog = File('${ordinaryLog.parent.path}/muyin-crash.log');
       var flutterDelegated = false;
       var platformDelegated = false;
       FlutterError.onError = (_) {

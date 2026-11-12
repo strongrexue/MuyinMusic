@@ -1,5 +1,5 @@
 name: music_source_runtime
-description: Native QuickJS runtime bridge for CyShineMusic sources.
+description: Native QuickJS runtime bridge for MuyinMusic sources.
 version: 0.1.0
 publish_to: none
 

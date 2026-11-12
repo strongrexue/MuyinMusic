@@ -53,8 +53,8 @@ void main() {
       final dio = _dioReturning({
         'tag_name': 'v1.10.0',
         'html_url':
-            'https://github.com/KevinllBin/CyShineMusic/releases/tag/v1.10.0',
-        'name': 'CyShineMusic 1.10.0',
+            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.10.0',
+        'name': 'MuyinMusic 1.10.0',
         'draft': false,
         'prerelease': false,
       });
@@ -65,11 +65,11 @@ void main() {
       expect(release, isNotNull);
       expect(release!.version, Version(1, 10, 0));
       expect(release.tagName, 'v1.10.0');
-      expect(release.title, 'CyShineMusic 1.10.0');
+      expect(release.title, 'MuyinMusic 1.10.0');
       expect(
         release.pageUri,
         Uri.parse(
-          'https://github.com/KevinllBin/CyShineMusic/releases/tag/v1.10.0',
+          'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.10.0',
         ),
       );
     });
@@ -79,7 +79,7 @@ void main() {
         final dio = _dioReturning({
           'tag_name': 'v2.0.0',
           'html_url':
-              'https://github.com/KevinllBin/CyShineMusic/releases/tag/v2.0.0',
+              'https://github.com/strongrexue/MuyinMusic/releases/tag/v2.0.0',
           field: true,
         });
         addTearDown(dio.close);
@@ -102,7 +102,7 @@ void main() {
       final dio = _dioReturning({
         'tag_name': 'invalid',
         'html_url':
-            'https://github.com/KevinllBin/CyShineMusic/releases/tag/invalid',
+            'https://github.com/strongrexue/MuyinMusic/releases/tag/invalid',
       });
       addTearDown(dio.close);
 
@@ -146,7 +146,7 @@ class _FakeAdapter implements HttpClientAdapter {
     expect(
       options.uri,
       Uri.parse(
-        'https://api.github.com/repos/KevinllBin/CyShineMusic/releases/latest',
+        'https://api.github.com/repos/strongrexue/MuyinMusic/releases/latest',
       ),
     );
     return ResponseBody.fromString(

@@ -210,7 +210,7 @@ class SafStoragePlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
         children(tree, DocumentsContract.getTreeDocumentId(tree))
         if (!writable) return
         val probe = DocumentsContract.createDocument(resolver, root, "application/octet-stream",
-            ".cyshine-probe-${UUID.randomUUID()}") ?: error("文件夹不可写，请重新选择")
+            ".muyin-probe-${UUID.randomUUID()}") ?: error("文件夹不可写，请重新选择")
         try {
             val output = resolver.openOutputStream(probe, "wt") ?: error("文件夹不可写，请重新选择")
             output.use { it.write(byteArrayOf(1)) }

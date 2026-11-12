@@ -378,7 +378,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
             );
 
             return MaterialApp.router(
-              title: '栖弦',
+              title: '沐音',
               localizationsDelegates: const [PrismChineseStrings.delegate],
               debugShowCheckedModeBanner: false,
               themeAnimationDuration: Duration.zero,

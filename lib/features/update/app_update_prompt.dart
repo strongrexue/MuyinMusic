@@ -99,7 +99,7 @@ Future<void> _showUpdateDialog(
       content: Text(
         '$currentVersion  →  ${release.version}\n\n'
         '${release.title}\n'
-        '将前往 GitHub Release 页面，由你选择并下载更新包。\n\n'
+        '将打开沐音的更新页面，由你选择并下载更新包。\n\n'
         '忽略更新后，启动时将不再自动检查，可在设置中手动检查更新。',
       ),
       actions: [
@@ -138,12 +138,12 @@ Future<void> _showUpdateDialog(
   try {
     final opened = await ref.read(externalUriLauncherProvider)(release.pageUri);
     if (!opened && context.mounted) {
-      showAppToast(context, '无法打开 GitHub Release 页面', type: AppToastType.error);
+      showAppToast(context, '无法打开沐音的更新页面', type: AppToastType.error);
     }
   } catch (error) {
     await AppLogger.write('update', 'open release page failed: $error');
     if (context.mounted) {
-      showAppToast(context, '无法打开 GitHub Release 页面', type: AppToastType.error);
+      showAppToast(context, '无法打开沐音的更新页面', type: AppToastType.error);
     }
   }
 }

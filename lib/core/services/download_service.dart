@@ -210,7 +210,7 @@ class DownloadService {
       log('step1 resolve with enabled local music sources');
       final destDir = await _resolveDestinationDir(settings.downloadDir, log);
       final cacheRoot = await getTemporaryDirectory();
-      taskCacheDir = await cacheRoot.createTemp('cyshine-download-');
+      taskCacheDir = await cacheRoot.createTemp('muyin-download-');
       ensureActive();
 
       final MusicSourceFallbackResult<_DownloadedAudio> sourceResult;
@@ -564,14 +564,14 @@ class DownloadService {
         await dir.create(recursive: true);
       }
       // Concurrent downloads must not write/delete each other's probe.
-      probeDir = await dir.createTemp('.cyshine-probe-');
+      probeDir = await dir.createTemp('.muyin-probe-');
       final probe = File(p.join(probeDir.path, 'write-test'));
       await probe.writeAsString('ok');
       return dir.path;
     } catch (e) {
       log('destDir FAILED ${dir.path}: $e; falling back to app-private');
       final fallback = await getApplicationDocumentsDirectory();
-      final fb = Directory(p.join(fallback.path, 'CyShineMusic'));
+      final fb = Directory(p.join(fallback.path, 'MuyinMusic'));
       if (!fb.existsSync()) fb.createSync(recursive: true);
       return fb.path;
     } finally {

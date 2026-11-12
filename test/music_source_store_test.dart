@@ -20,7 +20,7 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     scriptsDirectory = await Directory.systemTemp.createTemp(
-      'cyshine_music_source_store_test_',
+      'muyin_music_source_store_test_',
     );
   });
 

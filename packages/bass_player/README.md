@@ -41,5 +41,5 @@ records source identities, mixer/source clocks and transition stages. Dart
 records received snapshot sequences, EOF guards and metadata handoff decisions.
 Normal clock records and repeated jump records are limited to one per second;
 25 ms effect automation does not log per callback. The in-app log console can
-export both rotated files to `Download/CyShineMusic/logs/` using MediaStore.
+export both rotated files to `Download/MuyinMusic/logs/` using MediaStore.
 The exported text can be read with `adb pull` without root or a debug signature.

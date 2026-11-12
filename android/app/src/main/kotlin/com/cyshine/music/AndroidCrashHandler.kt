@@ -16,7 +16,7 @@ import kotlin.system.exitProcess
  * unavailable and a Dart logger cannot observe a native process death.
  */
 internal object AndroidCrashHandler {
-    private const val FILE_NAME = "cyshine-java-crash.txt"
+    private const val FILE_NAME = "muyin-java-crash.txt"
     private const val MAX_BYTES = 64 * 1024
     private var installed = false
 

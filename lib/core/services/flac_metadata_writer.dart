@@ -126,7 +126,7 @@ class FlacMetadataWriter {
       throw const FormatException('FLAC metadata block list is empty');
     }
 
-    final temp = await _uniqueSidecar(path, '.cyshinetag.tmp');
+    final temp = await _uniqueSidecar(path, '.muyintag.tmp');
     var installed = false;
     try {
       final sink = temp.openWrite();
@@ -458,7 +458,7 @@ class FlacMetadataWriter {
   }
 
   static Future<void> _replaceWithBackup(File original, File temp) async {
-    final backup = await _uniqueSidecar(original.path, '.cyshinetag.bak');
+    final backup = await _uniqueSidecar(original.path, '.muyintag.bak');
     await original.rename(backup.path);
     try {
       await temp.rename(original.path);

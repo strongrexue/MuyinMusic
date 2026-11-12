@@ -63,7 +63,7 @@ class SafStorage {
       await directory.list(followLinks: false).take(1).drain<void>();
       return;
     }
-    final probe = await directory.createTemp('.cyshine-probe-');
+    final probe = await directory.createTemp('.muyin-probe-');
     try {
       await File('${probe.path}/write-test').writeAsString('ok');
     } finally {

@@ -16,7 +16,7 @@ import 'log_policy.dart';
 
 // File-backed log so the user can hand over a real trace when something
 // looks wrong. Each line is `ISO8601 [scope] message`, persisted to
-// `<app-documents>/logs/cyshine.log` (rotated at 1 MiB).
+// `<app-documents>/logs/muyin.log` (rotated at 1 MiB).
 class AppLogger {
   const AppLogger._();
 
@@ -207,15 +207,15 @@ class AppLogger {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory(p.join(docs.path, 'logs'));
       if (!dir.existsSync()) dir.createSync(recursive: true);
-      final file = File(p.join(dir.path, 'cyshine.log'));
+      final file = File(p.join(dir.path, 'muyin.log'));
       if (file.existsSync() && file.lengthSync() > _maxBytes) {
-        final backup = File(p.join(dir.path, 'cyshine.prev.log'));
+        final backup = File(p.join(dir.path, 'muyin.prev.log'));
         if (backup.existsSync()) backup.deleteSync();
         file.renameSync(backup.path);
       }
       _file = file;
       _writtenBytes = file.existsSync() ? file.lengthSync() : 0;
-      final crashFile = File(p.join(dir.path, 'cyshine-crash.log'));
+      final crashFile = File(p.join(dir.path, 'muyin-crash.log'));
       if (crashFile.existsSync() && crashFile.lengthSync() > _maxCrashBytes) {
         crashFile.writeAsStringSync('');
       }
@@ -252,7 +252,7 @@ class AppLogger {
           final file = _file;
           if (file == null) return;
           if (_writtenBytes >= _maxBytes && await file.exists()) {
-            final backup = File(p.join(file.parent.path, 'cyshine.prev.log'));
+            final backup = File(p.join(file.parent.path, 'muyin.prev.log'));
             if (await backup.exists()) await backup.delete();
             await file.rename(backup.path);
             _writtenBytes = 0;
@@ -352,7 +352,7 @@ class AppLogger {
       final chunks = <String>[];
       final file = _file;
       if (file != null) {
-        final previous = File(p.join(file.parent.path, 'cyshine.prev.log'));
+        final previous = File(p.join(file.parent.path, 'muyin.prev.log'));
         if (await previous.exists()) chunks.add(await previous.readAsString());
         if (await file.exists()) chunks.add(await file.readAsString());
       }
@@ -365,7 +365,7 @@ class AppLogger {
       }
       if (chunks.isEmpty) chunks.add(_recent.join('\n'));
       final temp = await getTemporaryDirectory();
-      final snapshot = File(p.join(temp.path, 'cyshine-log-export.txt'));
+      final snapshot = File(p.join(temp.path, 'muyin-log-export.txt'));
       await snapshot.writeAsString(exportText(chunks), flush: true);
       return snapshot;
     });
@@ -414,7 +414,7 @@ class AppLogger {
           final file = _file;
           if (file != null) {
             await file.writeAsString('');
-            final backup = File(p.join(file.parent.path, 'cyshine.prev.log'));
+            final backup = File(p.join(file.parent.path, 'muyin.prev.log'));
             if (await backup.exists()) await backup.delete();
           }
           _writtenBytes = 0;
