@@ -1,16 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
-// CorePalette is still the public Android palette returned by dynamic_color
-// 1.8.x, even though material_color_utilities marks it deprecated internally.
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dynamic_color/dynamic_color.dart';
-import 'package:material_color_utilities/material_color_utilities.dart';
 
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
@@ -33,8 +27,7 @@ import 'features/update/app_update_prompt.dart';
 import 'router.dart';
 import 'theme/app_motion.dart';
 import 'theme/app_theme.dart';
-import 'theme/dynamic_color_scheme.dart';
-import 'theme/dynamic_color_status.dart';
+import 'core/storage/glass_preview_provider.dart';
 
 class CyShineMusicApp extends ConsumerStatefulWidget {
   const CyShineMusicApp({super.key});
@@ -45,7 +38,6 @@ class CyShineMusicApp extends ConsumerStatefulWidget {
 
 class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     with WidgetsBindingObserver {
-  Future<CorePalette?>? _corePaletteFuture;
   String? _lastLoggedScheme;
   static const _audioIntentChannel = MethodChannel(
     'cy_shine_music/audio_intent',
@@ -61,7 +53,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _corePaletteFuture = DynamicColorPlugin.getCorePalette();
     if (Platform.isAndroid) {
       final homeWidgetService = ref.read(musicHomeWidgetProvider);
       homeWidgetService.onOpenPlayer = _openWidgetPlayer;
@@ -295,143 +286,89 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final glassConfig = ref.watch(effectiveGlassConfigProvider);
     final themeMode = settings.themeMode;
 
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        return FutureBuilder<CorePalette?>(
-          future: _corePaletteFuture,
-          builder: (context, snapshot) {
-            final corePalette = snapshot.data;
-            final lightScheme = corePalette == null
-                ? lightDynamic
-                : DynamicColorScheme.fromCorePalette(
-                    corePalette,
-                    brightness: Brightness.light,
-                  );
-            final darkScheme = corePalette == null
-                ? darkDynamic
-                : DynamicColorScheme.fromCorePalette(
-                    corePalette,
-                    brightness: Brightness.dark,
-                  );
+    final lightTheme = AppTheme.fromScheme(
+      AppTheme.schemeFor(settings.themeSeed, Brightness.light),
+    );
+    final darkTheme = AppTheme.fromScheme(
+      AppTheme.schemeFor(settings.themeSeed, Brightness.dark),
+    );
+    final isDark = switch (themeMode) {
+      ThemeMode.light => false,
+      ThemeMode.dark => true,
+      ThemeMode.system =>
+        MediaQuery.platformBrightnessOf(context) == Brightness.dark,
+    };
+    _logColorSchemeOnce(isDark ? darkTheme.colorScheme : lightTheme.colorScheme);
+    final overlayIsDark = isDark;
+    final overlayStyle = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemStatusBarContrastEnforced: false,
+      systemNavigationBarContrastEnforced: false,
+      statusBarIconBrightness: overlayIsDark
+          ? Brightness.light
+          : Brightness.dark,
+      statusBarBrightness: overlayIsDark
+          ? Brightness.dark
+          : Brightness.light,
+      systemNavigationBarIconBrightness: overlayIsDark
+          ? Brightness.light
+          : Brightness.dark,
+    );
 
-            final dynamicSeed = lightScheme?.primary ?? darkScheme?.primary;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              final next = DynamicColorStatus(
-                available: dynamicSeed != null,
-                seed: dynamicSeed,
-              );
-              final current = ref.read(dynamicColorStatusProvider);
-              if (current.available != next.available ||
-                  current.seed?.toARGB32() != next.seed?.toARGB32()) {
-                ref.read(dynamicColorStatusProvider.notifier).state = next;
-              }
-            });
-
-            final useDynamicScheme =
-                settings.useDynamicColor &&
-                lightScheme != null &&
-                darkScheme != null;
-            final lightTheme = AppTheme.fromScheme(
-              AppTheme.schemeFor(
-                useDynamicScheme ? lightScheme.primary : settings.themeSeed,
-                Brightness.light,
-                settings.colorStyle,
-              ),
-              style: settings.colorStyle,
-            );
-            final darkTheme = AppTheme.fromScheme(
-              AppTheme.schemeFor(
-                useDynamicScheme ? darkScheme.primary : settings.themeSeed,
-                Brightness.dark,
-                settings.colorStyle,
-              ),
-              style: settings.colorStyle,
-            );
-            final isDark = switch (themeMode) {
-              ThemeMode.light => false,
-              ThemeMode.dark => true,
-              ThemeMode.system =>
-                MediaQuery.platformBrightnessOf(context) == Brightness.dark,
-            };
-            _logColorSchemeOnce(
-              useDynamicScheme ? (isDark ? darkScheme : lightScheme) : null,
-              fromCorePalette: corePalette != null,
-            );
-            final overlayIsDark = isDark;
-            final overlayStyle = SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
-              systemNavigationBarColor: Colors.transparent,
-              systemNavigationBarDividerColor: Colors.transparent,
-              systemStatusBarContrastEnforced: false,
-              systemNavigationBarContrastEnforced: false,
-              statusBarIconBrightness: overlayIsDark
-                  ? Brightness.light
-                  : Brightness.dark,
-              statusBarBrightness: overlayIsDark
-                  ? Brightness.dark
-                  : Brightness.light,
-              systemNavigationBarIconBrightness: overlayIsDark
-                  ? Brightness.light
-                  : Brightness.dark,
-            );
-
-            return MaterialApp.router(
-              title: '沐音',
-              localizationsDelegates: const [PrismChineseStrings.delegate],
-              debugShowCheckedModeBanner: false,
-              themeAnimationDuration: Duration.zero,
-              themeAnimationCurve: AppMotion.emphasized,
-              themeMode: themeMode,
-              theme: lightTheme,
-              darkTheme: darkTheme,
-              routerConfig: appRouter,
-              builder: (context, child) {
-                // Route-specific regions (such as artwork headers) override
-                // this baseline only while they are visible in the layer tree.
-                return AnnotatedRegion<SystemUiOverlayStyle>(
-                  value: overlayStyle,
-                  child: CarDisplayViewport(
-                    enabled: settings.carDisplayEnabled,
-                    sizeFactor: settings.carDisplaySize,
-                    child: PrismEnvironment(
-                      mode: settings.liquidGlassMode,
-                      child: AppToastOverlay(
-                        child: MusicSourceUpdatePrompt(
-                          navigatorKey: rootNavigatorKey,
-                          ready: _sourceUpdatePromptsReady,
-                          child: StartupGate(
-                            skipStartupScreen: settings.skipStartupScreen,
-                            onReady: _onStartupReady,
-                            child: child ?? const SizedBox.shrink(),
-                          ),
-                        ),
-                      ),
-                    ),
+    return MaterialApp.router(
+      title: '沐音',
+      localizationsDelegates: const [PrismChineseStrings.delegate],
+      debugShowCheckedModeBanner: false,
+      themeAnimationDuration: Duration.zero,
+      themeAnimationCurve: AppMotion.emphasized,
+      themeMode: themeMode,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      routerConfig: appRouter,
+      builder: (context, child) {
+        // Route-specific regions (such as artwork headers) override
+        // this baseline only while they are visible in the layer tree.
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: overlayStyle,
+          child: CarDisplayViewport(
+            enabled: settings.carDisplayEnabled,
+            sizeFactor: settings.carDisplaySize,
+            child: PrismEnvironment(
+              mode: settings.liquidGlassMode,
+              glassConfig: glassConfig,
+              child: AppToastOverlay(
+                child: MusicSourceUpdatePrompt(
+                  navigatorKey: rootNavigatorKey,
+                  ready: _sourceUpdatePromptsReady,
+                  child: StartupGate(
+                    skipStartupScreen: settings.skipStartupScreen,
+                    onReady: _onStartupReady,
+                    child: child ?? const SizedBox.shrink(),
                   ),
-                );
-              },
-            );
-          },
+                ),
+              ),
+            ),
+          ),
         );
       },
     );
   }
 
-  void _logColorSchemeOnce(
-    ColorScheme? scheme, {
-    required bool fromCorePalette,
-  }) {
+  void _logColorSchemeOnce(ColorScheme? scheme) {
     if (scheme == null) return;
     final signature =
         '${scheme.brightness}:${scheme.primary.toARGB32()}:'
-        '${scheme.surfaceContainerHigh.toARGB32()}:$fromCorePalette';
+        '${scheme.surfaceContainerHigh.toARGB32()}';
     if (_lastLoggedScheme == signature) return;
     _lastLoggedScheme = signature;
     AppLogger.write(
       'theme',
-      'dynamic=$fromCorePalette brightness=${scheme.brightness.name} '
+      'brightness=${scheme.brightness.name} '
           'surface=${_hex(scheme.surface)} '
           'surfaceContainerHigh=${_hex(scheme.surfaceContainerHigh)} '
           'primary=${_hex(scheme.primary)} '

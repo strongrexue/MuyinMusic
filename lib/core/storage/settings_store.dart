@@ -8,7 +8,7 @@ import '../services/storage_location.dart';
 import '../services/saf_storage.dart';
 import '../api/dio_factory.dart';
 import '../models/enums.dart';
-import '../../theme/color_style.dart';
+import '../../theme/glass_settings.dart';
 import '../../theme/liquid_glass_mode.dart';
 import '../../theme/seed_palette.dart';
 import 'base_url.dart';
@@ -24,8 +24,7 @@ const String _kUseBuiltInSourceFilePickerKey =
 const String _kThemeModeKey = 'theme_mode';
 const String _kThemeSeedKey = 'theme_seed_argb';
 const String _kThemePaletteKey = 'theme_palette';
-const String _kColorStyleKey = 'theme_color_style';
-const String _kUseDynamicColorKey = 'use_dynamic_color';
+const String _kGlassConfigKey = 'glass_config';
 const String _kLiquidGlassModeKey = 'liquid_glass_mode';
 const String _kPlaylistArtworkColorsEnabledKey =
     'playlist_artwork_colors_enabled';
@@ -113,9 +112,8 @@ class AppSettings {
     required this.themeMode,
     required this.themeSeed,
     this.themePalette = SeedPalette.defaultColors,
-    required this.colorStyle,
-    required this.useDynamicColor,
     this.liquidGlassMode = LiquidGlassMode.standard,
+    this.glassConfig = GlassConfig.defaults,
     this.playlistArtworkColorsEnabled = true,
     required this.flowingLightEnabled,
     this.lyricViewBlurDisabled = false,
@@ -154,9 +152,9 @@ class AppSettings {
   final ThemeMode themeMode;
   final Color themeSeed;
   final List<int> themePalette;
-  final AppColorStyle colorStyle;
-  final bool useDynamicColor;
   final LiquidGlassMode liquidGlassMode;
+  final GlassConfig glassConfig;
+  bool get glassEnabled => liquidGlassMode != LiquidGlassMode.none;
   final bool playlistArtworkColorsEnabled;
 
   /// Whether the player backdrop animates its extracted colors. Off falls back
@@ -210,9 +208,8 @@ class AppSettings {
     ThemeMode? themeMode,
     Color? themeSeed,
     List<int>? themePalette,
-    AppColorStyle? colorStyle,
-    bool? useDynamicColor,
     LiquidGlassMode? liquidGlassMode,
+    GlassConfig? glassConfig,
     bool? playlistArtworkColorsEnabled,
     bool? flowingLightEnabled,
     bool? lyricViewBlurDisabled,
@@ -254,9 +251,8 @@ class AppSettings {
     themeMode: themeMode ?? this.themeMode,
     themeSeed: themeSeed ?? this.themeSeed,
     themePalette: themePalette ?? this.themePalette,
-    colorStyle: colorStyle ?? this.colorStyle,
-    useDynamicColor: useDynamicColor ?? this.useDynamicColor,
     liquidGlassMode: liquidGlassMode ?? this.liquidGlassMode,
+    glassConfig: glassConfig ?? this.glassConfig,
     playlistArtworkColorsEnabled:
         playlistArtworkColorsEnabled ?? this.playlistArtworkColorsEnabled,
     flowingLightEnabled: flowingLightEnabled ?? this.flowingLightEnabled,
@@ -304,8 +300,6 @@ class AppSettings {
     localMusicDirs: [kDefaultDownloadDir],
     themeMode: ThemeMode.system,
     themeSeed: SeedPalette.defaultSeed,
-    colorStyle: AppColorStyle.fallback,
-    useDynamicColor: false,
     flowingLightEnabled: true,
     carPadModeEnabled: false,
     autoPlayOnStartup: false,
@@ -376,8 +370,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
             _prefs.containsKey(_kThemeSeedKey))
           _prefs.getInt(_kThemeSeedKey)!,
       }),
-      colorStyle: AppColorStyle.fromCode(_prefs.getString(_kColorStyleKey)),
-      useDynamicColor: _prefs.getBool(_kUseDynamicColorKey) ?? false,
+      glassConfig: GlassConfig.decode(_prefs.getString(_kGlassConfigKey)),
       liquidGlassMode: LiquidGlassMode.fromCode(
         _prefs.getString(_kLiquidGlassModeKey),
       ),
@@ -533,10 +526,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(themeSeed: color);
   }
 
-  Future<void> selectThemeColor(Color? color) async {
-    if (color != null) await _prefs.setInt(_kThemeSeedKey, color.toARGB32());
-    await _prefs.setBool(_kUseDynamicColorKey, color == null);
-    state = state.copyWith(themeSeed: color, useDynamicColor: color == null);
+  Future<void> selectThemeColor(Color color) async {
+    await _prefs.setInt(_kThemeSeedKey, color.toARGB32());
+    state = state.copyWith(themeSeed: color);
   }
 
   Future<void> saveThemeColor(Color color, {int? replacing}) async {
@@ -566,25 +558,37 @@ class SettingsNotifier extends Notifier<AppSettings> {
       palette.map((value) => value.toString()).toList(),
     );
     state = state.copyWith(themePalette: List<int>.unmodifiable(palette));
-    if (state.themeSeed.toARGB32() == color) await selectThemeColor(null);
+    if (state.themeSeed.toARGB32() == color) {
+      await selectThemeColor(SeedPalette.defaultSeed);
+    }
   }
 
   Future<void> resetThemeColors() async {
     await _prefs.remove(_kThemePaletteKey);
     state = state.copyWith(themePalette: SeedPalette.defaultColors);
     await selectThemeColor(SeedPalette.defaultSeed);
-    await setColorStyle(AppColorStyle.vivid);
   }
 
-  Future<void> setColorStyle(AppColorStyle style) async {
-    await _prefs.setString(_kColorStyleKey, style.code);
-    state = state.copyWith(colorStyle: style);
+  /// 玻璃总开关。画质固定 ultra：开=ultra、关=none。
+  Future<void> setGlassEnabled(bool value) =>
+      setLiquidGlassMode(value ? LiquidGlassMode.ultra : LiquidGlassMode.none);
+
+  Future<void> setGlassConfig(GlassConfig config) async {
+    await _prefs.setString(_kGlassConfigKey, config.encode());
+    state = state.copyWith(glassConfig: config);
   }
 
-  Future<void> setUseDynamicColor(bool value) async {
-    await _prefs.setBool(_kUseDynamicColorKey, value);
-    state = state.copyWith(useDynamicColor: value);
-  }
+  Future<void> setGlassAppearance(GlassAppearance appearance) =>
+      setGlassConfig(state.glassConfig.copyWith(appearance: appearance));
+
+  Future<void> setGlassSettingsForTab(
+    GlassAppearance tab,
+    GlassSettings settings,
+  ) => setGlassConfig(
+    state.glassConfig.copyWith(
+      tabs: state.glassConfig.tabs.withAppearance(tab, settings),
+    ),
+  );
 
   Future<void> setLiquidGlassMode(LiquidGlassMode mode) async {
     await _prefs.setString(_kLiquidGlassModeKey, mode.code);
@@ -697,8 +701,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     'themeMode': _encodeThemeMode(state.themeMode),
     'themeSeedArgb': state.themeSeed.toARGB32(),
     'themePalette': state.themePalette,
-    'colorStyle': state.colorStyle.code,
-    'useDynamicColor': state.useDynamicColor,
+    'glassConfig': state.glassConfig.encode(),
     'liquidGlassMode': state.liquidGlassMode.code,
     'playlistArtworkColorsEnabled': state.playlistArtworkColorsEnabled,
     'flowingLightEnabled': state.flowingLightEnabled,
@@ -713,28 +716,21 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final json = Map<String, dynamic>.from(value);
     final rawMode = json['themeMode'];
     final rawSeed = json['themeSeedArgb'];
-    final rawDynamic = json['useDynamicColor'];
+    // 旧备份里的 colorStyle / useDynamicColor 键一并忽略（这两项已移除）。
     if (rawMode is! String ||
         rawSeed is! int ||
         rawSeed < 0 ||
-        rawSeed > 0xFFFFFFFF ||
-        rawDynamic is! bool) {
+        rawSeed > 0xFFFFFFFF) {
       throw const FormatException('云端外观设置不完整');
     }
     if (!const {'system', 'light', 'dark'}.contains(rawMode)) {
       throw const FormatException('云端主题模式无效');
     }
 
-    // colorStyle 是后加的字段：旧版本写的备份没有它，此时保留本机当前风格，
-    // 而不是把它当成损坏数据。
-    final rawStyle = json['colorStyle'];
-    final AppColorStyle? syncedStyle;
-    if (rawStyle == null) {
-      syncedStyle = null;
-    } else if (rawStyle is String && AppColorStyle.isKnownCode(rawStyle)) {
-      syncedStyle = AppColorStyle.fromCode(rawStyle);
-    } else {
-      throw const FormatException('云端配色风格无效');
+    // 玻璃配置是单 JSON blob；非法类型直接拒绝，内容缺字段在 decode 里回退默认。
+    final rawGlassConfig = json['glassConfig'];
+    if (rawGlassConfig != null && rawGlassConfig is! String) {
+      throw const FormatException('云端玻璃设置无效');
     }
 
     // flowingLightEnabled 同样是后加字段，缺失时保留本机开关。
@@ -780,7 +776,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       ...(rawPalette == null
           ? state.themePalette
           : (rawPalette as List).cast<int>()),
-      if (!rawDynamic) rawSeed,
+      rawSeed,
     });
     // Old backups may contain customTheme. Ignore the retired editor settings.
 
@@ -812,8 +808,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       themeMode: _decodeThemeMode(rawMode),
       themeSeed: Color(rawSeed),
       themePalette: syncedPalette,
-      colorStyle: syncedStyle,
-      useDynamicColor: rawDynamic,
+      glassConfig: rawGlassConfig == null
+          ? state.glassConfig
+          : GlassConfig.decode(rawGlassConfig as String),
       liquidGlassMode: syncedGlass,
       playlistArtworkColorsEnabled: syncedPlaylistColors,
       flowingLightEnabled: syncedFlowingLight,
@@ -828,8 +825,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       _kThemePaletteKey,
       syncedPalette.map((color) => color.toString()).toList(),
     );
-    if (syncedStyle != null) {
-      await _prefs.setString(_kColorStyleKey, syncedStyle.code);
+    if (rawGlassConfig != null) {
+      await _prefs.setString(_kGlassConfigKey, rawGlassConfig as String);
     }
     if (syncedFlowingLight != null) {
       await _prefs.setBool(_kFlowingLightEnabledKey, syncedFlowingLight);
@@ -846,7 +843,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
     if (syncedLyricSize != null) {
       await _prefs.setDouble(_kLyricFontSizeKey, syncedLyricSize);
     }
-    await _prefs.setBool(_kUseDynamicColorKey, rawDynamic);
     await _prefs.setString(_kLiquidGlassModeKey, syncedGlass.code);
     await _prefs.setBool(
       _kPlaylistArtworkColorsEnabledKey,

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/settings_store.dart';
-import '../../../theme/liquid_glass_mode.dart';
+import 'glass_settings_sheet.dart';
 import 'settings_action.dart';
 import 'settings_menu.dart';
 import 'theme_color_settings.dart';
@@ -40,34 +40,24 @@ class AppearanceThemeSettings extends ConsumerWidget {
                   ),
               ],
             ),
-            SettingsSwitchAction(
-              icon: Icons.auto_awesome_outlined,
-              title: '动态取色',
-              value: settings.useDynamicColor,
-              onChanged: notifier.setUseDynamicColor,
-            ),
           ],
         ),
         const ThemeColorSettings(),
         SettingsCard(
           title: '材质',
           children: [
-            SettingsMenuAction(
-              key: const ValueKey('liquid-glass-menu'),
-              menuId: 'liquid-glass-menu',
-              applyImmediately: true,
+            SettingsSwitchAction(
               icon: Icons.blur_on_rounded,
-              title: '液态玻璃',
-              options: [
-                for (final mode in LiquidGlassMode.values)
-                  SettingsMenuOption(
-                    id: mode.code,
-                    label: mode.label,
-                    selected: settings.liquidGlassMode == mode,
-                    onSelected: () => notifier.setLiquidGlassMode(mode),
-                  ),
-              ],
+              title: '启用玻璃特效',
+              value: settings.glassEnabled,
+              onChanged: notifier.setGlassEnabled,
             ),
+            if (settings.glassEnabled)
+              SettingsAction(
+                icon: Icons.tune_rounded,
+                title: '玻璃设置',
+                onTap: () => showGlassSettingsSheet(context),
+              ),
           ],
         ),
       ],

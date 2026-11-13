@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified by MuyinMusic (2026-11-13): `LiquidGlassScope` gains an optional
+// `styleTransform` hook so the app can override every pane's glass style from
+// one place. See NOTICE section 6 (GPLv3 section 5(a)) and
+// liquid_glass_capture.dart. No shader or uniform packing was changed.
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -62,23 +67,34 @@ class LiquidGlassScope extends InheritedWidget {
     super.key,
     required this.enabled,
     this.quality = LiquidGlassQuality.ultra,
+    this.styleTransform,
     required super.child,
   });
 
   final bool enabled;
   final LiquidGlassQuality quality;
 
+  /// Optional app-wide override applied to every pane's style at capture time.
+  /// Added by MuyinMusic; see NOTICE section 6.
+  final LiquidGlassStyle Function(LiquidGlassStyle)? styleTransform;
+
   static bool of(BuildContext context) => _of(context)?.enabled ?? false;
 
   static LiquidGlassQuality qualityOf(BuildContext context) =>
       _of(context)?.quality ?? LiquidGlassQuality.ultra;
+
+  static LiquidGlassStyle Function(LiquidGlassStyle)? styleTransformOf(
+    BuildContext context,
+  ) => _of(context)?.styleTransform;
 
   static LiquidGlassScope? _of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<LiquidGlassScope>();
 
   @override
   bool updateShouldNotify(LiquidGlassScope oldWidget) =>
-      enabled != oldWidget.enabled || quality != oldWidget.quality;
+      enabled != oldWidget.enabled ||
+      quality != oldWidget.quality ||
+      styleTransform != oldWidget.styleTransform;
 }
 
 /// Keeps the panes below on one level, as iOS's GlassEffectContainer does.

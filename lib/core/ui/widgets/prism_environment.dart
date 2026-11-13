@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../theme/app_theme.dart';
+import '../../../theme/glass_settings.dart';
 import '../../../theme/liquid_glass_mode.dart';
 
 /// Supplies Prism UI library alongside the app's Material music screens.
@@ -11,15 +12,19 @@ class PrismEnvironment extends StatelessWidget {
     super.key,
     required this.child,
     this.mode = LiquidGlassMode.standard,
+    this.glassConfig = GlassConfig.defaults,
   });
 
   final Widget child;
   final LiquidGlassMode mode;
+  final GlassConfig glassConfig;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
+    final enabled = mode != LiquidGlassMode.none;
+    final transform = glassConfig.toStyleTransform(scheme.primary);
     return prism.Theme(
       data: prism.ThemeData(
         colorScheme: prism.ColorScheme(
@@ -64,12 +69,12 @@ class PrismEnvironment extends StatelessWidget {
             size: size,
             isMobile: size.width < 600,
             child: prism.LiquidGlassScope(
-              enabled: mode != LiquidGlassMode.none,
-              quality: mode == LiquidGlassMode.ultra
-                  ? prism.LiquidGlassQuality.ultra
-                  : prism.LiquidGlassQuality.standard,
+              enabled: enabled,
+              // 画质固定 ultra：色散 / 雾感滑杆才有效（见清单 §2）。
+              quality: prism.LiquidGlassQuality.ultra,
+              styleTransform: transform,
               child: prism.LiquidGlassHost(
-                enabled: mode != LiquidGlassMode.none,
+                enabled: enabled,
                 child: child,
               ),
             ),

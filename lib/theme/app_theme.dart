@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'app_motion.dart';
-import 'color_style.dart';
 
 class AppTheme {
   const AppTheme._();
@@ -18,49 +17,27 @@ class AppTheme {
     'Microsoft YaHei',
   ];
 
-  static ThemeData light([
-    Color seed = designSeed,
-    AppColorStyle style = AppColorStyle.fallback,
-  ]) => _build(Brightness.light, seed, style);
+  static ThemeData light([Color seed = designSeed]) =>
+      _build(Brightness.light, seed);
 
-  static ThemeData dark([
-    Color seed = designSeed,
-    AppColorStyle style = AppColorStyle.fallback,
-  ]) => _build(Brightness.dark, seed, style);
+  static ThemeData dark([Color seed = designSeed]) =>
+      _build(Brightness.dark, seed);
 
-  static ThemeData fromScheme(
-    ColorScheme scheme, {
-    AppColorStyle style = AppColorStyle.soft,
-  }) => _buildFromScheme(scheme, style: style);
+  static ThemeData fromScheme(ColorScheme scheme) => _buildFromScheme(scheme);
 
-  /// 用给定风格展开种子色。设置页的风格预览也走这里，保证预览与实际一致。
-  static ColorScheme schemeFor(
-    Color seed,
-    Brightness brightness,
-    AppColorStyle style,
-  ) => ColorScheme.fromSeed(
-    seedColor: seed,
-    brightness: brightness,
-    dynamicSchemeVariant: style.variant,
-  );
+  /// 固定用 fidelity 展开种子色：primary 尽量还原用户选的原色（对齐 MoviePilot）。
+  static ColorScheme schemeFor(Color seed, Brightness brightness) =>
+      ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: brightness,
+        dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+      );
 
-  static ThemeData _build(
-    Brightness brightness,
-    Color seed,
-    AppColorStyle style,
-  ) {
-    return _buildFromScheme(schemeFor(seed, brightness, style), style: style);
-  }
+  static ThemeData _build(Brightness brightness, Color seed) =>
+      _buildFromScheme(schemeFor(seed, brightness));
 
-  /// Applies the same surface policy used by the live theme to settings
-  /// previews. Soft and monochrome keep the deliberately neutral page surface;
-  /// vivid and tinted retain the variant's generated surface tones so the
-  /// selected color actually reaches the page background and containers.
-  static ColorScheme surfaceSchemeFor(ColorScheme base, AppColorStyle style) =>
-      switch (style) {
-        AppColorStyle.soft || AppColorStyle.monochrome => neutralSurfaces(base),
-        _ => base,
-      };
+  /// 背景永远中性：所有 surface 角色洗成中性灰阶，配色只影响强调色。
+  static ColorScheme surfaceSchemeFor(ColorScheme base) => neutralSurfaces(base);
 
   static ColorScheme neutralSurfaces(ColorScheme base) {
     final dark = base.brightness == Brightness.dark;
@@ -89,11 +66,8 @@ class AppTheme {
     );
   }
 
-  static ThemeData _buildFromScheme(
-    ColorScheme base, {
-    AppColorStyle style = AppColorStyle.soft,
-  }) {
-    final scheme = surfaceSchemeFor(base, style);
+  static ThemeData _buildFromScheme(ColorScheme base) {
+    final scheme = surfaceSchemeFor(base);
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,

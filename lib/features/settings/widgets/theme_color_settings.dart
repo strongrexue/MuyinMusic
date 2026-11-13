@@ -8,10 +8,7 @@ import 'package:prism_ui/prism_color_swatches.dart';
 import 'package:prism_ui/prism_palette.dart';
 
 import '../../../core/storage/settings_store.dart';
-import '../../../theme/color_style.dart';
-import '../../../theme/dynamic_color_status.dart';
 import '../../../theme/seed_palette.dart';
-import 'settings_menu.dart';
 import 'settings_sheet.dart';
 
 class ThemeColorSettings extends ConsumerWidget {
@@ -48,17 +45,9 @@ class ThemeColorSettings extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
-    final dynamicColor = ref.watch(dynamicColorStatusProvider);
-    final currentStyle = switch (settings.colorStyle) {
-      AppColorStyle.faithful => AppColorStyle.tinted,
-      AppColorStyle.creative => AppColorStyle.vivid,
-      final style => style,
-    };
     final isDefault =
-        !settings.useDynamicColor &&
         settings.themeSeed == SeedPalette.defaultSeed &&
-        listEquals(settings.themePalette, SeedPalette.defaultColors) &&
-        currentStyle == AppColorStyle.vivid;
+        listEquals(settings.themePalette, SeedPalette.defaultColors);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -87,37 +76,16 @@ class ThemeColorSettings extends ConsumerWidget {
             spacing: 8,
             children: [
               PrismColorSwatches(
-                colors: [null, ...settings.themePalette],
-                selected: settings.useDynamicColor
-                    ? null
-                    : settings.themeSeed.toARGB32(),
-                systemColor: dynamicColor.seed ?? settings.themeSeed,
-                onSelect: (color) => notifier.selectThemeColor(
-                  color == null ? null : Color(color),
-                ),
+                colors: <int?>[...settings.themePalette],
+                selected: settings.themeSeed.toARGB32(),
+                systemColor: settings.themeSeed,
+                onSelect: (color) {
+                  if (color != null) notifier.selectThemeColor(Color(color));
+                },
                 onEdit: (color) => _edit(context, ref, replacing: color),
                 onDelete: notifier.deleteThemeColor,
                 onAdd: () => _edit(context, ref),
               ),
-              prism.generateGroup([
-                SettingsMenuAction(
-                  menuId: 'color-style-menu',
-                  applyImmediately: true,
-                  icon: Icons.palette_outlined,
-                  showIcon: false,
-                  showSubtitle: false,
-                  title: '配色风格',
-                  options: [
-                    for (final style in AppColorStyle.choices)
-                      SettingsMenuOption(
-                        id: style.code,
-                        label: style.label,
-                        selected: currentStyle == style,
-                        onSelected: () => notifier.setColorStyle(style),
-                      ),
-                  ],
-                ),
-              ]),
             ],
           ),
         ),

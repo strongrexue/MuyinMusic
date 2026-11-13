@@ -124,3 +124,24 @@ not a relicensing of prism_ui.
 This project does NOT bundle or distribute any music content. Users must
 configure their own custom sources and are responsible for confirming the
 legality of those sources (see README, "免责声明").
+
+
+6. Modifications to vendored GPL files (GPLv3 section 5(a))
+------------------------------------------------------------
+This fork modifies the following GPL-3.0-only files vendored under
+packages/prism_ui (see section 3), to add a single app-wide glass-style
+injection hook used by the "玻璃设置" feature:
+
+  packages/prism_ui/lib/liquid_glass.dart
+    - `LiquidGlassScope` gains an optional `styleTransform` callback plus
+      `styleTransformOf(BuildContext)`; `updateShouldNotify` compares it.
+
+  packages/prism_ui/lib/liquid_glass_capture.dart  (part of the above)
+    - `LiquidGlassHost.build` reads the callback and threads it through
+      `_LiquidGlassHostBox` -> `_RenderLiquidGlassHost` ->
+      `_LiquidGlassHostLayer`; `_gather` applies it to every pane's style.
+
+Both modified files carry an SPDX header and an inline note. Changes are
+dated 2026-11-13. No shader (.frag) files, GLSL constants, or uniform
+packing were changed. The complete Corresponding Source for these changes
+is published in this repository (see section 4).

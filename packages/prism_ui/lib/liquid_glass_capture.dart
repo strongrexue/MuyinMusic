@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified by MuyinMusic (2026-11-13): threads LiquidGlassScope.styleTransform
+// through the capture layer and applies it to every pane in _gather.
+// See NOTICE section 6 (GPLv3 section 5(a)).
 part of 'liquid_glass.dart';
 
 // A capture shrinks while a sigma of its frost still spans two of its own
@@ -71,6 +75,7 @@ class LiquidGlassHost extends StatelessWidget {
       enabled: enabled,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       quality: LiquidGlassScope.qualityOf(context),
+      styleTransform: LiquidGlassScope.styleTransformOf(context),
       child: child,
     );
   }
@@ -335,12 +340,14 @@ class _LiquidGlassHostBox extends SingleChildRenderObjectWidget {
     required this.enabled,
     required this.devicePixelRatio,
     required this.quality,
+    required this.styleTransform,
     super.child,
   });
 
   final bool enabled;
   final double devicePixelRatio;
   final LiquidGlassQuality quality;
+  final LiquidGlassStyle Function(LiquidGlassStyle)? styleTransform;
 
   @override
   _RenderLiquidGlassHost createRenderObject(BuildContext context) {
@@ -348,6 +355,7 @@ class _LiquidGlassHostBox extends SingleChildRenderObjectWidget {
       enabled: enabled,
       devicePixelRatio: devicePixelRatio,
       quality: quality,
+      styleTransform: styleTransform,
     );
   }
 
@@ -359,7 +367,8 @@ class _LiquidGlassHostBox extends SingleChildRenderObjectWidget {
     renderObject
       ..enabled = enabled
       ..devicePixelRatio = devicePixelRatio
-      ..quality = quality;
+      ..quality = quality
+      ..styleTransform = styleTransform;
   }
 }
 
@@ -368,9 +377,11 @@ class _RenderLiquidGlassHost extends RenderProxyBox {
     required bool enabled,
     required double devicePixelRatio,
     required LiquidGlassQuality quality,
+    required LiquidGlassStyle Function(LiquidGlassStyle)? styleTransform,
   }) : _enabled = enabled,
        _devicePixelRatio = devicePixelRatio,
-       _quality = quality;
+       _quality = quality,
+       _styleTransform = styleTransform;
 
   final _layer = LayerHandle<_LiquidGlassHostLayer>();
 
@@ -402,6 +413,15 @@ class _RenderLiquidGlassHost extends RenderProxyBox {
     markNeedsPaint();
   }
 
+  LiquidGlassStyle Function(LiquidGlassStyle)? _styleTransform;
+  set styleTransform(LiquidGlassStyle Function(LiquidGlassStyle)? value) {
+    if (value == _styleTransform) {
+      return;
+    }
+    _styleTransform = value;
+    markNeedsPaint();
+  }
+
   @override
   bool get alwaysNeedsCompositing => _enabled;
 
@@ -416,6 +436,7 @@ class _RenderLiquidGlassHost extends RenderProxyBox {
     layer
       ..devicePixelRatio = _devicePixelRatio
       ..quality = _quality
+      ..styleTransform = _styleTransform
       ..bounds = offset & size;
     context.pushLayer(layer, super.paint, offset);
   }
@@ -440,6 +461,7 @@ class _LiquidGlassHostLayer extends ContainerLayer {
 
   double devicePixelRatio = 1;
   LiquidGlassQuality quality = LiquidGlassQuality.ultra;
+  LiquidGlassStyle Function(LiquidGlassStyle)? styleTransform;
   Rect bounds = Rect.zero;
 
   final _atlases = <({ui.Image image, List<_Band> bands})>[];
@@ -575,9 +597,11 @@ class _LiquidGlassHostLayer extends ContainerLayer {
         case _LiquidGlassFlatLayer():
           break;
         case final _LiquidGlassLayer pane:
+          final transform = styleTransform;
+          final themed = transform == null ? pane.style : transform(pane.style);
           final style = switch (quality) {
-            LiquidGlassQuality.standard => pane.style._standard,
-            LiquidGlassQuality.ultra => pane.style,
+            LiquidGlassQuality.standard => themed._standard,
+            LiquidGlassQuality.ultra => themed,
           };
           final storage = toHost.storage;
           final stretch = math.max(storage[0].abs(), storage[5].abs());

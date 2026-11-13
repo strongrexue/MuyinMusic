@@ -42,3 +42,19 @@ friends. Source is published publicly at
   disclaimer and the closing disclaimer.
 - `.gitignore` now ignores `android/signing/*.jks` and `*.properties` so the
   signing keystore is never committed.
+
+### Theme & glass (second batch, 2026-11-13)
+- Collapsed the four "配色风格" variants into one fixed `fidelity` scheme and
+  made every surface permanently neutral, so seed colors only affect accents;
+  removed the "配色风格" setting row and the `AppColorStyle` enum (R1/R2).
+- Removed dynamic color (Material You wallpaper seed) entirely: its switch,
+  the "跟随系统" swatch, and the `dynamic_color` / `material_color_utilities`
+  dependencies are gone (R4).
+- Removed the iOS system-gray preset and the unused seed-picker / color-picker
+  / color-style widgets (R3/R5).
+- Reworked the "材质" card into a single 玻璃特效 switch plus a "玻璃设置"
+  sheet with three tabs (磨砂 / 透明 / 色调), per-tab sliders, live draft
+  preview and 重置 / 保存. Glass quality is fixed to the `ultra` tier (R6).
+- Added a `styleTransform` injection hook to the vendored prism_ui glass
+  renderer so one place overrides every pane's style; see NOTICE section 6
+  for the GPLv3 section 5(a) modification notice.

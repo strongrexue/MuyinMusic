@@ -169,7 +169,6 @@ WebDavSyncSnapshot _snapshot() {
       data: const {
         'themeMode': 'system',
         'themeSeedArgb': 0xFF6750A4,
-        'useDynamicColor': false,
       },
     ),
     musicSources: WebDavSyncSection(

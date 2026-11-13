@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cy_shine_music/core/storage/settings_store.dart';
 import 'package:cy_shine_music/theme/app_theme.dart';
 import 'package:cy_shine_music/theme/liquid_glass_mode.dart';
+import 'package:cy_shine_music/theme/seed_palette.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -114,7 +115,6 @@ void main() {
       final legacy = {
         'themeMode': 'light',
         'themeSeedArgb': Colors.blue.toARGB32(),
-        'useDynamicColor': false,
         'customTheme': {'enabled': true},
       };
       await notifier.applyAppearanceFromSync(legacy);
@@ -171,14 +171,11 @@ void main() {
       final notifier = container.read(settingsProvider.notifier);
       const first = Color(0xFF6750A4);
       const second = Color(0xFF127856);
-      await notifier.selectThemeColor(null);
-      expect(container.read(settingsProvider).useDynamicColor, isTrue);
       await notifier.saveThemeColor(first);
       expect(
         container.read(settingsProvider).themePalette,
         contains(first.toARGB32()),
       );
-      expect(container.read(settingsProvider).useDynamicColor, isFalse);
       expect(container.read(settingsProvider).themeSeed, first);
       await notifier.saveThemeColor(second, replacing: first.toARGB32());
       expect(
@@ -195,7 +192,8 @@ void main() {
         restored.read(settingsProvider).themePalette,
         isNot(contains(second.toARGB32())),
       );
-      expect(restored.read(settingsProvider).useDynamicColor, isTrue);
+      // 删掉当前选中色后回落到默认蓝，不会复活被删的颜色。
+      expect(restored.read(settingsProvider).themeSeed, SeedPalette.defaultSeed);
     },
   );
 
