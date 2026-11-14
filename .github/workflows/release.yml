@@ -42,8 +42,8 @@ jobs:
           fi
 
           echo "APP_VERSION=${app_version}" >> "$GITHUB_ENV"
-          echo "ARM64_APK_NAME=CyShineMusic-v${app_version}-arm64-v8a.apk" >> "$GITHUB_ENV"
-          echo "V7A_APK_NAME=CyShineMusic-v${app_version}-armeabi-v7a.apk" >> "$GITHUB_ENV"
+          echo "ARM64_APK_NAME=MuyinMusic-v${app_version}-arm64-v8a.apk" >> "$GITHUB_ENV"
+          echo "V7A_APK_NAME=MuyinMusic-v${app_version}-armeabi-v7a.apk" >> "$GITHUB_ENV"
 
       - name: Prepare main signing
         shell: bash
@@ -97,7 +97,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CyShineMusic-v${{ env.APP_VERSION }}-android-apks
+          name: MuyinMusic-v${{ env.APP_VERSION }}-android-apks
           path: |
             ${{ env.ARM64_APK_NAME }}
             ${{ env.V7A_APK_NAME }}
@@ -111,6 +111,6 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" "$ARM64_APK_NAME" "$V7A_APK_NAME" \
               --draft \
-              --title "CyShineMusic ${APP_VERSION}" \
+              --title "MuyinMusic ${APP_VERSION}" \
               --generate-notes
           fi

@@ -65,8 +65,8 @@ jobs:
           echo "SHORT_SHA=${short_sha}" >> "$GITHUB_ENV"
           echo "HEAD_SHA=${head_sha}" >> "$GITHUB_ENV"
           echo "TAG_NAME=${tag_name}" >> "$GITHUB_ENV"
-          echo "ARM64_APK_NAME=CyShineMusic-${safe_ref}-v${app_version}-${short_sha}-arm64-v8a.apk" >> "$GITHUB_ENV"
-          echo "V7A_APK_NAME=CyShineMusic-${safe_ref}-v${app_version}-${short_sha}-armeabi-v7a.apk" >> "$GITHUB_ENV"
+          echo "ARM64_APK_NAME=MuyinMusic-${safe_ref}-v${app_version}-${short_sha}-arm64-v8a.apk" >> "$GITHUB_ENV"
+          echo "V7A_APK_NAME=MuyinMusic-${safe_ref}-v${app_version}-${short_sha}-armeabi-v7a.apk" >> "$GITHUB_ENV"
 
       - name: Prepare dev signing
         shell: bash
@@ -120,7 +120,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CyShineMusic-${{ env.SHORT_SHA }}-android-apks
+          name: MuyinMusic-${{ env.SHORT_SHA }}-android-apks
           path: |
             ${{ env.ARM64_APK_NAME }}
             ${{ env.V7A_APK_NAME }}
@@ -140,7 +140,7 @@ jobs:
           Version: ${APP_VERSION}
           EOF
 
-          title="CyShineMusic ${APP_VERSION} prerelease (${SHORT_SHA})"
+          title="MuyinMusic ${APP_VERSION} prerelease (${SHORT_SHA})"
 
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release upload "$TAG_NAME" "$ARM64_APK_NAME" "$V7A_APK_NAME" --clobber
