@@ -18,6 +18,7 @@ import 'playlist_adapters/kg_playlist_adapter.dart';
 import 'playlist_adapters/kw_playlist_adapter.dart';
 import 'playlist_adapters/mg_playlist_adapter.dart';
 import 'playlist_sdk.dart';
+import 'qishui_sdk.dart';
 
 typedef LeaderboardJsonPoster =
     Future<dynamic> Function(
@@ -117,6 +118,7 @@ class LeaderboardSdk {
         maxTracks: maxTracks,
         load: jsonLoader ?? SdkHttp.getJson,
       ),
+      MusicSource.qishui => _getQishui(board, maxTracks: maxTracks),
       MusicSource.all => throw Exception('排行榜不支持“全部”音源'),
     };
   }
@@ -154,6 +156,23 @@ class LeaderboardSdk {
       body: body,
     );
     return _decodeJson(response.body);
+  }
+
+  static Future<PlaylistInfo> _getQishui(
+    LeaderboardSummary board, {
+    int? maxTracks,
+  }) async {
+    final tracks = await QishuiSdk.chart(
+      board.boardId,
+      limit: maxTracks ?? 50,
+    );
+    return PlaylistInfo(
+      id: board.boardId,
+      name: board.name,
+      source: MusicSource.qishui,
+      tracks: tracks,
+      trackCount: tracks.length,
+    );
   }
 
   static Future<PlaylistInfo> _getTx(

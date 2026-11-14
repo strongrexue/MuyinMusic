@@ -431,7 +431,12 @@ void main() {
       );
       await notifier.setOnlinePlaybackQuality(OnlinePlaybackQuality.lossless);
       await notifier.setBatchDownloadQuality(OnlinePlaybackQuality.high);
-      for (final source in [MusicSource.kg, MusicSource.tx, MusicSource.wy]) {
+      for (final source in [
+        MusicSource.kg,
+        MusicSource.tx,
+        MusicSource.wy,
+        MusicSource.qishui,
+      ]) {
         expect(await notifier.setSearchSourceEnabled(source, false), isTrue);
       }
       expect(

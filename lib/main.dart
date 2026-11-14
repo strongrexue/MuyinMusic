@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'core/services/app_logger.dart';
 import 'core/debug/debug_paint_guard.dart';
+import 'core/sdk/qishui_sdk.dart';
 import 'core/storage/settings_store.dart';
 import 'features/player/player_audio_handler.dart';
 import 'features/player/music_home_widget_service.dart';
@@ -45,6 +46,7 @@ Future<void> _startApp() async {
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   }
   hydrateNetworkAdapterPreference(prefs);
+  QishuiSdk.configureSession(ensureQishuiSessionPreference(prefs));
   final audioHandler = await initializePlayerAudioHandler(
     allowMixWithOthers: readAllowMixWithOthersPreference(prefs),
   );

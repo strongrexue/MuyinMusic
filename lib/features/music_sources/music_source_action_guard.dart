@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/local_audio_source.dart';
 import '../../core/models/download_capabilities.dart';
 import '../../core/models/enums.dart';
+import '../../core/models/native_source_capabilities.dart';
 import '../../core/music_sources/music_source_controller.dart';
 import '../../core/ui/app_toast.dart';
 import '../downloads/download_history_entry.dart';
@@ -49,6 +50,8 @@ String? onlineMusicSourceUnavailableMessage(
   DownloadCapabilities capabilities,
   Iterable<MusicSource> sources,
 ) {
+  final requested = sources.toSet();
+  if (requested.every(isNativeMusicSource)) return null;
   if (capabilities.availableSources.isEmpty) {
     return '请先在设置中导入并启用音源';
   }

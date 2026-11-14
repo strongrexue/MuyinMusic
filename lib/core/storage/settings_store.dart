@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../services/storage_location.dart';
 import '../services/saf_storage.dart';
 import '../api/dio_factory.dart';
 import '../models/enums.dart';
+import '../sdk/qishui_sdk.dart';
 import '../../theme/glass_settings.dart';
 import '../../theme/liquid_glass_mode.dart';
 import '../../theme/seed_palette.dart';
@@ -52,6 +54,7 @@ const String _kShowMiniLyricsKey = 'show_mini_lyrics';
 const String _kGrooveShiftEnabledKey = 'groove_shift_enabled';
 const String _kAllowMixWithOthersKey = 'allow_mix_with_others';
 const String _kPlayerVolumeKey = 'player_volume';
+const String _kQishuiSessionIdKey = 'qishui_session_id';
 const String _kBluetoothLyricEnabledKey = 'bluetooth_lyric_enabled';
 const String _kBluetoothFullLyricEnabledKey = 'bluetooth_full_lyric_enabled';
 const String _kBluetoothLyricNoticeSeenKey = 'bluetooth_lyric_notice_seen';
@@ -110,6 +113,7 @@ class AppSettings {
     this.grooveShiftEnabled = false,
     required this.allowMixWithOthers,
     this.playerVolume = 1.0,
+    this.qishuiSessionId = '',
     required this.bluetoothLyricEnabled,
     required this.bluetoothFullLyricEnabled,
     required this.bluetoothLyricNoticeSeen,
@@ -171,6 +175,10 @@ class AppSettings {
   /// Playback gain in 0..1, applied to the BASS stream. Remembered so a level
   /// dialled in for a quiet Bluetooth path survives restarts.
   final double playerVolume;
+
+  /// Optional Soda login cookie. The bundled one works until Soda throttles it;
+  /// a user-supplied value is used instead when present.
+  final String qishuiSessionId;
   final bool bluetoothLyricEnabled;
   final bool bluetoothFullLyricEnabled;
   final bool bluetoothLyricNoticeSeen;
@@ -212,6 +220,7 @@ class AppSettings {
     bool? grooveShiftEnabled,
     bool? allowMixWithOthers,
     double? playerVolume,
+    String? qishuiSessionId,
     bool? bluetoothLyricEnabled,
     bool? bluetoothFullLyricEnabled,
     bool? bluetoothLyricNoticeSeen,
@@ -259,6 +268,7 @@ class AppSettings {
     grooveShiftEnabled: grooveShiftEnabled ?? this.grooveShiftEnabled,
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
     playerVolume: playerVolume ?? this.playerVolume,
+    qishuiSessionId: qishuiSessionId ?? this.qishuiSessionId,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
     bluetoothFullLyricEnabled:
         bluetoothFullLyricEnabled ?? this.bluetoothFullLyricEnabled,
@@ -398,6 +408,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
         0.0,
         1.0,
       ),
+      qishuiSessionId: readQishuiSessionPreference(_prefs),
       bluetoothLyricEnabled:
           _prefs.getBool(_kBluetoothLyricEnabledKey) ?? false,
       bluetoothFullLyricEnabled:
@@ -902,6 +913,13 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(playerVolume: volume);
   }
 
+  Future<void> setQishuiSessionId(String value) async {
+    final trimmed = value.trim();
+    await _prefs.setString(_kQishuiSessionIdKey, trimmed);
+    QishuiSdk.configureSession(trimmed);
+    state = state.copyWith(qishuiSessionId: trimmed);
+  }
+
   Future<void> setBluetoothLyricEnabled(bool value) async {
     await _prefs.setBool(_kBluetoothLyricEnabledKey, value);
     state = state.copyWith(bluetoothLyricEnabled: value);
@@ -930,6 +948,25 @@ final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(
 
 bool readAllowMixWithOthersPreference(SharedPreferences preferences) =>
     preferences.getBool(_kAllowMixWithOthersKey) ?? false;
+
+String readQishuiSessionPreference(SharedPreferences preferences) =>
+    (preferences.getString(_kQishuiSessionIdKey) ?? '').trim();
+
+/// Soda wants a session cookie on every signed call. A fresh random one per
+/// install works, while the hardcoded one shared by third-party plugins starts
+/// getting empty replies once it is used from many places, so generate and keep
+/// one when the user has not supplied their own.
+String ensureQishuiSessionPreference(SharedPreferences preferences) {
+  final stored = readQishuiSessionPreference(preferences);
+  if (stored.isNotEmpty) return stored;
+  final random = Random.secure();
+  final generated = List<String>.generate(
+    32,
+    (_) => '0123456789abcdef'[random.nextInt(16)],
+  ).join();
+  unawaited(preferences.setString(_kQishuiSessionIdKey, generated));
+  return generated;
+}
 
 String _encodeThemeMode(ThemeMode mode) {
   switch (mode) {
@@ -981,6 +1018,7 @@ const List<MusicSource> kDefaultDiscoverySourceOrder = <MusicSource>[
   MusicSource.kw,
   MusicSource.kg,
   MusicSource.mg,
+  MusicSource.qishui,
 ];
 
 List<MusicSource> decodeDiscoverySourceOrder(List<String>? codes) {

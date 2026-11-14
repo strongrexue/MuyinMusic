@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/music_api.dart';
 import '../../core/models/enums.dart';
+import '../../core/models/playlist_category.dart';
 import '../../core/models/playlist_summary.dart';
+import '../../core/sdk/leaderboard_catalog.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../core/ui/car_display_layout.dart';
 import '../../theme/app_motion.dart';
@@ -49,6 +51,12 @@ class _DiscoverySourcePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Soda exposes no leaderboard or featured-playlist catalog yet, so it only
+    // takes part in search. Say so instead of showing an empty page.
+    if (leaderboardCatalogFor(source).isEmpty &&
+        playlistCatalogCategoriesFor(source).isEmpty) {
+      return _DiscoveryUnsupported(source: source);
+    }
     final categoryId = ref.watch(selectedDiscoveryCategoryProvider(source));
     // 分类切换只更新精选歌单，排行榜所在的页面骨架保持挂载。
     return _DiscoveryList(
@@ -74,6 +82,49 @@ class _DiscoverySourcePage extends ConsumerWidget {
             limit: discoveryPlaylistPageSize,
             categoryId: categoryId,
           ),
+    );
+  }
+}
+
+/// Shown for platforms that only support search (e.g. 汽水音乐).
+class _DiscoveryUnsupported extends StatelessWidget {
+  const _DiscoveryUnsupported({required this.source});
+
+  final MusicSource source;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.explore_off_outlined,
+              size: 44,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '${source.label}音乐暂不支持发现页',
+              textAlign: TextAlign.center,
+              style: text.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '可以在首页搜索里直接找 ${source.label} 的歌曲、专辑和歌手',
+              textAlign: TextAlign.center,
+              style: text.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

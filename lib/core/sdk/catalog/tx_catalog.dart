@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import '../../models/catalog_result.dart';
 import '../../models/enums.dart';
 import '../../models/music_info.dart';
@@ -13,6 +11,10 @@ import 'catalog_helpers.dart';
 
 class TxCatalog {
   static const headers = {'Referer': 'https://y.qq.com/'};
+
+  /// QQ has no public artist track endpoint left, so the search pass
+  /// keeps the name and the detail page rebuilds the list from songs.
+  static final Map<String, String> _names = {};
 
   static Future<CatalogResult> search(
     String keyword,
@@ -57,88 +59,81 @@ class TxCatalog {
       );
     }
     final artist = category == SearchCategory.artists;
-    const module = 'music.search.SearchCgiService';
-    // This search endpoint needs the module name as its request key and no
-    // top-level comm block. The legacy client_search_cp endpoint returns 500.
-    final request = jsonEncode({
-      module: {
-        'module': module,
-        'method': 'DoSearchForQQMusicDesktop',
-        'param': {
-          'search_type': artist ? 1 : 2,
-          'query': keyword,
-          'page_num': page,
-          'num_per_page': limit,
-        },
-      },
-    });
-    final response = await catalogJson(
-      'https://u.y.qq.com/cgi-bin/musicu.fcg?data=${Uri.encodeComponent(request)}',
-      loader: loader,
-      headers: headers,
-    );
-    final result = catalogMap(response[module]);
-    final payload = catalogMap(result['data']);
-    if (response['code'] != 0 ||
-        result['code'] != 0 ||
-        (payload['code'] != null && payload['code'] != 0)) {
-      throw Exception('QQ 搜索暂时不可用');
+    // The signed mobile endpoint is the only QQ search that still answers;
+    // its singer/album buckets are plain lists (sometimes wrapped in `list`).
+    final data = await TxSdk.searchCatalog(keyword, artist ? 1 : 2, page, limit);
+    final body = catalogMap(data['body'] ?? data);
+    var rows = const <Map>[];
+    for (final key in artist
+        ? const ['singer', 'item_singer']
+        : const ['album', 'item_album']) {
+      rows = _rows(body[key]);
+      if (rows.isNotEmpty) break;
     }
-    final data = catalogMap(
-      catalogMap(payload['body'])[artist ? 'singer' : 'album'],
-    );
-    if (data['list'] is! List) throw Exception('QQ 搜索暂时不可用');
-    final items = catalogMaps(data['list'])
-        .map((i) {
-          final id = (i[artist ? 'singerMID' : 'albumMID'] ?? '').toString();
-          final creator = catalogText(i['singerName']);
-          final count = catalogInt(i[artist ? 'songNum' : 'song_count']);
-          return CatalogItem(
-            category: category,
-            summary: PlaylistSummary(
-              id: id,
-              name: catalogText(i[artist ? 'singerName' : 'albumName']),
-              source: MusicSource.tx,
-              coverUrl: catalogImage(i[artist ? 'singerPic' : 'albumPic']),
-              creator: artist ? null : creator,
-              trackCount: count,
+    final items = <CatalogItem>[];
+    for (final row in rows) {
+      final id = (row[artist ? 'singerMID' : 'albumMID'] ??
+              row[artist ? 'singerMid' : 'albumMid'] ??
+              row[artist ? 'singermid' : 'albummid'] ??
+              row['mid'] ??
+              '')
+          .toString();
+      final name = catalogText(
+        row[artist ? 'singerName' : 'albumName'] ??
+            row[artist ? 'singername' : 'albumname'] ??
+            row['name'] ??
+            row['title'],
+      );
+      if (id.isEmpty || name.isEmpty) continue;
+      _names['${artist ? 'artist' : 'album'}:$id'] = name;
+      final creator = catalogText(
+        row['singerName'] ?? row['singername'] ?? row['singer'],
+      );
+      final count = catalogInt(
+        row[artist ? 'songNum' : 'song_count'] ??
+            row[artist ? 'songnum' : 'song_count'] ??
+            row['songnum'],
+      );
+      items.add(
+        CatalogItem(
+          category: category,
+          summary: PlaylistSummary(
+            id: id,
+            name: name,
+            source: MusicSource.tx,
+            coverUrl: catalogImage(
+              row[artist ? 'singerPic' : 'albumPic'] ??
+                  row[artist ? 'singerpic' : 'albumpic'] ??
+                  row['pic'],
             ),
-            subtitle: artist
-                ? '$count 首歌曲 · ${catalogInt(i['albumNum'])} 张专辑'
-                : [
-                    creator,
-                    catalogText(i['publicTime']),
-                  ].where((s) => s.isNotEmpty).join(' · '),
-          );
-        })
-        .where((i) => i.summary.id.isNotEmpty)
-        .toList();
-    final total = catalogInt(catalogMap(payload['meta'])['sum']);
+            creator: artist || creator.isEmpty ? null : creator,
+            trackCount: count,
+          ),
+          subtitle: artist
+              ? [
+                  if (count > 0) '$count 首歌曲',
+                  if (catalogInt(row['albumNum']) > 0)
+                    '${catalogInt(row['albumNum'])} 张专辑',
+                ].join(' · ')
+              : [
+                  creator,
+                  catalogText(row['publicTime'] ?? row['publish_time']),
+                ].where((part) => part.isNotEmpty).join(' · '),
+        ),
+      );
+    }
     return CatalogResult(
       items: items,
-      total: total,
-      hasMore: items.isNotEmpty && page * limit < total,
+      total: items.length,
+      hasMore: items.length >= limit,
     );
   }
 
-  static Future<Map> _musicu(
-    String module,
-    String method,
-    Map param,
-    SdkJsonLoader? loader,
-  ) async {
-    final data = jsonEncode({
-      'comm': {'ct': 24, 'cv': 0},
-      'req': {'module': module, 'method': method, 'param': param},
-    });
-    final body = await catalogJson(
-      'https://u.y.qq.com/cgi-bin/musicu.fcg?data=${Uri.encodeComponent(data)}',
-      loader: loader,
-      headers: headers,
-    );
-    final req = catalogMap(body['req']);
-    if (body['code'] != 0 || req['code'] != 0) throw Exception('QQ 详情暂时不可用');
-    return catalogMap(req['data']);
+  /// QQ returns either a list or `{list: [...]}` depending on the endpoint.
+  static List<Map> _rows(Object? node) {
+    if (node is List) return catalogMaps(node);
+    if (node is Map) return catalogMaps(node['list']);
+    return const [];
   }
 
   static Future<PlaylistInfo> detail(
@@ -169,48 +164,33 @@ class TxCatalog {
         tracks: tracks.take(maxTracks ?? tracks.length).toList(),
       );
     }
-    final info = await _musicu(
-      'music.musichallSinger.SingerInfoInter',
-      'GetSingerDetail',
-      {
-        'singer_mids': [id],
-        'ex_singer': 1,
-      },
-      loader,
-    );
-    final singer = catalogMaps(info['singer_list']).firstOrNull ?? const {};
-    final songs = <MusicInfo>[];
-    final target = maxTracks ?? 10000;
-    var total = 0;
-    for (var offset = 0; songs.length < target; offset += 100) {
-      final data =
-          await _musicu('musichall.song_list_server', 'GetSingerSongList', {
-            'singerMid': id,
-            'begin': offset,
-            'num': target - songs.length < 100 ? target - songs.length : 100,
-            'order': 1,
-          }, loader);
-      total = catalogInt(data['totalNum']);
-      final batch = catalogMaps(data['songList'])
-          .map((i) => PlaylistSdk.parseTxSong(catalogMap(i['songInfo'])))
-          .whereType<MusicInfo>()
-          .toList();
-      final before = songs.length;
-      final seen = songs.map((s) => s.id).toSet();
-      songs.addAll(batch.where((s) => seen.add(s.id)));
-      if (songs.length >= total || songs.length == before || batch.isEmpty) {
-        break;
+    final name = _names['artist:$id'] ?? '';
+    final tracks = <MusicInfo>[];
+    final fallback = <MusicInfo>[];
+    final target = maxTracks ?? 100;
+    if (name.isNotEmpty) {
+      for (var page = 1; tracks.length < target && page <= 6; page++) {
+        final batch = await TxSdk.search(name, page: page, limit: 30);
+        if (batch.isEmpty) break;
+        for (final song in batch) {
+          if (song.singer.contains(name)) {
+            tracks.add(song);
+          } else if (fallback.length < target) {
+            fallback.add(song);
+          }
+          if (tracks.length >= target) break;
+        }
+        if (batch.length < 30) break;
       }
     }
+    if (tracks.isEmpty) tracks.addAll(fallback);
     return PlaylistInfo(
       id: id,
-      name: catalogText(catalogMap(singer['basic_info'])['name']),
+      name: name.isEmpty ? '歌手' : name,
       source: MusicSource.tx,
       coverUrl: 'https://y.gtimg.cn/music/photo_new/T001R500x500M000$id.jpg',
-      creator: '热门歌曲',
-      description: catalogText(catalogMap(singer['ex_info'])['desc']),
-      trackCount: total,
-      tracks: songs.take(target).toList(),
+      trackCount: tracks.length,
+      tracks: tracks.take(target).toList(),
     );
   }
 }

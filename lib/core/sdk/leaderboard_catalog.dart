@@ -3,6 +3,7 @@ import '../models/leaderboard_info.dart';
 import 'internal/leaderboard_catalog_kg.dart';
 import 'internal/leaderboard_catalog_kw.dart';
 import 'internal/leaderboard_catalog_mg.dart';
+import 'internal/leaderboard_catalog_qishui.dart';
 import 'internal/leaderboard_catalog_tx.dart';
 import 'internal/leaderboard_catalog_wy.dart';
 
@@ -16,6 +17,7 @@ List<LeaderboardSummary> leaderboardCatalogFor(MusicSource source) {
     MusicSource.tx => txLeaderboards,
     MusicSource.wy => wyLeaderboards,
     MusicSource.mg => mgLeaderboards,
+    MusicSource.qishui => qishuiLeaderboards,
     MusicSource.all => const <LeaderboardSummary>[],
   };
 }

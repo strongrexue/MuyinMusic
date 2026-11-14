@@ -10,6 +10,7 @@ import 'internal/tx_quality.dart';
 import 'playlist_adapters/kg_playlist_adapter.dart';
 import 'playlist_adapters/kw_playlist_adapter.dart';
 import 'playlist_adapters/mg_playlist_adapter.dart';
+import 'qishui_sdk.dart';
 
 class PlaylistSdk {
   const PlaylistSdk._();
@@ -48,6 +49,8 @@ class PlaylistSdk {
         return KgPlaylistAdapter.parse(target.id, maxTracks: maxTracks);
       case MusicSource.mg:
         return MgPlaylistAdapter.parse(target.id, maxTracks: maxTracks);
+      case MusicSource.qishui:
+        return QishuiSdk.playlist(target.id, maxTracks: maxTracks);
       case MusicSource.all:
         throw Exception('无法识别歌单来源');
     }

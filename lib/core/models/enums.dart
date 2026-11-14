@@ -4,7 +4,8 @@ enum MusicSource {
   kg('kg', '酷狗'),
   tx('tx', 'QQ'),
   wy('wy', '网易云'),
-  mg('mg', '咪咕');
+  mg('mg', '咪咕'),
+  qishui('qishui', '汽水');
 
   const MusicSource(this.code, this.label);
   final String code;
@@ -28,12 +29,14 @@ const List<MusicSource> kManageableSearchSources = [
   MusicSource.tx,
   MusicSource.wy,
   MusicSource.mg,
+  MusicSource.qishui,
 ];
 const Set<MusicSource> kDefaultEnabledSearchSources = {
   MusicSource.kw,
   MusicSource.kg,
   MusicSource.tx,
   MusicSource.wy,
+  MusicSource.qishui,
 };
 
 enum DownloadFileNameFormat {

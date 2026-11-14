@@ -1,4 +1,5 @@
 import 'enums.dart';
+import 'native_source_capabilities.dart';
 
 /// Source-level capabilities declared by the active on-device JS music source.
 /// This is independent of whether a platform can be searched locally.
@@ -16,13 +17,16 @@ class DownloadCapabilities {
   final List<MusicSource> availableSources;
 
   /// `all` is the aggregate search filter, not a real download source, so it is
-  /// always treated as available.
+  /// always treated as available. Built-in sources resolve without a JS plugin.
   bool isAvailable(MusicSource source) =>
-      source == MusicSource.all || availableSources.contains(source);
+      source == MusicSource.all ||
+      isNativeMusicSource(source) ||
+      availableSources.contains(source);
 
   /// Qualities a source supports, or null when the source has no reported
   /// capability (caller should fall back to per-track qualities).
-  List<Quality>? qualitiesFor(MusicSource source) => sources[source];
+  List<Quality>? qualitiesFor(MusicSource source) =>
+      sources[source] ?? kNativeSourceQualities[source];
 
   factory DownloadCapabilities.fromJson(Map<String, dynamic> json) {
     final sources = <MusicSource, List<Quality>>{};
