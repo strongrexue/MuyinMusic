@@ -14,10 +14,10 @@ import 'package:cy_shine_music/core/ui/app_toast.dart';
 import 'package:cy_shine_music/features/player/player_audio_handler.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
 import 'package:cy_shine_music/features/search/search_controller.dart';
-import 'package:cy_shine_music/features/search/search_page.dart';
+import 'package:cy_shine_music/features/search/online_search_body.dart';
 import 'package:cy_shine_music/features/search/search_toolbar_state.dart';
 import 'package:cy_shine_music/features/search/widgets/search_result_tile.dart';
-import 'package:cy_shine_music/features/songs/widgets/song_actions_menu.dart';
+import 'package:cy_shine_music/features/shell/widgets/dual_capsule_bottom_navigation.dart';
 import 'package:cy_shine_music/router.dart';
 import 'package:cy_shine_music/theme/app_theme.dart';
 
@@ -54,7 +54,7 @@ void main() {
           playerAudioHandlerProvider.overrideWithValue(audioHandler),
         ],
       );
-      final router = createAppRouter(initialLocation: '/');
+      final router = createAppRouter(initialLocation: '/home/search');
       addTearDown(() {
         router.dispose();
         container.dispose();
@@ -74,7 +74,9 @@ void main() {
       );
       await _pumpUi(tester);
 
-      final toolbarActionTop = tester.getTopLeft(find.byType(NavigationBar)).dy;
+      final toolbarActionTop = tester
+          .getTopLeft(find.byType(FloatingCapsuleBottomNavigation))
+          .dy;
       final fullyVisibleRows = find
           .byType(SearchResultTile)
           .evaluate()
@@ -85,17 +87,23 @@ void main() {
 
       final firstTile = find.byType(SearchResultTile).first;
       expect(tester.getSize(firstTile).height, 62);
-      final actionsMenu = find.byKey(
-        const ValueKey('search-result-menu-page-1-song-01'),
+      final actions = find.byKey(
+        const ValueKey('search-result-actions-page-1-song-01'),
       );
-      expect(actionsMenu, findsOneWidget);
-      expect(tester.getSize(actionsMenu), const Size.square(48));
-      await tester.tap(actionsMenu);
-      await _pumpUi(tester);
-      expect(find.text('下载'), findsOneWidget);
-      expect(find.text('添加到歌单'), findsOneWidget);
-      await tester.tapAt(const Offset(4, 4));
-      await _pumpUi(tester);
+      expect(actions, findsOneWidget);
+      expect(
+        tester.getSize(
+          find.byKey(const ValueKey('search-like-page-1-song-01')),
+        ),
+        const Size.square(40),
+      );
+      expect(
+        tester.getSize(
+          find.byKey(const ValueKey('search-playlist-page-1-song-01')),
+        ),
+        const Size.square(40),
+      );
+      expect(find.byTooltip('加入歌单'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
@@ -117,18 +125,16 @@ void main() {
           .create('Online favorites');
 
       await tester.pumpWidget(
-        _testAppWithContainer(container, const SearchPage()),
+        _testAppWithContainer(container, const _SearchHost()),
       );
       await _pumpUi(tester);
 
-      final actionsMenu = find.byKey(
-        const ValueKey('search-result-menu-page-1-song-01'),
+      final addToPlaylist = find.byKey(
+        const ValueKey('search-playlist-page-1-song-01'),
       );
-      await tester.tap(actionsMenu);
+      await tester.tap(addToPlaylist);
       await _pumpUi(tester);
-      await tester.tap(find.text('添加到歌单'));
-      await _pumpUi(tester);
-      expect(find.text('添加歌曲到'), findsOneWidget);
+      expect(find.byKey(const ValueKey('playlist-add-popup')), findsOneWidget);
 
       await tester.tap(find.text('Online favorites'));
       await _pumpUi(tester);
@@ -145,11 +151,9 @@ void main() {
       expect(find.text('已添加到「Online favorites」'), findsOneWidget);
       await tester.pump(const Duration(seconds: 4));
 
-      await tester.tap(actionsMenu);
+      await tester.tap(addToPlaylist);
       await _pumpUi(tester);
-      await tester.tap(find.text('添加到歌单'));
-      await _pumpUi(tester);
-      expect(find.text('添加歌曲到'), findsOneWidget);
+      expect(find.byKey(const ValueKey('playlist-add-popup')), findsOneWidget);
       await tester.tap(find.text('Online favorites'));
       await _pumpUi(tester);
 
@@ -176,7 +180,7 @@ void main() {
           playerAudioHandlerProvider.overrideWithValue(audioHandler),
         ],
       );
-      final router = createAppRouter(initialLocation: '/');
+      final router = createAppRouter(initialLocation: '/home/search');
       addTearDown(() {
         router.dispose();
         container.dispose();
@@ -196,10 +200,10 @@ void main() {
       );
       await _pumpUi(tester);
 
-      expect(tester.getSize(find.byType(NavigationBar)).width, 1280);
+      expect(tester.getSize(find.byType(FloatingCapsuleBottomNavigation)).width, 1280);
       final fabRect = tester.getRect(find.byType(FloatingActionButton));
-      final menuRect = tester.getRect(find.byType(SongActionsMenu).last);
-      expect(fabRect.right, lessThan(menuRect.left));
+      final actionsRect = tester.getRect(find.byTooltip('加入歌单').last);
+      expect(fabRect.right, lessThan(actionsRect.left));
       expect(tester.takeException(), isNull);
     },
   );
@@ -218,7 +222,7 @@ void main() {
     addTearDown(container.dispose);
 
     await tester.pumpWidget(
-      _testAppWithContainer(container, const SearchPage()),
+      _testAppWithContainer(container, const _SearchHost()),
     );
     await _pumpUi(tester);
 
@@ -265,7 +269,7 @@ void main() {
     addTearDown(container.dispose);
 
     await tester.pumpWidget(
-      _testAppWithContainer(container, const SearchPage()),
+      _testAppWithContainer(container, const _SearchHost()),
     );
     await _pumpUi(tester);
     expect(
@@ -313,6 +317,16 @@ Future<void> _usePhoneViewport(
 Future<void> _pumpUi(WidgetTester tester) async {
   for (var index = 0; index < 12; index++) {
     await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+/// The online search surface as the home tab hosts it.
+class _SearchHost extends StatelessWidget {
+  const _SearchHost();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(body: OnlineSearchBody());
   }
 }
 

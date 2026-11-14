@@ -697,7 +697,7 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  testWidgets('menu removes a playlist track without confirmation', (
+  testWidgets('batch selection confirms before removing a playlist track', (
     tester,
   ) async {
     await _useCompactViewport(tester);
@@ -714,12 +714,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('第一首'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('歌曲操作'));
+    await tester.tap(find.byTooltip('批量操作'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('移出歌单'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('第一首'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移出 1 首'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('从歌单中移除？'), findsNothing);
+    expect(find.text('移出已选歌曲？'), findsOneWidget);
+    await tester.tap(find.text('移出'));
+    await tester.pumpAndSettle();
+
     expect(find.text('第一首'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 5));

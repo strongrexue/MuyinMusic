@@ -4,13 +4,13 @@ import '../../../core/models/enums.dart';
 
 extension MusicSourceBrand on MusicSource {
   String get shortName => switch (this) {
-    MusicSource.all => '全部',
+    MusicSource.all => '聚合',
     MusicSource.wy => '网易',
     _ => label,
   };
 
   String get fullName => switch (this) {
-    MusicSource.all => '全平台',
+    MusicSource.all => '聚合',
     MusicSource.wy => '网易云音乐',
     _ => '$label音乐',
   };
@@ -26,25 +26,26 @@ extension MusicSourceBrand on MusicSource {
 }
 
 class MusicPlatformIcon extends StatelessWidget {
-  const MusicPlatformIcon({super.key, required this.source});
+  const MusicPlatformIcon({super.key, required this.source, this.size = 20});
 
   final MusicSource source;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     if (source == MusicSource.all) {
       return Icon(
         Icons.public_rounded,
-        size: 20,
+        size: size,
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       );
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(size <= 22 ? 4 : 6),
       child: Image.asset(
         'assets/platform_icons/${source.code}.png',
-        width: 20,
-        height: 20,
+        width: size,
+        height: size,
         fit: BoxFit.contain,
         excludeFromSemantics: true,
       ),

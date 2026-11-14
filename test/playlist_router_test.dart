@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cy_shine_music/core/storage/settings_store.dart';
@@ -21,9 +20,9 @@ import 'package:cy_shine_music/features/player/flowing_light_background.dart';
 import 'package:cy_shine_music/features/playlists/playlist_detail_page.dart';
 import 'package:cy_shine_music/features/playlists/playlist_models.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
+import 'package:cy_shine_music/features/songs/liked_songs_store.dart';
 import 'package:cy_shine_music/router.dart';
 import 'package:cy_shine_music/features/shell/shell_navigation.dart';
-import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'helpers/prism_test_environment.dart';
 
@@ -68,12 +67,9 @@ void main() {
       await _pumpUi(tester);
 
       expect(router.routeInformationProvider.value.uri.path, '/songs');
-      await tester.tap(find.byTooltip('歌单管理'));
+      router.go('/playlists');
       await _pumpUi(tester);
       expect(find.text('歌单管理'), findsOneWidget);
-
-      await tester.tap(find.text('歌单管理'));
-      await _pumpUi(tester);
       expect(find.byType(DraggableScrollableSheet), findsNothing);
       expect(router.routeInformationProvider.value.uri.path, '/playlists');
       expect(find.text('Night playlist'), findsOneWidget);
@@ -130,7 +126,7 @@ void main() {
   );
 
   testWidgets(
-    'library view menu fills songs in place and keeps management button',
+    'songs library tabs split local songs, playlists and liked songs',
     (tester) async {
       await _usePhoneViewport(tester);
       final prefs = await _prefsWith([
@@ -175,61 +171,177 @@ void main() {
       );
       await _pumpUi(tester);
 
-      // 首页标题下拉：列出本地歌曲与歌单。
-      await tester.tap(find.byKey(const ValueKey('library-view-menu-anchor')));
-      await _pumpUi(tester);
-      expect(find.text('本地歌曲'), findsOneWidget);
-      expect(find.text('Night playlist'), findsOneWidget);
+      // 顶部分段控件把喜欢、本地音乐、歌单拆成三个 tab，默认落在喜欢。
+      final tabs = find.byKey(const ValueKey('songs-library-tabs'));
+      expect(tabs, findsOneWidget);
+      expect(find.byTooltip('搜索喜欢的歌曲'), findsOneWidget);
 
-      // 选歌单只在 Songs 页原地换入歌单曲目。
-      await tester.tap(find.text('Night playlist'));
+      // 歌单 tab 只列歌单，点开走独立详情路由。
+      await tester.tap(find.descendant(of: tabs, matching: find.text('歌单')));
       await _pumpUi(tester);
-      expect(router.routeInformationProvider.value.uri.path, '/songs');
+      expect(
+        find.byKey(const ValueKey('songs-playlist-night')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('songs-playlist-night')));
+      await _pumpUi(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/playlists/night');
       expect(find.text('Nocturne'), findsOneWidget);
-      expect(find.text('1 首歌单歌曲'), findsOneWidget);
-      expect(
-        find.byKey(
-          const ValueKey('song-playing-playlist:night:music:wy:track-1'),
-        ),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const ValueKey('immersive-playlist-header')),
-        findsNothing,
-      );
-      expect(find.byKey(const ValueKey('songs-sort-button')), findsNothing);
 
-      expect(find.byTooltip('搜索歌单歌曲'), findsOneWidget);
-      expect(find.byTooltip('搜索本地歌曲'), findsNothing);
-      await tester.tap(find.byTooltip('搜索歌单歌曲'));
-      await _pumpUi(tester);
-      expect(router.routeInformationProvider.value.uri.path, '/songs');
-      expect(find.byKey(const ValueKey('header-search-field')), findsOneWidget);
       expect(await tester.binding.handlePopRoute(), isTrue);
       await _pumpUi(tester);
       expect(router.routeInformationProvider.value.uri.path, '/songs');
 
-      await tester.tap(find.byKey(const ValueKey('songs-batch-button')));
+      // 喜欢 tab 空态带爱心图标，并有自己的搜索文案。
+      await tester.tap(find.descendant(of: tabs, matching: find.text('喜欢')));
       await _pumpUi(tester);
-      expect(find.text('移出歌单'), findsOneWidget);
-      expect(find.text('加入歌单'), findsNothing);
-      expect(find.text('永久删除'), findsNothing);
-      await tester.tap(find.byTooltip('退出批量管理'));
-      await _pumpUi(tester);
+      expect(find.text('还没有喜欢的歌曲'), findsOneWidget);
+      expect(find.byTooltip('搜索喜欢的歌曲'), findsOneWidget);
 
-      // 切换到歌单后，右侧按钮仍保持默认的歌单管理入口。
-      await tester.tap(find.byTooltip('歌单管理'));
+      // 回到本地音乐后仍保持原有入口。
+      await tester.tap(find.descendant(of: tabs, matching: find.text('本地音乐')));
       await _pumpUi(tester);
-      expect(router.routeInformationProvider.value.uri.path, '/songs');
-      expect(find.text('歌单管理'), findsOneWidget);
-      await tester.tap(find.text('歌单管理'));
+      expect(find.byTooltip('搜索本地音乐'), findsOneWidget);
+
+      // 歌单 tab 顶部改成三条快捷操作，顶栏不再有歌单管理入口。
+      await tester.tap(find.descendant(of: tabs, matching: find.text('歌单')));
       await _pumpUi(tester);
-      expect(router.routeInformationProvider.value.uri.path, '/playlists');
+      expect(
+        find.byKey(const ValueKey('playlists-quick-create')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('playlists-quick-online')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('playlists-quick-lx')), findsOneWidget);
+      expect(find.byTooltip('歌单管理'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('songs playlist overflow updates online playlists only', (
+  testWidgets('playlist tab removes several playlists in batch mode', (
+    tester,
+  ) async {
+    await _usePhoneViewport(tester);
+    final prefs = await _prefsWith([
+      _playlist(id: 'alpha', name: 'Alpha list'),
+      _playlist(id: 'beta', name: 'Beta list'),
+    ]);
+    final audioHandler = PlayerAudioHandler();
+    final router = createAppRouter(initialLocation: '/songs');
+    addTearDown(() {
+      router.dispose();
+      unawaited(audioHandler.disposeHandler());
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          playerAudioHandlerProvider.overrideWithValue(audioHandler),
+        ],
+        child: MaterialApp.router(
+          builder: buildPrismTestEnvironment,
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          ),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await _pumpUi(tester);
+
+    final tabs = find.byKey(const ValueKey('songs-library-tabs'));
+    await tester.tap(find.descendant(of: tabs, matching: find.text('歌单')));
+    await _pumpUi(tester);
+
+    await tester.tap(find.byTooltip('批量操作'));
+    await _pumpUi(tester);
+    await tester.tap(find.byKey(const ValueKey('songs-playlist-alpha')));
+    await _pumpUi(tester);
+    expect(find.text('移除 1 个歌单'), findsOneWidget);
+
+    await tester.tap(find.text('移除 1 个歌单'));
+    await _pumpUi(tester);
+    expect(find.text('移除已选歌单？'), findsOneWidget);
+    await tester.tap(find.text('移除'));
+    await _pumpUi(tester);
+
+    expect(find.text('Alpha list'), findsNothing);
+    expect(find.text('Beta list'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('playlist tab reorders playlists with a long press drag', (
+    tester,
+  ) async {
+    await _usePhoneViewport(tester);
+    final prefs = await _prefsWith([
+      _playlist(id: 'alpha', name: 'Alpha list'),
+      _playlist(id: 'beta', name: 'Beta list'),
+    ]);
+    final audioHandler = PlayerAudioHandler();
+    final router = createAppRouter(initialLocation: '/songs');
+    addTearDown(() {
+      router.dispose();
+      unawaited(audioHandler.disposeHandler());
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          playerAudioHandlerProvider.overrideWithValue(audioHandler),
+        ],
+        child: MaterialApp.router(
+          builder: buildPrismTestEnvironment,
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          ),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await _pumpUi(tester);
+
+    final tabs = find.byKey(const ValueKey('songs-library-tabs'));
+    await tester.tap(find.descendant(of: tabs, matching: find.text('歌单')));
+    await _pumpUi(tester);
+
+    final alpha = find.byKey(const ValueKey('songs-playlist-alpha'));
+    final beta = find.byKey(const ValueKey('songs-playlist-beta'));
+    expect(tester.getTopLeft(alpha).dy, lessThan(tester.getTopLeft(beta).dy));
+
+    final start = tester.getCenter(alpha);
+    final end = tester.getCenter(beta) + const Offset(0, 30);
+    final gesture = await tester.startGesture(start);
+    await tester.pump(const Duration(milliseconds: 650));
+    for (var step = 1; step <= 8; step++) {
+      await gesture.moveTo(
+        Offset.lerp(start, end, step / 8)!,
+        timeStamp: Duration(milliseconds: 16 * step),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('songs-playlist-alpha'))).dy,
+      greaterThan(
+        tester.getTopLeft(find.byKey(const ValueKey('songs-playlist-beta'))).dy,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('playlist tile menu updates online playlists only', (
     tester,
   ) async {
     await _usePhoneViewport(tester);
@@ -276,32 +388,41 @@ void main() {
     );
     await _pumpUi(tester);
 
-    await tester.tap(find.byKey(const ValueKey('library-view-menu-anchor')));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('songs-library-tabs')),
+        matching: find.text('歌单'),
+      ),
+    );
     await _pumpUi(tester);
-    await tester.tap(find.text('在线收藏'));
-    await _pumpUi(tester);
-    await tester.tap(find.byTooltip('更多歌曲操作'));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('songs-playlist-online')),
+        matching: find.byTooltip('歌单选项'),
+      ),
+    );
     await _pumpUi(tester);
     expect(find.text('更新歌单'), findsOneWidget);
     await tester.tap(find.text('更新歌单'));
     await _pumpUi(tester);
     expect(api.inputs, ['3778678']);
-    expect(find.text('新歌曲'), findsOneWidget);
+    expect(find.textContaining('导入 · 2 首'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('library-view-menu-anchor')));
-    await _pumpUi(tester);
-    await tester.tap(find.text('本地新建'));
-    await _pumpUi(tester);
-    await tester.tap(find.byTooltip('更多歌曲操作'));
-    await _pumpUi(tester);
-    expect(find.text('更新歌单'), findsNothing);
+    // 本地歌单没有「更新歌单」入口（歌单 tab 只对在线导入歌单提供更新）。
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('songs-playlist-local')),
+        matching: find.byTooltip('歌单选项'),
+      ),
+      findsNothing,
+    );
     await tester.tapAt(const Offset(1, 1));
     await tester.pump(const Duration(seconds: 4));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'library radio menu limits long names and scrolls many playlists',
+    'playlist tab lists long names and scrolls many playlists',
     (tester) async {
       await _usePhoneViewport(tester);
       const longName = '这是一个长度明显超过菜单宽度限制的测试歌单名称';
@@ -339,33 +460,38 @@ void main() {
       );
       await _pumpUi(tester);
 
-      await tester.tap(find.byKey(const ValueKey('library-view-menu-anchor')));
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('songs-library-tabs')),
+          matching: find.text('歌单'),
+        ),
+      );
       await _pumpUi(tester);
 
-      final panel = find.byType(prism.PopupMenu);
-      expect(panel, findsOneWidget);
-      expect(tester.getSize(panel).width, lessThanOrEqualTo(280));
-      final menu = tester.widget<prism.PopupMenu>(panel);
-      expect(menu.items, hasLength(13));
-      expect(menu.items.first.label, '本地歌曲');
-      expect(menu.items.first.checked, isTrue);
+      // 歌单 tab 直接铺列表：超长名称单行省略，多歌单可滚动。
       final longLabel = tester.widget<Text>(find.text(longName));
       expect(longLabel.maxLines, 1);
       expect(longLabel.overflow, TextOverflow.ellipsis);
+      expect(
+        find.byKey(const ValueKey('songs-playlist-list-0')),
+        findsOneWidget,
+      );
       final scroll = find
-          .descendant(of: panel, matching: find.byType(Scrollable))
-          .last;
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
       await tester.scrollUntilVisible(
-        find.text('歌单 11'),
-        160,
+        find.byKey(const ValueKey('songs-playlist-list-11')),
+        200,
         scrollable: scroll,
       );
       await _pumpUi(tester);
-      expect(find.text('歌单 11').hitTestable(), findsOneWidget);
-
-      expect(await tester.binding.handlePopRoute(), isTrue);
-      await _pumpUi(tester);
-      expect(panel, findsNothing);
+      expect(
+        find.byKey(const ValueKey('songs-playlist-list-11')).hitTestable(),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -415,7 +541,7 @@ void main() {
     await _pumpUi(tester);
 
     expect(find.text('播放列表'), findsOneWidget);
-    expect(find.byType(prism.SheetDragHandle), findsOneWidget);
+    expect(find.byKey(const ValueKey('playback-queue-popup')), findsOneWidget);
 
     final playingBars = find.byKey(const ValueKey('playing-bars'));
     expect(playingBars, findsOneWidget);
@@ -492,9 +618,111 @@ void main() {
 
     final list = find.byKey(const ValueKey('playback-queue-list'));
     final current = find.byKey(const ValueKey('playback-queue-entry-20'));
+    expect(find.byKey(const ValueKey('playback-queue-popup')), findsOneWidget);
     expect(list, findsOneWidget);
     expect(current, findsOneWidget);
     expect(tester.getCenter(current).dy, closeTo(tester.getCenter(list).dy, 1));
+
+    // Each queue row carries a heart that toggles the like in place.
+    final like = find.byKey(const ValueKey('playback-queue-like-queue-20'));
+    expect(like, findsOneWidget);
+    expect(find.byTooltip('喜欢'), findsWidgets);
+    await tester.tap(like);
+    await _pumpUi(tester);
+    expect(
+      container.read(likedSongsProvider),
+      hasLength(1),
+    );
+    expect(find.byTooltip('取消喜欢'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('playback queue reorders, removes and clears entries', (
+    tester,
+  ) async {
+    await _usePhoneViewport(tester);
+    final prefs = await _prefsWith(const []);
+    final audioHandler = PlayerAudioHandler();
+    final router = createAppRouter(initialLocation: '/player');
+    addTearDown(() {
+      router.dispose();
+      unawaited(audioHandler.disposeHandler());
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          playerAudioHandlerProvider.overrideWithValue(audioHandler),
+          playerControllerProvider.overrideWith(_TestPlayerController.new),
+        ],
+        child: MaterialApp.router(
+          builder: buildPrismTestEnvironment,
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          ),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await _pumpUi(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PlayerPage)),
+    );
+    final controller =
+        container.read(playerControllerProvider.notifier)
+            as _TestPlayerController;
+    controller.seedPlayingQueue(count: 6, currentIndex: 2);
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('播放列表，共 6 首'));
+    await _pumpUi(tester);
+
+    // The header cycles the playback mode on tap.
+    expect(find.textContaining('顺序播放'), findsOneWidget);
+    await tester.tap(find.text('播放列表'));
+    await _pumpUi(tester);
+    expect(find.textContaining('随机播放'), findsOneWidget);
+
+    // A row's close button drops that entry and keeps the queue consistent.
+    await tester.tap(
+      find.byKey(const ValueKey('playback-queue-remove-queue-4')),
+    );
+    await _pumpUi(tester);
+    expect(
+      container.read(playerControllerProvider).queue.map((e) => e.id),
+      ['queue-0', 'queue-1', 'queue-2', 'queue-3', 'queue-5'],
+    );
+    expect(container.read(playerControllerProvider).queueIndex, 2);
+
+    // Long-press the first row, then drag it past the second row.
+    final first = find.byKey(const ValueKey('playback-queue-entry-0'));
+    final second = find.byKey(const ValueKey('playback-queue-entry-1'));
+    final start = tester.getCenter(first);
+    final end = tester.getCenter(second) + const Offset(0, 20);
+    final gesture = await tester.startGesture(start);
+    await tester.pump(const Duration(milliseconds: 650));
+    for (var step = 1; step <= 8; step++) {
+      await gesture.moveTo(
+        Offset.lerp(start, end, step / 8)!,
+        timeStamp: Duration(milliseconds: 16 * step),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await _pumpUi(tester);
+    final reordered = container.read(playerControllerProvider).queue;
+    expect(reordered.length, 5);
+    expect(reordered.first.id, isNot('queue-0'));
+
+    // Clearing the queue empties it and shows the empty state.
+    await tester.tap(find.byKey(const ValueKey('playback-queue-clear')));
+    await _pumpUi(tester);
+    expect(container.read(playerControllerProvider).queue, isEmpty);
+    expect(find.text('还没有正在播放的歌曲'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -555,11 +783,11 @@ void main() {
       ),
       findsNothing,
     );
-    final topQueueIcon = find.descendant(
-      of: find.byTooltip('本地歌曲'),
-      matching: find.byIcon(Symbols.library_music_rounded),
+    final topEqualizerIcon = find.descendant(
+      of: find.byTooltip('均衡器'),
+      matching: find.byIcon(Icons.graphic_eq_rounded),
     );
-    expect(tester.widget<Icon>(topQueueIcon).color, darkScheme.onSurface);
+    expect(tester.widget<Icon>(topEqualizerIcon).color, darkScheme.onSurface);
     expect(tester.takeException(), isNull);
   });
 
@@ -711,6 +939,50 @@ class _TestPlayerController extends PlayerController {
       canPlayPrevious: true,
       canPlayNext: true,
     );
+  }
+
+  @override
+  void cyclePlaybackMode() {
+    final next = switch (state.playbackMode) {
+      PlayerPlaybackMode.sequence => PlayerPlaybackMode.shuffle,
+      PlayerPlaybackMode.shuffle => PlayerPlaybackMode.repeatOne,
+      PlayerPlaybackMode.repeatOne => PlayerPlaybackMode.sequence,
+    };
+    state = state.copyWith(playbackMode: next);
+  }
+
+  @override
+  void reorderQueue(int oldIndex, int newIndex) {
+    final queue = List<DownloadHistoryEntry>.of(state.queue);
+    if (oldIndex < 0 || oldIndex >= queue.length) return;
+    final moved = queue.removeAt(oldIndex);
+    queue.insert(newIndex.clamp(0, queue.length), moved);
+    state = state.copyWith(
+      queue: queue,
+      queueIndex: _currentTrackQueueIndex(queue),
+    );
+  }
+
+  @override
+  Future<void> removeFromQueue(int index) async {
+    final queue = List<DownloadHistoryEntry>.of(state.queue);
+    if (index < 0 || index >= queue.length) return;
+    queue.removeAt(index);
+    state = state.copyWith(
+      queue: queue,
+      queueIndex: _currentTrackQueueIndex(queue),
+    );
+  }
+
+  @override
+  Future<void> clearQueue() async {
+    state = const PlayerState();
+  }
+
+  int _currentTrackQueueIndex(List<DownloadHistoryEntry> queue) {
+    final trackId = state.track?.id;
+    if (trackId == null) return -1;
+    return queue.indexWhere((entry) => entry.id == trackId);
   }
 
   void seedLyricsTrack() {

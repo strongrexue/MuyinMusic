@@ -15,9 +15,12 @@ class SongActionsMenu extends StatelessWidget {
     required VoidCallback onDelete,
     required VoidCallback onAddToPlaylist,
     required VoidCallback onAddNext,
+    VoidCallback? onToggleLike,
+    bool liked = false,
   }) => SongActionsMenu._(
     key: key,
     items: [
+      if (onToggleLike != null) _like(liked, onToggleLike),
       prism.PopupMenuItem(
         label: '删除',
         glyph: MusicActionGlyphs.trash,
@@ -37,9 +40,12 @@ class SongActionsMenu extends StatelessWidget {
     required VoidCallback? onDownload,
     DownloadTask? downloadTask,
     bool downloaded = false,
+    VoidCallback? onToggleLike,
+    bool liked = false,
   }) => SongActionsMenu._(
     key: key,
     items: [
+      if (onToggleLike != null) _like(liked, onToggleLike),
       prism.PopupMenuItem(
         label: '移出歌单',
         glyph: MusicActionGlyphs.playlistRemove,
@@ -57,15 +63,26 @@ class SongActionsMenu extends StatelessWidget {
     required VoidCallback onDownload,
     required VoidCallback onAddToPlaylist,
     DownloadTask? downloadTask,
+    VoidCallback? onToggleLike,
+    bool liked = false,
   }) => SongActionsMenu._(
     key: key,
     items: [
+      if (onToggleLike != null) _like(liked, onToggleLike),
       _download(onDownload, downloadTask),
       _addToPlaylist(onAddToPlaylist),
     ],
   );
 
   final List<prism.PopupMenuItem> items;
+
+  static prism.PopupMenuItem _like(bool liked, VoidCallback onPressed) =>
+      prism.PopupMenuItem(
+        label: liked ? '取消喜欢' : '喜欢',
+        glyph: AppGlyphs.star,
+        executeImmediately: true,
+        onPressed: onPressed,
+      );
 
   static prism.PopupMenuItem _addToPlaylist(VoidCallback? onPressed) =>
       prism.PopupMenuItem(

@@ -17,22 +17,35 @@ import 'widgets/leaderboard_spotlight.dart';
 import 'widgets/masonry_playlist_grid.dart';
 
 class DiscoveryContent extends ConsumerWidget {
-  const DiscoveryContent({super.key});
+  const DiscoveryContent({super.key, this.topPadding = 2});
+
+  /// Room at the top of the list, e.g. so the floating source tabs can hover
+  /// above the content while later rows scroll underneath them.
+  final double topPadding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final source = ref.watch(selectedDiscoverySourceProvider);
     return DiscoverySourceTransition(
       source: source,
-      child: _DiscoverySourcePage(key: ValueKey(source), source: source),
+      child: _DiscoverySourcePage(
+        key: ValueKey(source),
+        source: source,
+        topPadding: topPadding,
+      ),
     );
   }
 }
 
 class _DiscoverySourcePage extends ConsumerWidget {
-  const _DiscoverySourcePage({super.key, required this.source});
+  const _DiscoverySourcePage({
+    super.key,
+    required this.source,
+    required this.topPadding,
+  });
 
   final MusicSource source;
+  final double topPadding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -41,6 +54,7 @@ class _DiscoverySourcePage extends ConsumerWidget {
     return _DiscoveryList(
       source: source,
       categoryId: categoryId,
+      topPadding: topPadding,
       browseCache: ref.watch(discoveryBrowseCacheProvider),
       featured: ref.watch(featuredPlaylistsProvider(source)),
       onRefresh: () async {
@@ -68,6 +82,7 @@ class _DiscoveryList extends StatefulWidget {
   const _DiscoveryList({
     required this.source,
     required this.categoryId,
+    required this.topPadding,
     required this.browseCache,
     required this.featured,
     required this.onRefresh,
@@ -77,6 +92,7 @@ class _DiscoveryList extends StatefulWidget {
 
   final MusicSource source;
   final String categoryId;
+  final double topPadding;
   final DiscoveryBrowseCache browseCache;
 
   /// 当前分类的首页数据；loading / error 只影响歌单区块。
@@ -337,7 +353,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
               12,
-              2,
+              widget.topPadding,
               12,
               ShellBottomArea.contentPadding(context, 156),
             ),

@@ -7,8 +7,8 @@ import '../../../core/storage/settings_store.dart';
 import '../../../core/ui/app_toast.dart';
 import '../../downloads/download_progress.dart';
 import '../../music_sources/music_source_action_guard.dart';
-import '../../playlists/playlist_browser_sheet.dart';
 import '../../playlists/playlist_store.dart';
+import '../../playlists/widgets/add_music_to_playlist.dart';
 import '../../playlists/widgets/playlist_batch_download_bar.dart';
 
 class OnlineCollectionBatchBar extends ConsumerStatefulWidget {
@@ -91,21 +91,10 @@ class _OnlineCollectionBatchBarState
   }
 
   Future<bool> _addToPlaylist(List<MusicInfo> selected) async {
-    final destination = await showPlaylistBrowserSheet(
-      context,
-      mode: PlaylistBrowserMode.addSongs,
-    );
-    if (!mounted || destination == null) return false;
-    const prefix = '/playlists/';
-    if (!destination.startsWith(prefix)) return false;
-    final playlistId = destination.substring(prefix.length);
+    final playlist = await showPlaylistAddCard(context);
+    if (!mounted || playlist == null) return false;
     final store = ref.read(localPlaylistsProvider.notifier);
-    final playlist = store.byId(playlistId);
-    if (playlist == null) {
-      showAppToast(context, '歌单不存在或已被删除', type: AppToastType.warning);
-      return false;
-    }
-    final added = await store.addMusics(playlistId, selected);
+    final added = await store.addMusics(playlist.id, selected);
     if (!mounted) return false;
     showAppToast(
       context,

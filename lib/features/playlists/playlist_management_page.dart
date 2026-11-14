@@ -2,24 +2,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:prism_ui/prism_ui.dart' as prism;
-import 'package:prism_ui/icons/prism_glyphs.dart' as prism_glyphs;
-import 'package:prism_ui/icons/icons.dart' as glyph;
-
-import '../../core/models/enums.dart';
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/car_display_layout.dart';
-import '../../core/ui/music_action_glyphs.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
-import 'lx_playlist_import.dart';
 import 'online_playlist_updater.dart';
-import 'playlist_cover_resolver.dart';
+import 'playlist_import_actions.dart';
 import 'playlist_name_dialog.dart';
 import 'playlist_models.dart';
 import 'playlist_store.dart';
-import 'widgets/playlist_artwork.dart';
+import 'widgets/playlist_library_tile.dart';
 import 'widgets/playlist_management_menu.dart';
 
 class PlaylistManagementPage extends ConsumerStatefulWidget {
@@ -103,7 +96,7 @@ class _PlaylistManagementPageState
                           context,
                           maxWidth: 760,
                         ),
-                        child: _PlaylistManagementTile(
+                        child: PlaylistLibraryTile(
                           playlist: playlist,
                           onOpen: () => context.go(
                             _managementDetailLocation(playlist.id),
@@ -157,62 +150,16 @@ class _PlaylistManagementPageState
     if (_importingLx) return;
     setState(() => _importingLx = true);
     try {
-      final picked = await ref.read(lxPlaylistFilePickerProvider)();
-      if (picked == null || !mounted) return;
-
-      final document = parseLxPlaylistFile(picked.bytes, fileName: picked.name);
-      final coverResolution = await resolveLxPlaylistCovers(
-        document.playlists,
-        ref.read(playlistCoverResolverProvider),
-        onProgress: (completed, total) {
+      await importLxPlaylistFile(
+        context,
+        ref,
+        onProgress: (progress) {
           if (!mounted) return;
-          setState(() => _lxImportProgress = '封面 $completed/$total');
+          setState(() => _lxImportProgress = progress);
         },
       );
-      if (!mounted) return;
-      final imported = await ref
-          .read(localPlaylistsProvider.notifier)
-          .importLxPlaylists(coverResolution.playlists);
-      if (!mounted) return;
-
-      final trackCount = imported.fold<int>(
-        0,
-        (total, playlist) => total + playlist.tracks.length,
-      );
-      final skipped = document.skippedTrackCount;
-      final message = imported.length == 1
-          ? '已导入“${imported.single.name}”，共 $trackCount 首'
-          : '已导入 ${imported.length} 个洛雪歌单，共 $trackCount 首';
-      final coverMessage = coverResolution.resolvedCount > 0
-          ? '，补全 ${coverResolution.resolvedCount} 张封面'
-          : '';
-      final skippedParts = <String>[
-        if (document.skippedPlaylistCount > 0)
-          '${document.skippedPlaylistCount} 个无效歌单',
-        if (skipped > 0) '$skipped 首无效或不支持的歌曲',
-      ];
-      showAppToast(
-        context,
-        skippedParts.isEmpty
-            ? '$message$coverMessage'
-            : '$message$coverMessage，跳过 ${skippedParts.join('、')}',
-        type: AppToastType.success,
-      );
-    } on LxPlaylistImportException catch (error) {
-      if (mounted) {
-        showAppToast(context, error.message, type: AppToastType.warning);
-      }
-    } catch (_) {
-      if (mounted) {
-        showAppToast(context, '读取洛雪歌单文件失败', type: AppToastType.error);
-      }
     } finally {
-      if (mounted) {
-        setState(() {
-          _importingLx = false;
-          _lxImportProgress = null;
-        });
-      }
+      if (mounted) setState(() => _importingLx = false);
     }
   }
 
@@ -300,131 +247,6 @@ String _managementDetailLocation(String playlistId) {
     path: '/playlists/$playlistId',
     queryParameters: const {'from': 'manage'},
   ).toString();
-}
-
-class _PlaylistManagementTile extends StatelessWidget {
-  const _PlaylistManagementTile({
-    required this.playlist,
-    required this.onOpen,
-    required this.onRename,
-    required this.onUpdate,
-    required this.updating,
-    required this.onDelete,
-  });
-
-  final LocalPlaylist playlist;
-  final VoidCallback onOpen;
-  final VoidCallback onRename;
-  final VoidCallback? onUpdate;
-  final bool updating;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final importedSource = MusicSource.fromCode(
-      playlist.originSourceCode ?? '',
-    );
-    return prism.Card(
-      radius: prism.AppCorner.xl,
-      padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
-      onPressed: onOpen,
-      child: Padding(
-        padding: EdgeInsets.zero,
-        child: Row(
-          children: [
-            _PlaylistCover(playlist: playlist),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    playlist.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: prism.AppTextStyle.subheadline.of(
-                      context,
-                      emphasized: true,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    playlist.isOnlineImport
-                        ? '${importedSource.label}导入 · ${playlist.tracks.length} 首'
-                        : '${playlist.tracks.length} 首歌曲',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: prism.AppTextStyle.caption1.of(context),
-                  ),
-                ],
-              ),
-            ),
-            prism.PopupAnchor(
-              targetBuilder: (open) => prism.IconButton(
-                tooltip: '歌单选项',
-                onPressed: open,
-                icon: const glyph.GlyphIcon(prism_glyphs.AppGlyphs.more),
-              ),
-              popupBuilder: (_) => prism.PopupMenu(
-                items: [
-                  if (onUpdate != null)
-                    prism.PopupMenuItem(
-                      label: updating ? '正在更新' : '更新歌单',
-                      glyph: prism_glyphs.AppGlyphs.refresh,
-                      executeImmediately: true,
-                      onPressed: updating ? null : onUpdate,
-                    ),
-                  prism.PopupMenuItem(
-                    label: '重命名',
-                    glyph: prism_glyphs.AppGlyphs.edit,
-                    executeImmediately: true,
-                    onPressed: onRename,
-                  ),
-                  prism.PopupMenuItem(
-                    label: '删除',
-                    glyph: MusicActionGlyphs.trash,
-                    executeImmediately: true,
-                    onPressed: onDelete,
-                    danger: true,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlaylistCover extends StatelessWidget {
-  const _PlaylistCover({required this.playlist});
-
-  final LocalPlaylist playlist;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final placeholder = Container(
-      width: 58,
-      height: 58,
-      color: scheme.secondaryContainer,
-      alignment: Alignment.center,
-      child: Icon(
-        playlist.isOnlineImport
-            ? Icons.cloud_done_outlined
-            : Icons.music_note_rounded,
-        color: scheme.onSecondaryContainer,
-        size: 25,
-      ),
-    );
-    return PlaylistCover(
-      playlist: playlist,
-      size: 58,
-      radius: 16,
-      placeholder: placeholder,
-    );
-  }
 }
 
 class _EmptyManagement extends StatelessWidget {

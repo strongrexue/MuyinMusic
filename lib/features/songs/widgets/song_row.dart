@@ -34,6 +34,8 @@ class SongRow extends ConsumerWidget {
     required this.onDelete,
     this.onDownload,
     this.playlistMode = false,
+    this.liked = false,
+    this.onToggleLike,
   });
 
   final DownloadHistoryEntry entry;
@@ -49,6 +51,8 @@ class SongRow extends ConsumerWidget {
   final VoidCallback onDelete;
   final VoidCallback? onDownload;
   final bool playlistMode;
+  final bool liked;
+  final VoidCallback? onToggleLike;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -154,6 +158,12 @@ class SongRow extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
+                  if (onToggleLike != null && !batchMode)
+                    _LikeButton(
+                      key: ValueKey('song-like-${entry.id}'),
+                      liked: liked,
+                      onPressed: onToggleLike!,
+                    ),
                   AnimatedSize(
                     duration: mediumDuration,
                     curve: AppMotion.emphasized,
@@ -196,12 +206,16 @@ class SongRow extends ConsumerWidget {
                               downloadTask: task,
                               downloaded:
                                   entry.savedPath?.trim().isNotEmpty == true,
+                              liked: liked,
+                              onToggleLike: onToggleLike,
                             )
                           : SongActionsMenu.local(
                               key: ValueKey('song-menu-${entry.id}'),
                               onDelete: onDelete,
                               onAddToPlaylist: onAddToPlaylist,
                               onAddNext: onAddNext,
+                              liked: liked,
+                              onToggleLike: onToggleLike,
                             ),
                     ),
                   ),
@@ -433,6 +447,33 @@ class _SongCoverState extends State<_SongCover> {
         filterQuality: FilterQuality.medium,
         placeholder: (_, _) => placeholder,
         errorWidget: (_, _, _) => placeholder,
+      ),
+    );
+  }
+}
+
+class _LikeButton extends StatelessWidget {
+  const _LikeButton({super.key, required this.liked, required this.onPressed});
+
+  final bool liked;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return prism.IconButton(
+      tooltip: liked ? '取消喜欢' : '喜欢',
+      onPressed: onPressed,
+      style: prism.ButtonStyle.from(fixedSize: const Size.square(40)),
+      icon: AnimatedSwitcher(
+        duration: reduceMotion ? Duration.zero : AppMotion.short,
+        child: Icon(
+          liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          key: ValueKey(liked),
+          size: 21,
+          color: liked ? scheme.primary : scheme.onSurfaceVariant,
+        ),
       ),
     );
   }

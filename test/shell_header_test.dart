@@ -19,7 +19,7 @@ void main() {
       '/settings/equalizer': '均衡器',
       '/playlists': '歌单管理',
       '/downloads': '下载',
-      '/songs/search': '搜索本地歌曲',
+      '/songs/search': '搜索喜欢的歌曲',
       '/discover/leaderboards/kw': '排行榜',
     }.entries) {
       await _pumpHeader(tester, entry.key);

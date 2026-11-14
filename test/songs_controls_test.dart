@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cy_shine_music/features/songs/songs_toolbar_state.dart';
+import 'package:cy_shine_music/features/songs/widgets/songs_batch_action_bar.dart';
 import 'package:cy_shine_music/features/songs/widgets/songs_placeholders.dart';
 import 'package:cy_shine_music/features/songs/widgets/songs_sort_sheet.dart';
 
@@ -32,7 +33,7 @@ void main() {
       ),
     );
 
-    expect(find.text('12 首本地歌曲'), findsOneWidget);
+    expect(find.text('12 首本地音乐'), findsOneWidget);
     expect(find.byTooltip('排序：标题（升序）'), findsOneWidget);
     expect(find.byTooltip('批量操作'), findsOneWidget);
     expect(find.text('标题 · 升序'), findsNothing);
@@ -97,6 +98,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(selectedMode, SongSortMode.added);
     expect(selectedAscending, isTrue);
+  });
+
+  testWidgets('songs batch bar offers a batch download action', (tester) async {
+    _useNarrowPhone(tester);
+    var downloaded = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: buildPrismTestEnvironment,
+        home: Scaffold(
+          body: SongsBatchActionBar(
+            selectedCount: 3,
+            onDelete: () {},
+            onAddToPlaylist: () {},
+            onPlaySelected: () {},
+            onDownloadSelected: () => downloaded++,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('批量下载'), findsOneWidget);
+    expect(find.text('播放 3 首'), findsOneWidget);
+
+    await tester.tap(find.text('批量下载'));
+    expect(downloaded, 1);
   });
 }
 

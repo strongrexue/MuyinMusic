@@ -1,15 +1,66 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
+import 'package:prism_ui/icons/icons.dart' as prism_glyph;
+import '../../../core/ui/music_action_glyphs.dart';
 import '../../../theme/app_motion.dart';
 import '../../downloads/download_progress.dart';
-import '../../songs/widgets/song_actions_menu.dart';
+import '../../songs/liked_songs_store.dart';
 import '../resolved_playlist_track.dart';
 import 'playlist_artwork.dart';
 
 const double _trackCoverSize = 52;
 const double _trackRowMinHeight = 68;
 const double _trackCoverRadius = 10;
+
+/// Inline download action for a playlist row: shows progress while busy and a
+/// disabled tick once the track is already on disk.
+class _TrackDownloadButton extends StatelessWidget {
+  const _TrackDownloadButton({
+    super.key,
+    required this.task,
+    required this.downloaded,
+    required this.onPressed,
+  });
+
+  final DownloadTask? task;
+  final bool downloaded;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final busy = task?.isBusy ?? false;
+    final done = downloaded || task?.stage == DownloadStage.done;
+    if (busy) {
+      return SizedBox.square(
+        dimension: 44,
+        child: Center(
+          child: SizedBox.square(
+            dimension: 20,
+            child: CircularProgressIndicator(
+              value: task?.fraction,
+              strokeWidth: 2.2,
+              color: scheme.primary,
+            ),
+          ),
+        ),
+      );
+    }
+    return prism.IconButton(
+      tooltip: done ? '已下载' : '下载',
+      style: prism.ButtonStyle.from(fixedSize: const Size.square(44)),
+      onPressed: done ? null : onPressed,
+      icon: prism_glyph.GlyphIcon(
+        done ? MusicActionGlyphs.downloaded : MusicActionGlyphs.download,
+        size: 21,
+        color: done
+            ? scheme.onSurfaceVariant.withValues(alpha: 0.4)
+            : scheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
 
 class PlaylistTrackTile extends ConsumerWidget {
   const PlaylistTrackTile({
@@ -53,6 +104,15 @@ class PlaylistTrackTile extends ConsumerWidget {
             ),
           );
     final isLocal = item.localEntry != null;
+    final likeEntry = item.queueEntry;
+    final likeKey = likeEntry == null ? null : songIdentityKey(likeEntry);
+    final liked =
+        likeKey != null &&
+        ref.watch(
+          likedSongsProvider.select(
+            (items) => items.any((row) => songIdentityKey(row) == likeKey),
+          ),
+        );
     final selectionEnabled = !batchSubmitting && task?.isBusy != true;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final shortDuration = reduceMotion ? Duration.zero : AppMotion.short;
@@ -203,13 +263,42 @@ class PlaylistTrackTile extends ConsumerWidget {
                                 ),
                               ),
                             )
-                          : SongActionsMenu.playlist(
-                              key: ValueKey('playlist-menu-${item.track.id}'),
-                              onRemove: onRemove,
-                              onAddNext: onAddNext,
-                              onDownload: onDownload,
-                              downloadTask: task,
-                              downloaded: isLocal,
+                          : Row(
+                              key: const ValueKey('playlist-row-actions'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                prism.IconButton(
+                                  key: ValueKey(
+                                    'playlist-like-${item.track.id}',
+                                  ),
+                                  tooltip: liked ? '取消喜欢' : '喜欢',
+                                  style: prism.ButtonStyle.from(
+                                    fixedSize: const Size.square(44),
+                                  ),
+                                  onPressed: likeEntry == null
+                                      ? null
+                                      : () => ref
+                                            .read(likedSongsProvider.notifier)
+                                            .toggle(likeEntry),
+                                  icon: Icon(
+                                    liked
+                                        ? Icons.favorite_rounded
+                                        : Icons.favorite_border_rounded,
+                                    size: 22,
+                                    color: liked
+                                        ? scheme.primary
+                                        : supportingColor,
+                                  ),
+                                ),
+                                _TrackDownloadButton(
+                                  key: ValueKey(
+                                    'playlist-download-${item.track.id}',
+                                  ),
+                                  task: task,
+                                  downloaded: isLocal,
+                                  onPressed: onDownload,
+                                ),
+                              ],
                             ),
                     ),
                   ),

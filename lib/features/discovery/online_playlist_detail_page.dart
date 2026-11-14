@@ -672,11 +672,7 @@ class _OnlinePlaylistDetailPageState
                                     : () => _playQueue(
                                         playbackPlaylist,
                                         entry,
-                                        replaceQueue: searching
-                                            ? ref
-                                                  .read(settingsProvider)
-                                                  .replaceQueueOnSearchPlay
-                                            : true,
+                                        replaceQueue: false,
                                       ),
                               ),
                             ),

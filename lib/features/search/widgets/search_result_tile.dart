@@ -1,5 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/icons/icons.dart' as prism_glyph;
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/models/enums.dart';
@@ -7,15 +9,17 @@ import '../../../core/models/music_info.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/ui/cover_image_source.dart';
 import '../../../core/ui/cover_placeholder.dart';
+import '../../../core/ui/music_action_glyphs.dart';
 import '../../../theme/app_motion.dart';
 import '../../../theme/app_theme.dart';
 import '../../downloads/download_progress.dart';
-import '../../songs/widgets/song_actions_menu.dart';
+import '../../playlists/playlist_models.dart';
+import '../../songs/liked_songs_store.dart';
 
 const double _resultCoverSize = 44;
 const double _resultRowMinHeight = 62;
 
-class SearchResultTile extends StatelessWidget {
+class SearchResultTile extends ConsumerWidget {
   const SearchResultTile({
     super.key,
     required this.music,
@@ -44,8 +48,19 @@ class SearchResultTile extends StatelessWidget {
   final VoidCallback? onToggleSelected;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final likeEntry = PlaylistTrack.fromMusicInfo(music).toQueueEntry(
+      playlistId: 'search',
+    );
+    final likeKey = likeEntry == null ? null : songIdentityKey(likeEntry);
+    final liked =
+        likeKey != null &&
+        ref.watch(
+          likedSongsProvider.select(
+            (items) => items.any((row) => songIdentityKey(row) == likeKey),
+          ),
+        );
     final task = downloadTask;
     final done = task?.stage == DownloadStage.done;
     final failed = task?.stage == DownloadStage.failed;
@@ -170,11 +185,80 @@ class SearchResultTile extends StatelessWidget {
                           : (_) => onToggleSelected!(),
                     )
                   else
-                    SongActionsMenu.online(
-                      key: ValueKey('search-result-menu-${music.id}'),
-                      onDownload: onDownload,
-                      onAddToPlaylist: onAddToPlaylist,
-                      downloadTask: task,
+                    Row(
+                      key: ValueKey('search-result-actions-${music.id}'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        prism.IconButton(
+                          key: ValueKey('search-like-${music.id}'),
+                          tooltip: liked ? '取消喜欢' : '喜欢',
+                          style: prism.ButtonStyle.from(
+                            fixedSize: const Size.square(40),
+                            tapTargetSize: prism.TapTargetSize.shrinkWrap,
+                            padding: EdgeInsets.zero,
+                          ),
+                          onPressed: likeEntry == null
+                              ? null
+                              : () => ref
+                                    .read(likedSongsProvider.notifier)
+                                    .toggle(likeEntry),
+                          icon: Icon(
+                            liked
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 21,
+                            color: liked
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        prism.IconButton(
+                          key: ValueKey('search-download-${music.id}'),
+                          tooltip: done ? '已下载' : '下载',
+                          style: prism.ButtonStyle.from(
+                            fixedSize: const Size.square(40),
+                            tapTargetSize: prism.TapTargetSize.shrinkWrap,
+                            padding: EdgeInsets.zero,
+                          ),
+                          onPressed: done ? null : onDownload,
+                          icon: task != null && !done && !failed
+                              ? SizedBox.square(
+                                  dimension: 19,
+                                  child: CircularProgressIndicator(
+                                    value: task.fraction,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : prism_glyph.GlyphIcon(
+                                  done
+                                      ? MusicActionGlyphs.downloaded
+                                      : MusicActionGlyphs.download,
+                                  size: 21,
+                                  fill: 0,
+                                  color: done
+                                      ? scheme.onSurfaceVariant.withValues(
+                                          alpha: 0.4,
+                                        )
+                                      : scheme.onSurfaceVariant,
+                                ),
+                        ),
+                        prism.IconButton(
+                          key: ValueKey('search-playlist-${music.id}'),
+                          tooltip: '加入歌单',
+                          style: prism.ButtonStyle.from(
+                            fixedSize: const Size.square(40),
+                            tapTargetSize: prism.TapTargetSize.shrinkWrap,
+                            padding: EdgeInsets.zero,
+                          ),
+                          onPressed: onAddToPlaylist,
+                          icon: prism_glyph.GlyphIcon(
+                            MusicActionGlyphs.playlistAdd,
+                            size: 21,
+                            fill: 0,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                 ],
               ),

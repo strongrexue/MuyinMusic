@@ -49,8 +49,17 @@ void main() {
     await _pumpUi(tester);
 
     expect(find.byKey(const ValueKey('header-search-field')), findsNothing);
-    expect(find.byTooltip('搜索本地歌曲'), findsOneWidget);
-    await tester.tap(find.byTooltip('搜索本地歌曲'));
+    // 默认落在「喜欢」tab，每个 tab 有自己的搜索文案。
+    expect(find.byTooltip('搜索喜欢的歌曲'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('songs-library-tabs')),
+        matching: find.text('本地音乐'),
+      ),
+    );
+    await _pumpUi(tester);
+    expect(find.byTooltip('搜索本地音乐'), findsOneWidget);
+    await tester.tap(find.byTooltip('搜索本地音乐'));
     await _pumpUi(tester);
     expect(router.routeInformationProvider.value.uri.path, '/songs');
     expect(find.byKey(const ValueKey('header-search-field')), findsOneWidget);

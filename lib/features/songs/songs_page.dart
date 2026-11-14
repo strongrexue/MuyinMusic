@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
+import '../../core/services/batch_download_controller.dart';
 import '../../core/services/saf_storage.dart';
 import '../../core/services/local_audio_source.dart';
 import '../../core/models/enums.dart';
+import '../../core/models/music_info.dart';
 import '../../core/services/embedded_artwork_cache.dart';
 import '../../core/services/embedded_audio_tags.dart';
 import '../../core/storage/settings_store.dart';
@@ -17,17 +20,22 @@ import '../../core/ui/app_toast.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../theme/app_motion.dart';
 import '../downloads/download_history_store.dart';
+import '../downloads/download_progress.dart';
 import '../music_sources/music_source_action_guard.dart';
 import '../player/player_controller.dart';
 import '../search/widgets/quality_picker_sheet.dart';
-import '../playlists/playlist_browser_sheet.dart';
+import '../playlists/widgets/add_music_to_playlist.dart';
 import '../playlists/playlist_models.dart';
 import '../playlists/online_playlist_updater.dart';
-import '../playlists/resolved_playlist_track.dart';
+import '../playlists/playlist_import_actions.dart';
+import '../playlists/playlist_name_dialog.dart';
 import '../playlists/playlist_store.dart';
+import '../playlists/widgets/playlist_library_tile.dart';
+import '../playlists/widgets/playlists_batch_action_bar.dart';
 import '../shell/shell_toolbar_visibility.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
+import 'liked_songs_store.dart';
 import 'local_song_scan_cache.dart';
 import 'scanned_song_file.dart';
 import 'song_search.dart';
@@ -40,6 +48,10 @@ import 'widgets/songs_sort_sheet.dart';
 
 const _songSortModeKey = 'songs_sort_mode_v1';
 const _songSortAscendingKey = 'songs_sort_ascending_v1';
+
+/// Footprint the floating tab capsule needs above the list: the capsule plus
+/// its top and bottom breathing room.
+const double kSongsTabBarSlot = prism.kGlassPillBarHeight + 14;
 
 class SongsPage extends ConsumerStatefulWidget {
   const SongsPage({super.key, this.searchMode = false});
@@ -66,9 +78,11 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'songs-search');
   bool? _toolbarVisibilityBeforeSearchFocus;
   List<DownloadHistoryEntry> _visibleSongs = const [];
-  Map<String, PlaylistTrack> _visiblePlaylistTracks = const {};
+  List<String> _visiblePlaylistIds = const [];
   final Set<String> _selectedIds = <String>{};
   final Set<String> _updatingPlaylistIds = <String>{};
+  bool _importingLx = false;
+  String? _lxImportProgress;
   List<ScannedSongFile>? _scannedFiles;
   String? _scanError;
   ProviderSubscription<List<String>>? _localMusicDirSubscription;
@@ -257,45 +271,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     return out;
   }
 
-  ({
-    List<DownloadHistoryEntry> songs,
-    Map<String, PlaylistTrack> tracksByEntryId,
-  })
-  _songsForPlaylist(
-    LocalPlaylist playlist,
-    List<DownloadHistoryEntry> history,
-  ) {
-    final localIndex = LocalHistoryIndex(history);
-    final songs = <DownloadHistoryEntry>[];
-    final tracksByEntryId = <String, PlaylistTrack>{};
-    for (final track in playlist.tracks) {
-      final localEntry = localIndex.resolve(track, playlist.id);
-      final entry =
-          localEntry ??
-          track.toQueueEntry(playlistId: playlist.id) ??
-          DownloadHistoryEntry(
-            id: 'playlist:${playlist.id}:${track.identityKey}',
-            musicId: track.musicId,
-            name: track.name,
-            singer: track.singer,
-            albumName: track.albumName,
-            sourceCode: track.sourceCode,
-            qualityCode: track.qualityCode,
-            status: DownloadHistoryStatus.completed,
-            createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-            savedPath: track.localPath,
-            picUrl: track.picUrl,
-            musicJson: track.musicJson,
-          );
-      songs.add(entry);
-      tracksByEntryId[entry.id] = track;
-    }
-    return (
-      songs: List<DownloadHistoryEntry>.unmodifiable(songs),
-      tracksByEntryId: Map<String, PlaylistTrack>.unmodifiable(tracksByEntryId),
-    );
-  }
-
   DownloadHistoryEntry _entryWithScannedFile(
     DownloadHistoryEntry entry,
     ScannedSongFile file,
@@ -349,14 +324,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     final path = entry.savedPath;
     final hasLocalFile =
         path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path);
-    final playlistId = ref.read(songsLibraryPlaylistIdProvider);
-    final playlistMode = playlistId != null;
-    if (!hasLocalFile && (!playlistMode || entry.musicInfo == null)) {
-      showAppToast(
-        context,
-        playlistMode ? '这首歌曲暂时无法播放' : '文件不存在，可能已被移动或删除',
-        type: AppToastType.warning,
-      );
+    if (!hasLocalFile && entry.musicInfo == null) {
+      showAppToast(context, '文件不存在，可能已被移动或删除', type: AppToastType.warning);
       return;
     }
     final available = await ensureQueueEntryMusicSourceAvailable(
@@ -372,8 +341,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     final player = ref.read(playerControllerProvider.notifier);
     if (!replaceQueue) {
       await player.playSingleQueueEntry(entry);
-    } else if (playlistMode) {
-      await player.playFromPlaylistQueue(entry, queue, playlistId: playlistId);
     } else {
       await player.playFromHistoryQueue(entry, queue);
     }
@@ -384,24 +351,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     final initialPlayer = ref.read(playerControllerProvider);
     final trackId = initialPlayer.track?.id;
     if (trackId == null) return;
-    final destination = findPlayingLibrary(
-      player: initialPlayer,
-      sourcePlaylistId: ref
-          .read(playerControllerProvider.notifier)
-          .queuePlaylistId,
-      selectedPlaylistId: ref.read(songsLibraryPlaylistIdProvider),
-      playlists: ref.read(localPlaylistsProvider),
-      localSongs: _songs(ref.read(downloadHistoryProvider)),
-    );
-    if (destination == null) {
-      showAppToast(context, '当前歌曲不在本地歌曲或已收藏歌单中');
-      return;
-    }
-    final playlistId = destination.playlistId;
-    _selectLibraryPlaylist(playlistId);
     if (_searchMode) _clearSearch();
-    // Selecting a library replaces the keyed list. Wait until its rows and
-    // scroll dimensions are ready before finding the playing song.
+    // Clearing the search rebuilds the list; wait until its rows and scroll
+    // dimensions are ready before finding the playing song.
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || generation != _locateGeneration) return;
     final duration = MediaQuery.disableAnimationsOf(context)
@@ -413,9 +365,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     for (var attempt = 0; attempt < 3; attempt++) {
       if (!mounted || generation != _locateGeneration) return;
       final player = ref.read(playerControllerProvider);
-      if (player.track?.id != trackId ||
-          ref.read(songsLibraryPlaylistIdProvider) != playlistId ||
-          !_scrollController.hasClients) {
+      if (player.track?.id != trackId || !_scrollController.hasClients) {
         return;
       }
       final queueEntry =
@@ -575,26 +525,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   }
 
   Future<void> _selectPlaylistForSong(DownloadHistoryEntry entry) async {
-    final destination = await showPlaylistBrowserSheet(
-      context,
-      mode: PlaylistBrowserMode.addSongs,
-    );
-    if (!mounted || destination == null) return;
-
-    const prefix = '/playlists/';
-    if (!destination.startsWith(prefix)) return;
-    final playlistId = destination.substring(prefix.length);
-    LocalPlaylist? playlist;
-    for (final candidate in ref.read(localPlaylistsProvider)) {
-      if (candidate.id == playlistId) {
-        playlist = candidate;
-        break;
-      }
-    }
-    if (playlist == null) {
-      showAppToast(context, '歌单不存在或已被删除', type: AppToastType.warning);
-      return;
-    }
+    final playlist = await showPlaylistAddCard(context);
+    if (!mounted || playlist == null) return;
     await _addSongToPlaylist(entry, playlist);
   }
 
@@ -679,53 +611,107 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     }
   }
 
-  Future<void> _removePlaylistTrack(
-    LocalPlaylist playlist,
-    PlaylistTrack track,
-  ) async {
-    final removed = await ref
-        .read(localPlaylistsProvider.notifier)
-        .removeTrack(playlist.id, track.id);
-    if (!mounted || !removed) return;
-    setState(
-      () => _selectedIds.removeWhere(
-        (entryId) => _visiblePlaylistTracks[entryId]?.id == track.id,
+  Future<void> _openPlaylist(LocalPlaylist playlist) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await context.push('/playlists/${playlist.id}');
+  }
+
+  Future<void> _createPlaylist() async {
+    final name = await showPlaylistNameDialog(
+      context,
+      title: '新建歌单',
+      actionLabel: '创建',
+    );
+    if (name == null || !mounted) return;
+    try {
+      final playlist = await ref
+          .read(localPlaylistsProvider.notifier)
+          .create(name);
+      if (!mounted) return;
+      showAppToast(
+        context,
+        '歌单“${playlist.name}”已创建',
+        type: AppToastType.success,
+      );
+      await _openPlaylist(playlist);
+    } on PlaylistStoreException catch (error) {
+      if (mounted) {
+        showAppToast(context, error.message, type: AppToastType.warning);
+      }
+    }
+  }
+
+  Future<void> _importOnlinePlaylist() async {
+    await context.push('/playlists/import');
+  }
+
+  Future<void> _importLxPlaylist() async {
+    if (_importingLx) return;
+    setState(() => _importingLx = true);
+    try {
+      await importLxPlaylistFile(
+        context,
+        ref,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() => _lxImportProgress = progress);
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _importingLx = false;
+          _lxImportProgress = null;
+        });
+      }
+    }
+  }
+
+  /// Drops a playlist out of the library — the filled heart on its row.
+  Future<void> _unfavoritePlaylist(LocalPlaylist playlist) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.heart_broken_rounded),
+        title: const Text('取消收藏这个歌单？'),
+        content: Text('「${playlist.name}」将从我的歌单中移除，下载的歌曲不会被删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('取消收藏'),
+          ),
+        ],
       ),
     );
-    showAppToast(context, '已从歌单移除', type: AppToastType.success);
+    if (confirmed != true || !mounted) return;
+    await ref.read(localPlaylistsProvider.notifier).delete(playlist.id);
+    if (!mounted) return;
+    showAppToast(context, '已取消收藏', type: AppToastType.success);
   }
 
-  Future<void> _removeSelectedFromPlaylist(
-    LocalPlaylist playlist,
-    List<DownloadHistoryEntry> songs,
-  ) async {
-    final selectedEntries = songs
-        .where((entry) => _selectedIds.contains(entry.id))
-        .toList(growable: false);
-    final trackIds = <String>{};
-    for (final entry in selectedEntries) {
-      final track = _visiblePlaylistTracks[entry.id];
-      if (track != null) trackIds.add(track.id);
-    }
-    if (trackIds.isEmpty) {
-      showAppToast(context, '请先选择要移出的歌曲', type: AppToastType.warning);
-      return;
-    }
-    final removed = await ref
-        .read(localPlaylistsProvider.notifier)
-        .removeTracks(playlist.id, trackIds);
-    if (!mounted || removed == 0) return;
-    setState(() {
-      _selectedIds.clear();
-      _batchMode = false;
-    });
-    showAppToast(context, '已从歌单移出 $removed 首歌曲', type: AppToastType.success);
+  /// Liked entries newest first, preferring the freshly scanned local row when
+  /// the same song is also in the local library.
+  List<DownloadHistoryEntry> _likedSongs(
+    List<DownloadHistoryEntry> liked,
+    List<DownloadHistoryEntry> librarySongs,
+  ) {
+    final byKey = {
+      for (final entry in librarySongs) songIdentityKey(entry): entry,
+    };
+    return [for (final entry in liked) byKey[songIdentityKey(entry)] ?? entry];
   }
 
-  Future<void> _openPlaylists() async {
-    final destination = await showPlaylistBrowserSheet(context);
-    if (!mounted || destination == null) return;
-    context.go(destination);
+  void _toggleLike(DownloadHistoryEntry entry) {
+    final liked = ref.read(likedSongsProvider.notifier).toggle(entry);
+    showAppToast(
+      context,
+      liked ? '已加入我的喜欢' : '已取消喜欢',
+      type: AppToastType.success,
+    );
   }
 
   void _openHistory() {
@@ -795,13 +781,17 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     }
   }
 
-  void _selectLibraryPlaylist(String? playlistId) {
-    final normalized = playlistId?.trim();
-    final nextId = normalized == null || normalized.isEmpty ? null : normalized;
-    if (ref.read(songsLibraryPlaylistIdProvider) == nextId) return;
-    ref.read(songsLibraryPlaylistIdProvider.notifier).select(nextId);
-    if (_searchMode) _preSearchScrollOffset = 0;
+  void _selectTab(SongsLibraryTab tab) {
+    if (ref.read(songsLibraryTabProvider) == tab) return;
+    ref.read(songsLibraryTabProvider.notifier).select(tab);
+    ref.read(songsSearchAutoFocusProvider.notifier).state = false;
+    _searchFocusNode.unfocus();
     setState(() {
+      if (_searchMode) {
+        _searchMode = false;
+        _searchQuery = '';
+        _searchController.clear();
+      }
       _selectedIds.clear();
       _batchMode = false;
     });
@@ -861,7 +851,81 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   }
 
   void _toggleVisibleSelection() {
+    if (ref.read(songsLibraryTabProvider) == SongsLibraryTab.playlists) {
+      _toggleSelectAllPlaylists(_visiblePlaylistIds);
+      return;
+    }
     _toggleSelectAll(_visibleSongs);
+  }
+
+  void _togglePlaylistSelection(String id) {
+    setState(() {
+      if (!_selectedIds.add(id)) _selectedIds.remove(id);
+    });
+  }
+
+  void _toggleSelectAllPlaylists(List<String> ids) {
+    if (ids.isEmpty) return;
+    final targets = ids.toSet();
+    setState(() {
+      final selectedCount = _selectedIds.where(targets.contains).length;
+      if (selectedCount == targets.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(targets);
+      }
+    });
+  }
+
+  Future<void> _reorderPlaylists(int oldIndex, int newIndex) async {
+    await ref.read(localPlaylistsProvider.notifier).reorder(oldIndex, newIndex);
+  }
+
+  Future<void> _confirmRemoveSelectedPlaylists(
+    List<LocalPlaylist> playlists,
+  ) async {
+    final selected = [
+      for (final playlist in playlists)
+        if (_selectedIds.contains(playlist.id)) playlist,
+    ];
+    if (selected.isEmpty) {
+      showAppToast(context, '请先选择要移除的歌单', type: AppToastType.warning);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.delete_outline_rounded),
+        title: const Text('移除已选歌单？'),
+        content: Text('将移除 ${selected.length} 个歌单，本地下载的歌曲不会被删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('移除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final removed = await ref
+        .read(localPlaylistsProvider.notifier)
+        .deleteMany(selected.map((playlist) => playlist.id));
+    if (!mounted) return;
+    setState(() {
+      _selectedIds.clear();
+      _batchMode = false;
+    });
+    showAppToast(
+      context,
+      removed == 0 ? '没有歌单被移除' : '已移除 $removed 个歌单',
+      type: removed == 0 ? AppToastType.info : AppToastType.success,
+    );
   }
 
   Future<void> _addSelectedToPlaylist(List<DownloadHistoryEntry> songs) async {
@@ -872,17 +936,11 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       showAppToast(context, '请先选择歌曲', type: AppToastType.warning);
       return;
     }
-    final destination = await showPlaylistBrowserSheet(
-      context,
-      mode: PlaylistBrowserMode.addSongs,
-    );
-    if (!mounted || destination == null) return;
-    const prefix = '/playlists/';
-    if (!destination.startsWith(prefix)) return;
-    final playlistId = destination.substring(prefix.length);
+    final playlist = await showPlaylistAddCard(context);
+    if (!mounted || playlist == null) return;
     final added = await ref
         .read(localPlaylistsProvider.notifier)
-        .addEntries(playlistId, selected);
+        .addEntries(playlist.id, selected);
     if (!mounted) return;
     if (added == 0) {
       showAppToast(context, '所选歌曲已在这个歌单中', type: AppToastType.info);
@@ -893,6 +951,78 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       _batchMode = false;
     });
     showAppToast(context, '已加入 $added 首歌曲', type: AppToastType.success);
+  }
+
+  Future<void> _downloadSelected(List<DownloadHistoryEntry> songs) async {
+    final selected = songs
+        .where((entry) => _selectedIds.contains(entry.id))
+        .toList(growable: false);
+    if (selected.isEmpty) {
+      showAppToast(context, '请先选择歌曲', type: AppToastType.warning);
+      return;
+    }
+    final progress = ref.read(downloadProgressProvider);
+    final musics = <MusicInfo>[];
+    var skipped = 0;
+    for (final entry in selected) {
+      final music = entry.musicInfo;
+      if (music == null ||
+          (entry.savedPath?.isNotEmpty ?? false) ||
+          progress.isMusicBusy(music.id)) {
+        skipped++;
+        continue;
+      }
+      musics.add(music);
+    }
+    if (musics.isEmpty) {
+      showAppToast(
+        context,
+        '所选歌曲都已在本地或正在下载',
+        type: AppToastType.warning,
+      );
+      return;
+    }
+    final available = await ensureOnlineMusicSourcesAvailable(
+      context,
+      musics.map((music) => music.source),
+    );
+    if (!available || !mounted) return;
+    final tab = ref.read(songsLibraryTabProvider);
+    try {
+      final task = ref
+          .read(batchDownloadProvider.notifier)
+          .create(
+            musics: musics,
+            title: switch (tab) {
+              SongsLibraryTab.liked => '我的喜欢',
+              SongsLibraryTab.playlists => '歌单',
+              SongsLibraryTab.local => '本地音乐',
+            },
+            quality: ref.read(settingsProvider).batchDownloadQuality,
+            skippedCount: skipped,
+          );
+      setState(() {
+        _selectedIds.clear();
+        _batchMode = false;
+      });
+      showAppToast(
+        context,
+        '已创建任务 ${task.id}：${task.items.length} 首'
+        '${task.skippedCount > 0 ? '，跳过 ${task.skippedCount} 首' : ''}'
+        '，可在下载页管理',
+        type: task.items.isEmpty ? AppToastType.warning : AppToastType.info,
+        duration: const Duration(seconds: 4),
+      );
+    } catch (error) {
+      if (mounted) {
+        showAppToast(
+          context,
+          '批量下载失败：$error',
+          type: AppToastType.error,
+          duration: const Duration(seconds: 4),
+        );
+      }
+    }
   }
 
   String _pathKey(String path) => _scanCache.pathKey(path);
@@ -948,11 +1078,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   }
 
   void _syncToolbarState({
+    required SongsLibraryTab tab,
     required String libraryTitle,
-    required String? activePlaylistId,
     required int songCount,
     required int selectedCount,
-    required LocalPlaylist? activePlaylist,
     required bool searchAutoFocus,
   }) {
     if (!TickerMode.valuesOf(context).enabled ||
@@ -960,10 +1089,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       return;
     }
     final allSelected = songCount > 0 && selectedCount == songCount;
-    final canUpdatePlaylist = activePlaylist?.isOnlineImport == true;
-    final updatingPlaylist =
-        activePlaylist != null &&
-        _updatingPlaylistIds.contains(activePlaylist.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
           !TickerMode.valuesOf(context).enabled ||
@@ -974,30 +1099,27 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       if (current.matchesView(
         owner: _toolbarOwner,
         libraryTitle: libraryTitle,
-        activePlaylistId: activePlaylistId,
+        tab: tab,
         songCount: songCount,
         selectedCount: selectedCount,
         allSelected: allSelected,
         batchMode: _batchMode,
         searchMode: _searchMode,
         searchAutoFocus: searchAutoFocus,
-        canUpdatePlaylist: canUpdatePlaylist,
-        updatingPlaylist: updatingPlaylist,
       )) {
         return;
       }
       ref.read(songsToolbarStateProvider.notifier).state = SongsToolbarState(
         owner: _toolbarOwner,
         libraryTitle: libraryTitle,
-        activePlaylistId: activePlaylistId,
+        tab: tab,
         songCount: songCount,
         selectedCount: selectedCount,
         allSelected: allSelected,
         batchMode: _batchMode,
         searchMode: _searchMode,
         searchAutoFocus: searchAutoFocus,
-        onSelectLibraryPlaylist: _selectLibraryPlaylist,
-        onOpenPlaylists: _openPlaylists,
+        onSelectTab: _selectTab,
         onSearch: _openSearch,
         onCloseSearch: _closeSearch,
         onSearchChanged: _updateSearchQuery,
@@ -1005,10 +1127,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
         searchFocusNode: _searchFocusNode,
         onShuffle: _shuffleVisibleSongs,
         onOpenHistory: _openHistory,
-        onUpdatePlaylist: canUpdatePlaylist
-            ? () => _updatePlaylist(activePlaylist!)
-            : null,
-        updatingPlaylist: updatingPlaylist,
         onToggleBatch: _toggleBatchMode,
         onToggleSelectAll: _toggleVisibleSelection,
       );
@@ -1017,37 +1135,29 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final tab = ref.watch(songsLibraryTabProvider);
     final playlists = ref.watch(localPlaylistsProvider);
-    final selectedPlaylistId = ref.watch(songsLibraryPlaylistIdProvider);
-    LocalPlaylist? selectedPlaylist;
-    if (selectedPlaylistId != null) {
-      for (final playlist in playlists) {
-        if (playlist.id == selectedPlaylistId) {
-          selectedPlaylist = playlist;
-          break;
-        }
-      }
-      if (selectedPlaylist == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted ||
-              ref.read(songsLibraryPlaylistIdProvider) != selectedPlaylistId) {
-            return;
-          }
-          ref.read(songsLibraryPlaylistIdProvider.notifier).select(null);
-        });
-      }
-    }
-    final playlistMode = selectedPlaylist != null;
     final history = ref.watch(downloadHistoryProvider);
-    final playlistSongs = selectedPlaylist == null
-        ? null
-        : _songsForPlaylist(selectedPlaylist, history);
-    final allSongs = playlistSongs?.songs ?? _songs(history);
-    _visiblePlaylistTracks = playlistSongs?.tracksByEntryId ?? const {};
+    final likedSongs = ref.watch(likedSongsProvider);
+    final likedKeys = {for (final entry in likedSongs) songIdentityKey(entry)};
+    final query = _searchQuery.trim();
+    final searching = _searchMode && query.isNotEmpty;
+    final librarySongs = _songs(history);
+    final localSongs = tab == SongsLibraryTab.liked
+        ? _likedSongs(likedSongs, librarySongs)
+        : librarySongs;
     final songs = _searchMode
-        ? filterSongsByQuery(allSongs, _searchQuery)
-        : allSongs;
-    final scanning = !playlistMode && _scannedFiles == null;
+        ? filterSongsByQuery(localSongs, _searchQuery)
+        : localSongs;
+    final visiblePlaylists = !searching
+        ? playlists
+        : [
+            for (final playlist in playlists)
+              if (playlist.name.toLowerCase().contains(query.toLowerCase()))
+                playlist,
+          ];
+    final playlistTab = tab == SongsLibraryTab.playlists;
+    final scanning = !playlistTab && _scannedFiles == null;
     final playbackIdentity = ref.watch(
       playerControllerProvider.select((state) {
         final queueIndex = state.queueIndex;
@@ -1066,16 +1176,18 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       for (final file in _scannedFiles ?? const <ScannedSongFile>[])
         _pathKey(file.path): file.fingerprint,
     };
-    final selectedCount = songs
-        .where((entry) => _selectedIds.contains(entry.id))
-        .length;
-    _visibleSongs = songs;
+    final selectedCount = playlistTab
+        ? visiblePlaylists.where((p) => _selectedIds.contains(p.id)).length
+        : songs.where((entry) => _selectedIds.contains(entry.id)).length;
+    _visibleSongs = playlistTab ? const [] : songs;
+    _visiblePlaylistIds = [
+      for (final playlist in visiblePlaylists) playlist.id,
+    ];
     _syncToolbarState(
-      libraryTitle: selectedPlaylist?.name ?? '歌曲',
-      activePlaylistId: selectedPlaylist?.id,
-      songCount: songs.length,
+      tab: tab,
+      libraryTitle: '歌曲',
+      songCount: playlistTab ? visiblePlaylists.length : songs.length,
       selectedCount: selectedCount,
-      activePlaylist: selectedPlaylist,
       searchAutoFocus: ref.watch(songsSearchAutoFocusProvider),
     );
 
@@ -1084,109 +1196,222 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       child: CustomScrollView(
         controller: _scrollController,
         key: PageStorageKey(
-          '${widget.searchMode ? 'songs-search' : 'songs'}-'
-          '${selectedPlaylist?.id ?? 'local'}-scroll',
+          '${widget.searchMode ? 'songs-search' : 'songs'}-${tab.name}-scroll',
         ),
         physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
         ),
         slivers: [
           const SliverToBoxAdapter(child: ScrollHeaderSpacer()),
-          if (allSongs.isNotEmpty)
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
-              sliver: SliverToBoxAdapter(
-                child: SongsListSummary(
-                  count: songs.length,
-                  totalCount: allSongs.length,
-                  searching: _searchMode && _searchQuery.trim().isNotEmpty,
-                  sortMode: _sortMode,
-                  ascending: _ascending,
-                  batchMode: _batchMode,
-                  onOpenSort: () => unawaited(_openSortSheet()),
-                  onToggleBatch: songs.isEmpty ? null : _toggleBatchMode,
-                  showSort: !playlistMode,
-                  collectionLabel: playlistMode ? '歌单歌曲' : '本地歌曲',
+          // The tab capsule floats over the list, so the list only needs its
+          // footprint kept clear here.
+          const SliverToBoxAdapter(
+            child: SizedBox(height: kSongsTabBarSlot),
+          ),
+          if (playlistTab) ...[
+            if (!searching && !_batchMode)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                sliver: SliverToBoxAdapter(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _LibraryQuickAction(
+                          key: const ValueKey('playlists-quick-create'),
+                          icon: Icons.create_new_folder_rounded,
+                          label: '新建歌单',
+                          onPressed: () => unawaited(_createPlaylist()),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _LibraryQuickAction(
+                          key: const ValueKey('playlists-quick-online'),
+                          icon: Icons.cloud_download_outlined,
+                          label: '在线导入',
+                          onPressed: () => unawaited(_importOnlinePlaylist()),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _LibraryQuickAction(
+                          key: const ValueKey('playlists-quick-lx'),
+                          icon: Icons.upload_file_rounded,
+                          label:
+                              _lxImportProgress ??
+                              (_importingLx ? '正在导入' : '洛雪导入'),
+                          onPressed: _importingLx
+                              ? null
+                              : () => unawaited(_importLxPlaylist()),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          if (allSongs.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: scanning
-                  ? const SongsLoading()
-                  : EmptySongs(
-                      error: playlistMode ? null : _scanError,
-                      playlistMode: playlistMode,
-                    ),
-            )
-          else if (songs.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: EmptySongSearch(),
-            )
-          else
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                12,
-                0,
-                12,
-                _batchMode ? 12 : ShellBottomArea.contentPadding(context, 104),
-              ),
-              sliver: SliverList.separated(
-                key: _songsListKey,
-                itemCount: songs.length,
-                separatorBuilder: (_, _) => const SongListDivider(),
-                itemBuilder: (context, index) {
-                  final entry = songs[index];
-                  final path = entry.savedPath;
-                  final playing = matchesPlayingEntry(
-                    entry,
-                    playbackIdentity.queueEntry,
-                    playbackIdentity.localPath,
-                    playbackIdentity.trackId,
-                  );
-                  return SongRow(
-                    key: ValueKey(entry.id),
-                    entry: entry,
-                    artworkVersion: path == null
-                        ? null
-                        : artworkVersionByPath[_pathKey(path)],
-                    playing: playing,
-                    playingActive: playing && playbackIdentity.playing,
+            if (visiblePlaylists.isNotEmpty)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
+                sliver: SliverToBoxAdapter(
+                  child: SongsListSummary(
+                    count: visiblePlaylists.length,
+                    totalCount: playlists.length,
+                    searching: searching,
+                    sortMode: _sortMode,
+                    ascending: _ascending,
                     batchMode: _batchMode,
-                    selected: _selectedIds.contains(entry.id),
-                    onToggleSelected: () => _toggleSelection(entry),
-                    onAddNext: () => _addNext(entry),
-                    onAddToPlaylist: () =>
-                        unawaited(_selectPlaylistForSong(entry)),
-                    onDownload: entry.musicInfo == null
+                    onOpenSort: () => unawaited(_openSortSheet()),
+                    onToggleBatch: visiblePlaylists.isEmpty
                         ? null
-                        : () =>
-                              showQualityPickerSheet(context, entry.musicInfo!),
-                    onPlay: () => _play(
-                      entry,
-                      songs,
-                      replaceQueue:
-                          !_searchMode ||
-                          _searchQuery.trim().isEmpty ||
-                          ref.read(settingsProvider).replaceQueueOnSearchPlay,
-                    ),
-                    onDelete: playlistMode
-                        ? () {
-                            final track = _visiblePlaylistTracks[entry.id];
-                            if (track != null) {
-                              unawaited(
-                                _removePlaylistTrack(selectedPlaylist!, track),
-                              );
-                            }
-                          }
-                        : () => _deleteSong(entry),
-                    playlistMode: playlistMode,
-                  );
-                },
+                        : _toggleBatchMode,
+                    showSort: false,
+                    collectionLabel: '歌单',
+                  ),
+                ),
               ),
-            ),
+            if (visiblePlaylists.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: EmptySongs(
+                  playlistMode: true,
+                  title: searching ? '没有匹配的歌单' : '还没有歌单',
+                  message: searching ? '换一个歌单名试试' : '从酷我、酷狗、QQ、网易云或咪咕导入公开歌单',
+                ),
+              )
+            else
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  12,
+                  0,
+                  12,
+                  _batchMode
+                      ? 12
+                      : ShellBottomArea.contentPadding(context, 104),
+                ),
+                sliver: SliverReorderableList(
+                  itemCount: visiblePlaylists.length,
+                  onReorderItem: (oldIndex, newIndex) {
+                    unawaited(_reorderPlaylists(oldIndex, newIndex));
+                  },
+                  itemBuilder: (context, index) {
+                    final playlist = visiblePlaylists[index];
+                    return Padding(
+                      key: ValueKey('songs-playlist-${playlist.id}'),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ReorderableDelayedDragStartListener(
+                        index: index,
+                        enabled: !_batchMode && !searching,
+                        child: PlaylistLibraryTile(
+                          playlist: playlist,
+                          batchMode: _batchMode,
+                          selected: _selectedIds.contains(playlist.id),
+                          onToggleSelected: () =>
+                              _togglePlaylistSelection(playlist.id),
+                          onOpen: () => unawaited(_openPlaylist(playlist)),
+                          onUpdate: playlist.isOnlineImport
+                              ? () => unawaited(_updatePlaylist(playlist))
+                              : null,
+                          updating: _updatingPlaylistIds.contains(playlist.id),
+                          onUnfavorite: () =>
+                              unawaited(_unfavoritePlaylist(playlist)),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ] else ...[
+            if (localSongs.isNotEmpty)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
+                sliver: SliverToBoxAdapter(
+                  child: SongsListSummary(
+                    count: songs.length,
+                    totalCount: localSongs.length,
+                    searching: searching,
+                    sortMode: _sortMode,
+                    ascending: _ascending,
+                    batchMode: _batchMode,
+                    onOpenSort: () => unawaited(_openSortSheet()),
+                    onToggleBatch: songs.isEmpty ? null : _toggleBatchMode,
+                    collectionLabel: tab == SongsLibraryTab.liked
+                        ? '喜欢的歌曲'
+                        : '本地音乐',
+                  ),
+                ),
+              ),
+            if (localSongs.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child:
+                    scanning &&
+                        !(tab == SongsLibraryTab.liked && likedKeys.isEmpty)
+                    ? const SongsLoading()
+                    : tab == SongsLibraryTab.liked
+                    ? const EmptySongs(
+                        liked: true,
+                        title: '还没有喜欢的歌曲',
+                        message: '在歌曲列表点击右侧 ❤️ 即可收藏到这里',
+                      )
+                    : EmptySongs(error: _scanError),
+              )
+            else if (songs.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: EmptySongSearch(),
+              )
+            else
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  12,
+                  0,
+                  12,
+                  _batchMode
+                      ? 12
+                      : ShellBottomArea.contentPadding(context, 104),
+                ),
+                sliver: SliverList.separated(
+                  key: _songsListKey,
+                  itemCount: songs.length,
+                  separatorBuilder: (_, _) => const SongListDivider(),
+                  itemBuilder: (context, index) {
+                    final entry = songs[index];
+                    final path = entry.savedPath;
+                    final playing = matchesPlayingEntry(
+                      entry,
+                      playbackIdentity.queueEntry,
+                      playbackIdentity.localPath,
+                      playbackIdentity.trackId,
+                    );
+                    return SongRow(
+                      key: ValueKey(entry.id),
+                      entry: entry,
+                      artworkVersion: path == null
+                          ? null
+                          : artworkVersionByPath[_pathKey(path)],
+                      playing: playing,
+                      playingActive: playing && playbackIdentity.playing,
+                      batchMode: _batchMode,
+                      selected: _selectedIds.contains(entry.id),
+                      liked: likedKeys.contains(songIdentityKey(entry)),
+                      onToggleLike: () => _toggleLike(entry),
+                      onToggleSelected: () => _toggleSelection(entry),
+                      onAddNext: () => _addNext(entry),
+                      onAddToPlaylist: () =>
+                          unawaited(_selectPlaylistForSong(entry)),
+                      onDownload: entry.musicInfo == null
+                          ? null
+                          : () => showQualityPickerSheet(
+                              context,
+                              entry.musicInfo!,
+                            ),
+                      onPlay: () => _play(entry, songs, replaceQueue: false),
+                      onDelete: () => _deleteSong(entry),
+                    );
+                  },
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -1194,34 +1419,66 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       bottomNavigationBar: _batchMode
-          ? SongsBatchActionBar(
-              selectedCount: selectedCount,
-              onDelete: selectedCount == 0
-                  ? null
-                  : playlistMode
-                  ? () => unawaited(
-                      _removeSelectedFromPlaylist(selectedPlaylist!, songs),
-                    )
-                  : () => unawaited(_confirmDeleteSelected(songs)),
-              onAddToPlaylist: playlistMode || selectedCount == 0
-                  ? null
-                  : () => unawaited(_addSelectedToPlaylist(songs)),
-              onPlaySelected: selectedCount == 0
-                  ? null
-                  : () => unawaited(_playSelected(songs)),
-              playlistMode: playlistMode,
-            )
+          ? (playlistTab
+                ? PlaylistsBatchActionBar(
+                    selectedCount: selectedCount,
+                    onRemove: selectedCount == 0
+                        ? null
+                        : () => unawaited(
+                            _confirmRemoveSelectedPlaylists(visiblePlaylists),
+                          ),
+                  )
+                : SongsBatchActionBar(
+                    selectedCount: selectedCount,
+                    onDelete: selectedCount == 0
+                        ? null
+                        : () => unawaited(_confirmDeleteSelected(songs)),
+                    onAddToPlaylist: selectedCount == 0
+                        ? null
+                        : () => unawaited(_addSelectedToPlaylist(songs)),
+                    onPlaySelected: selectedCount == 0
+                        ? null
+                        : () => unawaited(_playSelected(songs)),
+                    onDownloadSelected: selectedCount == 0
+                        ? null
+                        : () => unawaited(_downloadSelected(songs)),
+                  ))
           : null,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          _batchMode || playlistMode
-              ? libraryView
-              : AppRefreshIndicator(
-                  onRefresh: _scanLocalMusicFolder,
-                  child: libraryView,
-                ),
-          if (!_batchMode && playbackIdentity.trackId != null)
+          if (_batchMode || playlistTab || tab == SongsLibraryTab.liked)
+            libraryView
+          else
+            AppRefreshIndicator(
+              onRefresh: _scanLocalMusicFolder,
+              child: libraryView,
+            ),
+          // The capsule floats over the list, exactly like the dock: rows keep
+          // scrolling underneath the glass instead of pushing it along.
+          Positioned(
+            top: ScrollHeaderInset.of(context),
+            left: 14,
+            right: 14,
+            child: prism.SegmentedControl<SongsLibraryTab>(
+              key: const ValueKey('songs-library-tabs'),
+              segments: const [
+                (SongsLibraryTab.liked, '喜欢'),
+                (SongsLibraryTab.local, '本地音乐'),
+                (SongsLibraryTab.playlists, '歌单'),
+              ],
+              value: tab,
+              onChanged: _selectTab,
+              iconBuilder: (option, selected) => Icon(
+                option.icon,
+                size: 17,
+                color: selected
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          if (!_batchMode && !playlistTab && playbackIdentity.trackId != null)
             Positioned(
               right: 18,
               bottom: ShellBottomArea.contentPadding(context, 88),
@@ -1236,6 +1493,82 @@ class _SongsPageState extends ConsumerState<SongsPage> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// One of the three shortcuts above the playlist list: 新建歌单 / 在线导入 /
+/// 洛雪导入.
+class _LibraryQuickAction extends StatelessWidget {
+  const _LibraryQuickAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = onPressed != null;
+    final content = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 17,
+                color: enabled
+                    ? scheme.onSurface
+                    : scheme.onSurface.withValues(alpha: 0.38),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.1,
+                    fontWeight: FontWeight.w600,
+                    color: enabled
+                        ? scheme.onSurface
+                        : scheme.onSurface.withValues(alpha: 0.38),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    // Same material as the floating tab capsule above: real glass when the
+    // scope allows it, the dock's flat fallback otherwise.
+    final prismScheme = prism.Theme.of(context).colorScheme;
+    if (prism.LiquidGlassScope.of(context)) {
+      return prism.LiquidGlass(
+        style: prism.LiquidGlassStyle.pill(prismScheme),
+        shadows: prism.dockShadows(prismScheme),
+        child: content,
+      );
+    }
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.62),
+        shape: prism.AppShape.full,
+        shadows: prism.dockShadows(prismScheme),
+      ),
+      child: content,
     );
   }
 }

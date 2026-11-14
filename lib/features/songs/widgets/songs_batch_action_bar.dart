@@ -12,6 +12,7 @@ class SongsBatchActionBar extends StatelessWidget {
     required this.onDelete,
     required this.onAddToPlaylist,
     required this.onPlaySelected,
+    required this.onDownloadSelected,
     this.playlistMode = false,
   });
 
@@ -19,6 +20,9 @@ class SongsBatchActionBar extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onAddToPlaylist;
   final VoidCallback? onPlaySelected;
+
+  /// Batches the selected online tracks into one download task.
+  final VoidCallback? onDownloadSelected;
   final bool playlistMode;
 
   @override
@@ -55,6 +59,14 @@ class SongsBatchActionBar extends StatelessWidget {
                         icon: MusicActionGlyphs.playlistAdd,
                         label: '加入歌单',
                         onPressed: onAddToPlaylist,
+                      ),
+                    ),
+                  if (!playlistMode)
+                    Expanded(
+                      child: _SongsBatchAction(
+                        icon: MusicActionGlyphs.download,
+                        label: '批量下载',
+                        onPressed: onDownloadSelected,
                       ),
                     ),
                   Expanded(

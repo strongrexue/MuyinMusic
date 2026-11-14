@@ -5,7 +5,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/settings_store.dart';
 
-const String songsLibraryPlaylistIdStorageKey = 'songs_library_playlist_id_v1';
+const String songsLibraryTabStorageKey = 'songs_library_tab_v1';
+
+/// The three collections the Songs page hosts as independent tabs.
+enum SongsLibraryTab {
+  liked('liked', '喜欢', Icons.favorite_rounded),
+  local('local', '本地音乐', Icons.smartphone_rounded),
+  playlists('playlists', '歌单', Icons.queue_music_rounded);
+
+  const SongsLibraryTab(this.code, this.label, this.icon);
+
+  final String code;
+  final String label;
+  final IconData icon;
+
+  static SongsLibraryTab fromCode(String? code) {
+    return switch (code) {
+      'local' => SongsLibraryTab.local,
+      'playlists' => SongsLibraryTab.playlists,
+      _ => SongsLibraryTab.liked,
+    };
+  }
+}
 
 enum SongSortMode {
   title('title', '标题', Icons.sort_by_alpha_rounded),
@@ -32,7 +53,7 @@ class SongsToolbarState {
   const SongsToolbarState({
     this.owner,
     this.libraryTitle = '歌曲',
-    this.activePlaylistId,
+    this.tab = SongsLibraryTab.local,
     this.songCount = 0,
     this.selectedCount = 0,
     this.allSelected = false,
@@ -43,20 +64,17 @@ class SongsToolbarState {
     this.searchFocusNode,
     this.onCloseSearch,
     this.onSearchChanged,
-    this.onSelectLibraryPlaylist,
-    this.onOpenPlaylists,
     this.onSearch,
     this.onShuffle,
     this.onOpenHistory,
-    this.onUpdatePlaylist,
-    this.updatingPlaylist = false,
+    this.onSelectTab,
     this.onToggleBatch,
     this.onToggleSelectAll,
   });
 
   final Object? owner;
   final String libraryTitle;
-  final String? activePlaylistId;
+  final SongsLibraryTab tab;
   final int songCount;
   final int selectedCount;
   final bool allSelected;
@@ -67,77 +85,66 @@ class SongsToolbarState {
   final FocusNode? searchFocusNode;
   final VoidCallback? onCloseSearch;
   final ValueChanged<String>? onSearchChanged;
-  final ValueChanged<String?>? onSelectLibraryPlaylist;
-  final VoidCallback? onOpenPlaylists;
   final VoidCallback? onSearch;
   final VoidCallback? onShuffle;
   final VoidCallback? onOpenHistory;
-  final VoidCallback? onUpdatePlaylist;
-  final bool updatingPlaylist;
+  final ValueChanged<SongsLibraryTab>? onSelectTab;
   final VoidCallback? onToggleBatch;
   final VoidCallback? onToggleSelectAll;
 
   bool get attached => owner != null;
   bool get hasSongs => songCount > 0;
-  bool get isPlaylistView => activePlaylistId != null;
-  String get searchLabel => isPlaylistView ? '搜索歌单歌曲' : '搜索本地歌曲';
+
+  /// The playlist tab lists collections, so the song search does not apply.
+  bool get searchEnabled => tab != SongsLibraryTab.playlists;
+
+  String get searchLabel => switch (tab) {
+    SongsLibraryTab.local => '搜索本地音乐',
+    SongsLibraryTab.liked => '搜索喜欢的歌曲',
+    SongsLibraryTab.playlists => '搜索歌单',
+  };
 
   bool matchesView({
     required Object owner,
     required String libraryTitle,
-    required String? activePlaylistId,
+    required SongsLibraryTab tab,
     required int songCount,
     required int selectedCount,
     required bool allSelected,
     required bool batchMode,
     required bool searchMode,
     required bool searchAutoFocus,
-    required bool canUpdatePlaylist,
-    required bool updatingPlaylist,
   }) {
     return identical(this.owner, owner) &&
         this.libraryTitle == libraryTitle &&
-        this.activePlaylistId == activePlaylistId &&
+        this.tab == tab &&
         this.songCount == songCount &&
         this.selectedCount == selectedCount &&
         this.allSelected == allSelected &&
         this.batchMode == batchMode &&
         this.searchMode == searchMode &&
-        this.searchAutoFocus == searchAutoFocus &&
-        (onUpdatePlaylist != null) == canUpdatePlaylist &&
-        this.updatingPlaylist == updatingPlaylist;
+        this.searchAutoFocus == searchAutoFocus;
   }
 }
 
-/// The library selected from the Songs header. Search stays within this
-/// collection, and an App restart restores the last selected library.
-class SongsLibraryPlaylistIdNotifier extends Notifier<String?> {
+/// The tab selected in the Songs page. An app restart restores the last tab.
+class SongsLibraryTabNotifier extends Notifier<SongsLibraryTab> {
   late final _prefs = ref.read(sharedPreferencesProvider);
 
   @override
-  String? build() =>
-      _normalize(_prefs.getString(songsLibraryPlaylistIdStorageKey));
+  SongsLibraryTab build() =>
+      SongsLibraryTab.fromCode(_prefs.getString(songsLibraryTabStorageKey));
 
-  void select(String? playlistId) {
-    final nextId = _normalize(playlistId);
-    if (state == nextId) return;
-    state = nextId;
-    if (nextId == null) {
-      unawaited(_prefs.remove(songsLibraryPlaylistIdStorageKey));
-    } else {
-      unawaited(_prefs.setString(songsLibraryPlaylistIdStorageKey, nextId));
-    }
-  }
-
-  static String? _normalize(String? playlistId) {
-    final normalized = playlistId?.trim();
-    return normalized == null || normalized.isEmpty ? null : normalized;
+  void select(SongsLibraryTab tab) {
+    if (state == tab) return;
+    state = tab;
+    unawaited(_prefs.setString(songsLibraryTabStorageKey, tab.code));
   }
 }
 
-final songsLibraryPlaylistIdProvider =
-    NotifierProvider<SongsLibraryPlaylistIdNotifier, String?>(
-      SongsLibraryPlaylistIdNotifier.new,
+final songsLibraryTabProvider =
+    NotifierProvider<SongsLibraryTabNotifier, SongsLibraryTab>(
+      SongsLibraryTabNotifier.new,
     );
 
 final songsToolbarStateProvider = StateProvider<SongsToolbarState>(

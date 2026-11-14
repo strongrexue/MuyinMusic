@@ -10,6 +10,8 @@ import '../../../core/ui/container_transform.dart';
 import '../../../core/ui/widgets/spring_artwork_hero.dart';
 import '../../../core/ui/car_display_layout.dart';
 import '../../../theme/app_motion.dart';
+import '../../playlists/playlist_favorite.dart';
+import '../../playlists/playlist_store.dart';
 import '../../shell/shell_bottom_area.dart';
 import '../discovery_controller.dart';
 import 'discovery_helpers.dart';
@@ -168,7 +170,7 @@ class _MasonryEntry {
   final double coverRatio;
 }
 
-class _PlaylistDiscoveryCard extends StatelessWidget {
+class _PlaylistDiscoveryCard extends ConsumerStatefulWidget {
   const _PlaylistDiscoveryCard({
     required this.summary,
     required this.coverRatio,
@@ -180,7 +182,32 @@ class _PlaylistDiscoveryCard extends StatelessWidget {
   final bool reveal;
 
   @override
+  ConsumerState<_PlaylistDiscoveryCard> createState() =>
+      _PlaylistDiscoveryCardState();
+}
+
+class _PlaylistDiscoveryCardState
+    extends ConsumerState<_PlaylistDiscoveryCard> {
+  bool _saving = false;
+
+  Future<void> _toggleFavorite() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await toggleCollectionFavorite(context, ref, widget.summary);
+    } catch (_) {
+      // toggleCollectionFavorite already surfaced the failure.
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final summary = widget.summary;
+    final coverRatio = widget.coverRatio;
+    final reveal = widget.reveal;
+    final saved = savedPlaylistFor(ref.watch(localPlaylistsProvider), summary);
     final scheme = Theme.of(context).colorScheme;
     final path = discoveryPlaylistDetailPath(summary);
     const radius = BorderRadius.all(Radius.circular(18));
@@ -227,21 +254,36 @@ class _PlaylistDiscoveryCard extends StatelessWidget {
               children: [
                 AspectRatio(
                   aspectRatio: coverRatio,
-                  child: SpringArtworkHero(
-                    tag: onlinePlaylistArtworkHeroTag(
-                      summary.source,
-                      summary.id,
-                    ),
-                    child: HeroArtworkShape(
-                      // 封面贴着卡片顶部，只有上方两角跟随卡片圆角。
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(18),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      SpringArtworkHero(
+                        tag: onlinePlaylistArtworkHeroTag(
+                          summary.source,
+                          summary.id,
+                        ),
+                        child: HeroArtworkShape(
+                          // 封面贴着卡片顶部，只有上方两角跟随卡片圆角。
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(18),
+                          ),
+                          child: DiscoveryPlaylistCover(
+                            url: summary.coverUrl,
+                            size: 36,
+                          ),
+                        ),
                       ),
-                      child: DiscoveryPlaylistCover(
-                        url: summary.coverUrl,
-                        size: 36,
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: _FavoriteBadge(
+                          saved: saved != null,
+                          busy: _saving,
+                          onPressed: _toggleFavorite,
+                          key: ValueKey('discovery-favorite-${summary.key}'),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
                 Padding(
@@ -282,6 +324,58 @@ class _PlaylistDiscoveryCard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The heart sitting on a playlist cover: filled once the collection is
+/// saved into the library, tapping it saves or drops it.
+class _FavoriteBadge extends StatelessWidget {
+  const _FavoriteBadge({
+    super.key,
+    required this.saved,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  final bool saved;
+  final bool busy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: saved ? '取消收藏' : '收藏歌单',
+      child: GestureDetector(
+        onTap: busy ? null : onPressed,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.26),
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: busy
+              ? const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Icon(
+                  saved
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  size: 18,
+                  color: saved
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.white,
+                ),
         ),
       ),
     );

@@ -7,6 +7,8 @@ import 'features/discovery/leaderboards_page.dart';
 import 'features/discovery/online_playlist_detail_page.dart';
 import 'features/downloads/download_history_page.dart';
 import 'features/equalizer/equalizer_page.dart';
+import 'features/home/home_page.dart';
+import 'features/home/home_search_page.dart';
 import 'core/models/enums.dart';
 import 'core/models/leaderboard_info.dart';
 import 'core/models/online_collection_kind.dart';
@@ -35,7 +37,11 @@ import 'theme/app_motion.dart';
 // a stable BuildContext after the router mounts.
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
-final appRouter = createAppRouter(navigatorKey: rootNavigatorKey);
+// The app opens on the personalised home tab; discovery is one tap away.
+final appRouter = createAppRouter(
+  navigatorKey: rootNavigatorKey,
+  initialLocation: '/home',
+);
 
 GoRouter createAppRouter({
   String initialLocation = '/',
@@ -70,6 +76,37 @@ GoRouter createAppRouter({
                   children: children,
                 ),
             branches: [
+              StatefulShellBranch(
+                initialLocation: '/home',
+                routes: [
+                  GoRoute(
+                    path: '/home',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: _shellPageContent(state, child: const HomePage()),
+                    ),
+                    routes: [
+                      GoRoute(
+                        path: 'search',
+                        pageBuilder: (context, state) => NoTransitionPage(
+                          child: _shellPageContent(
+                            state,
+                            child: const HomeSearchPage(),
+                          ),
+                        ),
+                      ),
+                      GoRoute(
+                        path: 'downloads',
+                        pageBuilder: (context, state) => NoTransitionPage(
+                          child: _shellPageContent(
+                            state,
+                            child: const DownloadHistoryPage(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
               StatefulShellBranch(
                 initialLocation: '/',
                 observers: [HeroineController()],

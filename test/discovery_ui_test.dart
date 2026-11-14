@@ -37,6 +37,7 @@ import 'package:cy_shine_music/features/player/player_audio_handler.dart';
 import 'package:cy_shine_music/features/player/player_controller.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
 import 'package:cy_shine_music/features/playlists/widgets/immersive_playlist_chrome.dart';
+import 'package:cy_shine_music/features/search/online_search_body.dart';
 import 'package:cy_shine_music/features/search/search_controller.dart';
 import 'package:cy_shine_music/features/search/search_page.dart';
 import 'package:cy_shine_music/features/search/search_toolbar_state.dart';
@@ -607,7 +608,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('discovery platform menu and displayed source stay in sync', (
+  testWidgets('discovery source tabs and displayed source stay in sync', (
     tester,
   ) async {
     await _useViewport(tester, const Size(390, 844));
@@ -628,11 +629,10 @@ void main() {
     expect(container.read(selectedDiscoverySourceProvider), MusicSource.kw);
 
     for (final source in [MusicSource.kg, MusicSource.kw, MusicSource.mg]) {
-      await tester.tap(
-        find.byKey(const ValueKey('search-platform-menu-anchor')),
-      );
+      final tab = find.byKey(ValueKey('discovery-source-${source.code}'));
+      await tester.ensureVisible(tab);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('${source.label}音乐'));
+      await tester.tap(tab);
       await tester.pumpAndSettle();
       expect(container.read(selectedDiscoverySourceProvider), source);
       expect(
@@ -830,7 +830,7 @@ void main() {
     expect(find.byKey(const ValueKey('discovery-category-fab')), findsNothing);
   });
 
-  testWidgets('discovery platform keeps the default search source', (
+  testWidgets('discovery source tabs switch the displayed platform only', (
     tester,
   ) async {
     await _useViewport(tester, const Size(390, 844));
@@ -848,26 +848,15 @@ void main() {
     await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
     await tester.pumpAndSettle();
     expect(container.read(searchControllerProvider).source, MusicSource.all);
+    expect(find.byKey(const ValueKey('discovery-source-tabs')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('search-platform-menu-anchor')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('QQ音乐'));
+    await tester.tap(find.byKey(const ValueKey('discovery-source-tx')));
     await tester.pumpAndSettle();
 
     expect(container.read(selectedDiscoverySourceProvider), MusicSource.tx);
+    // 平台 tab 只切换发现内容，不再顺手改搜索来源。
     expect(container.read(searchControllerProvider).source, MusicSource.all);
     expect(find.byKey(const ValueKey('discovery-card-tx:1')), findsOneWidget);
-
-    await tester.tap(find.byType(SearchBar));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(EditableText).last, '周杰伦');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pump(const Duration(milliseconds: 400));
-
-    expect(fake.searchRequests, [
-      const SearchQuery(keyword: '周杰伦', source: MusicSource.all, page: 1),
-    ]);
-    expect(container.read(searchControllerProvider).source, MusicSource.all);
   });
 
   testWidgets('long press preview lists only the first eight tracks', (
@@ -990,7 +979,7 @@ void main() {
   });
 
   testWidgets(
-    'search cancel restores discovery and rejects the stale response',
+    'search cancel closes the search surface and rejects the stale response',
     (tester) async {
       await _useViewport(tester, const Size(390, 844));
       final prefs = await _freshPreferences();
@@ -1002,20 +991,24 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
+      var closed = 0;
 
-      await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(SearchBar));
+      await tester.pumpWidget(
+        _appWithContainer(
+          container,
+          _SearchHost(onClosed: () => closed++),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(EditableText).last, '慢搜索');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pump(const Duration(milliseconds: 300));
 
-      final cancelButton = find.byTooltip('取消搜索').hitTestable();
+      final cancelButton = find.byKey(const ValueKey('clear')).hitTestable();
       expect(cancelButton, findsOneWidget);
       await tester.tap(cancelButton);
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(DiscoveryContent), findsOneWidget);
+      expect(closed, 1);
       expect(container.read(searchControllerProvider).isSearchActive, isFalse);
 
       fake.completeSearch();
@@ -1067,7 +1060,8 @@ void main() {
       );
       expect(find.byTooltip('返回上一页'), findsOneWidget);
       expect(find.text('播放全部'), findsOneWidget);
-      expect(find.byTooltip('歌曲操作'), findsWidgets);
+      expect(find.byTooltip('喜欢'), findsWidgets);
+      expect(find.byTooltip('下载'), findsWidgets);
       await tester.tap(find.text('收藏歌单'));
       await tester.pumpAndSettle();
 
@@ -1739,4 +1733,16 @@ Widget _appWithContainer(ProviderContainer container, Widget home) {
       home: Scaffold(body: home),
     ),
   );
+}
+
+/// 搜索已从发现页搬到首页，测试里用它充当宿主页面。
+class _SearchHost extends StatelessWidget {
+  const _SearchHost({this.onClosed});
+
+  final VoidCallback? onClosed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OnlineSearchBody(openEntryOnMount: true, onClosed: onClosed);
+  }
 }

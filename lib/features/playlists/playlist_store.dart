@@ -70,12 +70,51 @@ class LocalPlaylistNotifier extends Notifier<List<LocalPlaylist>> {
     return true;
   }
 
+  /// The saved copy of an online collection, if the user already has it.
+  LocalPlaylist? savedFor(String onlineId, String sourceCode) {
+    final id = onlineId.trim();
+    if (id.isEmpty) return null;
+    for (final playlist in state) {
+      if (playlist.onlinePlaylistId == id &&
+          playlist.originSourceCode?.trim() == sourceCode.trim()) {
+        return playlist;
+      }
+    }
+    return null;
+  }
+
   Future<bool> delete(String id) async {
     final next = state.where((playlist) => playlist.id != id).toList();
     if (next.length == state.length) return false;
     state = List<LocalPlaylist>.unmodifiable(next);
     await _persist();
     return true;
+  }
+
+  /// Moves a playlist to [newIndex], counted after its own removal, which is
+  /// the shape ReorderableListView reports through onReorderItem.
+  Future<void> reorder(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= state.length) return;
+    final target = newIndex.clamp(0, state.length - 1);
+    if (target == oldIndex) return;
+    final next = [...state];
+    final playlist = next.removeAt(oldIndex);
+    next.insert(target, playlist);
+    state = List<LocalPlaylist>.unmodifiable(next);
+    await _persist();
+  }
+
+  /// Drops every playlist whose id is in [ids]; returns how many went away.
+  Future<int> deleteMany(Iterable<String> ids) async {
+    final targets = ids.toSet();
+    if (targets.isEmpty) return 0;
+    final next = state.where((playlist) => !targets.contains(playlist.id));
+    final result = next.toList(growable: false);
+    final removed = state.length - result.length;
+    if (removed == 0) return 0;
+    state = List<LocalPlaylist>.unmodifiable(result);
+    await _persist();
+    return removed;
   }
 
   Future<int> addTrack(String playlistId, DownloadHistoryEntry entry) {

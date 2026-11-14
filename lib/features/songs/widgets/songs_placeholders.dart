@@ -18,7 +18,7 @@ class SongsListSummary extends StatelessWidget {
     required this.onOpenSort,
     required this.onToggleBatch,
     this.showSort = true,
-    this.collectionLabel = '本地歌曲',
+    this.collectionLabel = '本地音乐',
   });
 
   final int count;
@@ -166,10 +166,24 @@ class SongsLoading extends StatelessWidget {
 }
 
 class EmptySongs extends StatelessWidget {
-  const EmptySongs({super.key, this.error, this.playlistMode = false});
+  const EmptySongs({
+    super.key,
+    this.error,
+    this.playlistMode = false,
+    this.liked = false,
+    this.title,
+    this.message,
+  });
 
   final String? error;
   final bool playlistMode;
+
+  /// Marks the liked-songs collection, which gets its own heart glyph.
+  final bool liked;
+
+  /// Overrides the default copy for non-local collections (liked songs).
+  final String? title;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -178,19 +192,25 @@ class EmptySongs extends StatelessWidget {
     return AnimatedEmptyState(
       kind: hasError
           ? EmptyStateKind.cloud
+          : liked
+          ? EmptyStateKind.liked
           : playlistMode
           ? EmptyStateKind.playlist
           : EmptyStateKind.library,
-      title: hasError
-          ? '暂时无法读取歌曲'
-          : playlistMode
-          ? '歌单还是空的'
-          : '还没有本地歌曲',
-      message: hasError
-          ? normalizedError
-          : playlistMode
-          ? '把喜欢的歌收进来'
-          : '音乐文件夹中的歌曲会显示在这里\n下拉即可重新扫描',
+      title:
+          title ??
+          (hasError
+              ? '暂时无法读取歌曲'
+              : playlistMode
+              ? '歌单还是空的'
+              : '还没有本地歌曲'),
+      message:
+          message ??
+          (hasError
+              ? normalizedError
+              : playlistMode
+              ? '把喜欢的歌收进来'
+              : '音乐文件夹中的歌曲会显示在这里\n下拉即可重新扫描'),
       bottomPadding: ShellBottomArea.contentPadding(context, 108),
     );
   }
