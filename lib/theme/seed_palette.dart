@@ -5,14 +5,19 @@ class SeedPalette {
 
   static const Color defaultSeed = Color(0xFF007AFF);
 
-  // Prism UI's default accent colors, in its displayed order.
+  // MoviePilot's twelve built-in theme colors, in its displayed order.
   static const List<int> defaultColors = [
-    0xFF007AFF,
-    0xFFCB30E0,
-    0xFFFF2D55,
-    0xFFFF383C,
-    0xFFFF8D28,
-    0xFFFFCC00,
-    0xFF34C759,
+    0xFF8D51F9, // 紫
+    0xFF3F51B5, // 靛蓝
+    0xFF1976D2, // 蓝
+    0xFF00BCD4, // 青
+    0xFF009688, // 蓝绿
+    0xFF4CAF50, // 绿
+    0xFFFFB400, // 琥珀
+    0xFFFF9800, // 橙
+    0xFFFF4C51, // 珊瑚
+    0xFFE91E63, // 粉
+    0xFF16B1FF, // 天蓝
+    0xFF607D8B, // 蓝灰
   ];
 }

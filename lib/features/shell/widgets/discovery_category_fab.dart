@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/models/playlist_category.dart';
-import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_motion.dart';
 import '../../discovery/discovery_controller.dart';
 import '../../search/search_controller.dart';
@@ -32,9 +31,7 @@ class _DiscoveryCategoryFabLayerState
   @override
   Widget build(BuildContext context) {
     final bottomArea = ShellBottomArea.maybeOf(context);
-    if ((bottomArea?.nativeNavigation == true ||
-            bottomArea?.navigationMode == AppNavigationMode.floatingCapsule) &&
-        bottomArea!.extent == 0) {
+    if (bottomArea != null && bottomArea.extent == 0) {
       return const SizedBox.shrink();
     }
     final source = ref.watch(selectedDiscoverySourceProvider);
@@ -63,13 +60,9 @@ class _DiscoveryCategoryFabLayerState
     final wideLayout = toolbarUsesWideMetrics(MediaQuery.sizeOf(context));
     final fabPadding = EdgeInsets.only(
       right: wideLayout ? 104 : 18,
-      bottom: switch (bottomArea?.navigationMode) {
-        AppNavigationMode.native =>
-          bottomArea!.extent - MediaQuery.paddingOf(context).bottom + 24,
-        AppNavigationMode.floatingCapsule =>
-          bottomArea!.extent - MediaQuery.paddingOf(context).bottom + 16,
-        _ => 82,
-      },
+      bottom: bottomArea == null
+          ? 82
+          : bottomArea.extent - MediaQuery.paddingOf(context).bottom + 16,
     );
     final categoryFab = FloatingActionButton.extended(
       key: const ValueKey('discovery-category-fab'),

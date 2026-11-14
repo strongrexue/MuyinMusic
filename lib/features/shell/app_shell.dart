@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/models/enums.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/cover_image_source.dart';
@@ -18,6 +19,7 @@ import '../search/search_controller.dart';
 import '../search/search_toolbar_state.dart';
 import '../settings/settings_section.dart';
 import '../songs/songs_toolbar_state.dart';
+import 'player_origin_state.dart';
 import 'player_pull_scope.dart';
 import 'player_transition.dart';
 import 'shell_bottom_area.dart';
@@ -26,7 +28,6 @@ import 'shell_toolbar_visibility.dart';
 import 'tab_location_memory.dart';
 import 'widgets/discovery_category_fab.dart';
 import 'widgets/dual_capsule_bottom_navigation.dart';
-import 'widgets/native_bottom_navigation.dart';
 import 'widgets/player_surface_clipper.dart';
 import 'widgets/search_paging_fab.dart';
 import 'widgets/toolbar_capsule.dart';
@@ -57,6 +58,20 @@ class _AppShellState extends ConsumerState<AppShell>
   String _playerReturnLocation = '/songs';
   late final AnimationController _toolbarRevealController;
 
+  /// How far the bottom chrome has folded away while a list scrolls: 0 keeps
+  /// it in place, 1 applies the setting's full collapse or hide.
+  late final AnimationController _chromeFold;
+  double _chromeFoldTravel = 0;
+  double _scrollFoldAccum = 0;
+
+  /// The scrollable of the page currently under the floating chrome, captured
+  /// from its scroll notifications so the folded dock anchor can jump the page
+  /// back to the top without every page registering its controller.
+  ScrollPosition? _pageScrollPosition;
+
+  /// How much of a vertical drag accumulates before the chrome reacts.
+  static const double _scrollFoldThreshold = 26;
+
   /// Player reveal progress: 0 parks the player layer below the screen, 1
   /// seats it. This is the single source of truth for entering, leaving and
   /// dragging the player — the page itself never animates.
@@ -83,6 +98,11 @@ class _AppShellState extends ConsumerState<AppShell>
     _toolbarRevealController = AnimationController(
       vsync: this,
       value: 1,
+      duration: AppMotion.medium,
+    );
+    _chromeFold = AnimationController(
+      vsync: this,
+      value: 0,
       duration: AppMotion.medium,
     );
     final startsOnPlayer = widget.location == '/player';
@@ -132,6 +152,7 @@ class _AppShellState extends ConsumerState<AppShell>
   void dispose() {
     _resetTopLevelBack();
     _toolbarRevealController.dispose();
+    _chromeFold.dispose();
     _transition.dispose();
     _coverRotation.dispose();
     _pull.dispose();
@@ -145,6 +166,15 @@ class _AppShellState extends ConsumerState<AppShell>
       _rememberTabLocation();
     }
     if (oldWidget.location != widget.location) {
+      _setChromeFolded(false);
+      // The "came from the player" hand-off only covers the page it opened.
+      if (oldWidget.location == '/settings/equalizer') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ref.read(pageOpenedFromPlayerProvider.notifier).state = null;
+          }
+        });
+      }
       _resetTopLevelBack();
       // Keep the bottom controls fully revealed when the route shell changes.
       if (!_pullActive && _pull.value == 0) {
@@ -302,6 +332,12 @@ class _AppShellState extends ConsumerState<AppShell>
       if (destination == null && GoRouter.of(context).canPop()) {
         context.pop();
       } else {
+        if (destination != null) {
+          // Remember that the player opened this page, so its back button can
+          // return here instead of the tab underneath.
+          ref.read(pageOpenedFromPlayerProvider.notifier).state =
+              _playerReturnLocation;
+        }
         context.go(destination ?? _playerReturnLocation);
       }
     }
@@ -412,11 +448,15 @@ class _AppShellState extends ConsumerState<AppShell>
 
     _releaseRouteFocus();
     final settingsParent = settingsParentLocation(widget.location);
+    final playerOrigin = ref.read(pageOpenedFromPlayerProvider);
     if (_isTopLevelMenuLocation(widget.location)) {
       await _handleTopLevelBack();
     } else if (widget.location == '/downloads' ||
         widget.location == '/songs/search') {
       context.go('/songs');
+    } else if (playerOrigin != null && settingsParent != null) {
+      // Back out of a page the player opened into the player again.
+      context.go('/player', extra: playerOrigin);
     } else if (settingsParent != null) {
       if (context.canPop()) {
         context.pop();
@@ -510,6 +550,77 @@ class _AppShellState extends ConsumerState<AppShell>
     );
   }
 
+  void _setChromeFolded(bool folded) {
+    final target = folded ? 1.0 : 0.0;
+    if ((_chromeFold.value - target).abs() < 0.001) return;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _chromeFold.value = target;
+      return;
+    }
+    _chromeFold.animateTo(
+      target,
+      duration: AppMotion.medium,
+      curve: AppMotion.emphasized,
+    );
+  }
+
+  bool _handleChromeScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+    if (notification.depth == 0) {
+      // `metrics` is a snapshot, not the live position, so ask the scrollable
+      // that raised the notification for its own position.
+      final context = notification.context;
+      if (context != null) {
+        _pageScrollPosition = Scrollable.maybeOf(context)?.position;
+      }
+    }
+    if (ref.read(settingsProvider).bottomBarBehavior ==
+        BottomBarBehavior.always) {
+      _setChromeFolded(false);
+      return false;
+    }
+    if (notification is ScrollEndNotification) {
+      // Only a genuine return to the top expands the bars again; the settle at
+      // the end of a downward fling must keep them folded.
+      if (metrics.extentBefore <= 4) _setChromeFolded(false);
+      _scrollFoldAccum = 0;
+      return false;
+    }
+    if (notification is! ScrollUpdateNotification) return false;
+    final delta = notification.scrollDelta ?? 0;
+    if (delta.abs() < 0.5) return false;
+    // Rubber-band overscroll reports deltas that pull against the gesture.
+    if (metrics.pixels > metrics.maxScrollExtent + 0.5) return false;
+    _scrollFoldAccum = _scrollFoldAccum.sign == delta.sign
+        ? _scrollFoldAccum + delta
+        : delta;
+    if (_scrollFoldAccum > _scrollFoldThreshold &&
+        metrics.pixels > metrics.minScrollExtent + 24) {
+      _setChromeFolded(true);
+      _scrollFoldAccum = 0;
+    } else if (_scrollFoldAccum < -_scrollFoldThreshold) {
+      _setChromeFolded(false);
+      _scrollFoldAccum = 0;
+    }
+    return false;
+  }
+
+  /// Sent by the folded dock's round capsule: bring the page back to its top.
+  void _scrollPageToTop() {
+    final position = _pageScrollPosition;
+    if (position == null || !position.hasContentDimensions) return;
+    final target = position.minScrollExtent;
+    if ((position.pixels - target).abs() < 0.5) return;
+    unawaited(
+      position.animateTo(
+        target,
+        duration: AppMotion.medium,
+        curve: AppMotion.emphasized,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Keep artwork sampling tied to song selection, including before the
@@ -538,9 +649,6 @@ class _AppShellState extends ConsumerState<AppShell>
     );
     final pageBackground = Theme.of(context).scaffoldBackgroundColor;
     final isPlayer = widget.location == '/player';
-    final navigationMode = ref.watch(
-      settingsProvider.select((settings) => settings.navigationMode),
-    );
     final showPlayerBar = ref.watch(
       playerControllerProvider.select(
         (state) => state.hasTrack || state.loading,
@@ -559,30 +667,14 @@ class _AppShellState extends ConsumerState<AppShell>
                 (state) => state.batchMode,
               ),
             ));
-    final nativeBottomExtent =
-        shellControlsVisible && navigationMode == AppNavigationMode.native
-        ? nativeBottomAreaHeight(context, showPlayer: showPlayerBar)
-        : 0.0;
-    // The player strip floats over content; only the navigation bar below it
-    // pushes the page up.
-    final nativeFloatingExtent =
-        shellControlsVisible &&
-            navigationMode == AppNavigationMode.native &&
-            showPlayerBar
-        ? nativeFloatingPlayerExtent(context)
-        : 0.0;
     final dualBottomExtent =
-        shellControlsVisible &&
-            navigationMode == AppNavigationMode.floatingCapsule
+        shellControlsVisible
         ? floatingCapsuleBottomAreaHeight(context, showPlayer: showPlayerBar)
         : 0.0;
-    ref.listen<AppNavigationMode>(
-      settingsProvider.select((settings) => settings.navigationMode),
-      (previous, next) {
-        _toolbarRevealController.stop(canceled: false);
-        _toolbarRevealController.value = 1;
-      },
+    final bottomBarBehavior = ref.watch(
+      settingsProvider.select((settings) => settings.bottomBarBehavior),
     );
+    _chromeFoldTravel = dualBottomExtent;
 
     ref.listen<bool>(shellToolbarVisibleProvider, (previous, next) {
       if (next && previous == false) _animateToolbarTo(1);
@@ -614,89 +706,88 @@ class _AppShellState extends ConsumerState<AppShell>
         child: PlayerPullScope(
           gestures: _pullGestures,
           child: ShellBottomArea(
-            navigationMode: navigationMode,
-            extent: switch (navigationMode) {
-              AppNavigationMode.native => nativeBottomExtent,
-              AppNavigationMode.floatingCapsule => dualBottomExtent,
-            },
-            floatingExtent: switch (navigationMode) {
-              AppNavigationMode.native => nativeFloatingExtent,
-              AppNavigationMode.floatingCapsule => dualBottomExtent,
-            },
+            extent: dualBottomExtent,
+            floatingExtent: dualBottomExtent,
             child: Scaffold(
               extendBody: true,
               resizeToAvoidBottomInset: true,
               backgroundColor: pageBackground,
-              body: Stack(
-                key: _transition.rootKey,
-                // Every child carries an explicit key so element matching never
-                // falls back to list position. The player layer slot below appears
-                // and disappears, and without keys that index shift would rebuild
-                // the toolbar subtree — killing any in-flight drag recognizer.
-                children: [
-                  Positioned.fill(
-                    key: const ValueKey('shell-content'),
-                    child: ColoredBox(
-                      color: pageBackground,
-                      // Keep the outer navigator mounted across tab changes;
-                      // its StatefulShellRoute owns the retained branch stacks.
-                      child: RepaintBoundary(
-                        child: ClipRect(child: widget.child),
+              body: NotificationListener<ScrollNotification>(
+                onNotification: _handleChromeScroll,
+                child: Stack(
+                  key: _transition.rootKey,
+                  // Every child carries an explicit key so element matching never
+                  // falls back to list position. The player layer slot below appears
+                  // and disappears, and without keys that index shift would rebuild
+                  // the toolbar subtree — killing any in-flight drag recognizer.
+                  children: [
+                    Positioned.fill(
+                      key: const ValueKey('shell-content'),
+                      child: ColoredBox(
+                        color: pageBackground,
+                        // Keep the outer navigator mounted across tab changes;
+                        // its StatefulShellRoute owns the retained branch stacks.
+                        child: RepaintBoundary(
+                          child: ClipRect(child: widget.child),
+                        ),
                       ),
                     ),
-                  ),
-                  if (contentLocation == '/')
-                    const Positioned.fill(
-                      key: ValueKey('shell-fab'),
-                      child: Stack(
-                        children: [
-                          DiscoveryCategoryFabLayer(),
-                          SearchPagingFabLayer(),
-                        ],
+                    if (contentLocation == '/' ||
+                        isHomeSearchLocation(contentLocation))
+                      const Positioned.fill(
+                        key: ValueKey('shell-fab'),
+                        child: Stack(
+                          children: [
+                            DiscoveryCategoryFabLayer(),
+                            SearchPagingFabLayer(),
+                          ],
+                        ),
                       ),
-                    ),
-                  _buildPlayerLayer(isPlayer),
-                  Positioned(
-                    key: const ValueKey('shell-toolbar'),
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: AnimatedBuilder(
-                      animation: _pull,
-                      builder: (context, child) {
-                        final blocked =
-                            _pull.value > 0 &&
-                            !(_settleTarget == 0 && _pull.value < 0.2);
-                        return IgnorePointer(
-                          ignoring: blocked,
-                          child: ExcludeSemantics(
-                            excluding: blocked,
-                            child: child!,
-                          ),
-                        );
-                      },
-                      child: switch (navigationMode) {
-                        AppNavigationMode.floatingCapsule =>
-                          FloatingCapsuleBottomNavigation(
+                    _buildPlayerLayer(isPlayer),
+                    Positioned(
+                      key: const ValueKey('shell-toolbar'),
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: AnimatedBuilder(
+                        animation: _pull,
+                        builder: (context, child) {
+                          final blocked =
+                              _pull.value > 0 &&
+                              !(_settleTarget == 0 && _pull.value < 0.2);
+                          return IgnorePointer(
+                            ignoring: blocked,
+                            child: ExcludeSemantics(
+                              excluding: blocked,
+                              child: child!,
+                            ),
+                          );
+                        },
+                        child: _FoldingBottomChrome(
+                          fold: _chromeFold,
+                          behavior: bottomBarBehavior,
+                          travel: dualBottomExtent > 0
+                              ? dualBottomExtent
+                              : _chromeFoldTravel,
+                          child: FloatingCapsuleBottomNavigation(
                             location: contentLocation,
                             routeLocation: contentRoute,
                             showPlayer: showPlayerBar,
                             visible: shellControlsVisible,
                             reveal: _toolbarRevealController,
                             isPlayer: isPlayer,
+                            fold: bottomBarBehavior == BottomBarBehavior.leftFold
+                                ? _chromeFold
+                                : null,
+                            onFoldedAnchorTap: _scrollPageToTop,
+                            onFoldedPlayerTap: _handleOpenPlayer,
                           ),
-                        AppNavigationMode.native => NativeBottomNavigation(
-                          location: contentLocation,
-                          routeLocation: contentRoute,
-                          showPlayer: showPlayerBar,
-                          visible: shellControlsVisible,
-                          reveal: _toolbarRevealController,
                         ),
-                      },
+                      ),
                     ),
-                  ),
-                  _buildSharedCoverLayer(),
-                ],
+                    _buildSharedCoverLayer(),
+                  ],
+                ),
               ),
             ),
           ),
@@ -868,6 +959,55 @@ class _AppShellState extends ConsumerState<AppShell>
 }
 
 const _doubleBackExitWindow = Duration(seconds: 2);
+
+/// Applies the configured scroll behaviour to the floating mini player and
+/// dock: folding shrinks it towards the bottom edge, hiding slides it away.
+class _FoldingBottomChrome extends StatelessWidget {
+  const _FoldingBottomChrome({
+    required this.fold,
+    required this.behavior,
+    required this.travel,
+    required this.child,
+  });
+
+  final Animation<double> fold;
+  final BottomBarBehavior behavior;
+  final double travel;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // 向左折叠 is painted inside the bars themselves (each folds towards its
+    // left anchor), so this wrapper only drives 滚动折叠 and 滚动隐藏.
+    if (behavior == BottomBarBehavior.leftFold) return child;
+    final hiding = behavior == BottomBarBehavior.hide;
+    return AnimatedBuilder(
+      animation: fold,
+      child: child,
+      builder: (context, child) {
+        final amount = fold.value.clamp(0.0, 1.0);
+        if (amount == 0) return child!;
+        return IgnorePointer(
+          ignoring: amount > 0.4,
+          child: ExcludeSemantics(
+            excluding: amount > 0.4,
+            child: Opacity(
+              opacity: hiding ? 1 - 0.35 * amount : 1 - 0.1 * amount,
+              child: Transform.translate(
+                offset: Offset(0, travel * (hiding ? amount : 0.42 * amount)),
+                child: Transform.scale(
+                  scale: hiding ? 1 : 1 - 0.08 * amount,
+                  alignment: Alignment.bottomCenter,
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 bool _isTopLevelMenuLocation(String location) {
   return location == '/' || location == '/songs' || location == '/settings';

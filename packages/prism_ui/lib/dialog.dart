@@ -21,6 +21,13 @@ const double _actionGap = 8;
 const double _actionInset = 16;
 const double _actionHeight = 48;
 const double _textInset = 30;
+// A form's own insets: iOS alerts are sized for a question and a pair of
+// buttons, a settings form is sized for rows.
+const double _formInset = 24;
+const EdgeInsets _formFrameInset = EdgeInsets.symmetric(
+  horizontal: 20,
+  vertical: 24,
+);
 const double _alertWidth = 348;
 const double _contentMaxWidth = 300;
 // Material 3 sets a filled field's text 4 in past its content padding.
@@ -321,10 +328,17 @@ class _RenderAlertGlass extends RenderProxyBox {
 
 /// Keeps an alert clear of the keyboard and the window's edge, centered.
 class _AlertFrame extends StatelessWidget {
-  const _AlertFrame({required this.color, required this.child});
+  const _AlertFrame({
+    required this.color,
+    required this.child,
+    this.inset = _inset,
+  });
 
   final Color color;
   final Widget child;
+
+  /// The room kept clear around the alert, in place of an alert's own.
+  final EdgeInsets inset;
 
   static const _inset = EdgeInsets.symmetric(horizontal: 40, vertical: 24);
   static const _minWidth = 280.0;
@@ -332,7 +346,7 @@ class _AlertFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedPadding(
-      padding: MediaQuery.viewInsetsOf(context) + _inset,
+      padding: MediaQuery.viewInsetsOf(context) + inset,
       duration: Duration.zero,
       child: MediaQuery.removeViewInsets(
         removeLeft: true,
@@ -372,6 +386,10 @@ class AlertDialog extends StatelessWidget {
   /// The last action destroys data: red on the plain fill, as in UIKit.
   final bool destructive;
 
+  /// The body's own width, in place of the iOS alert's 288-point one. For a
+  /// settings form whose rows need more room than a question does.
+  final double? contentWidth;
+
   const AlertDialog({
     super.key,
     required this.title,
@@ -381,12 +399,17 @@ class AlertDialog extends StatelessWidget {
     this.padding,
     this.hasFields = false,
     this.destructive = false,
+    this.contentWidth,
   });
 
   @override
   Widget build(BuildContext context) {
     final actions = this.actions ?? const <Widget>[];
-    final contentInset = hasFields ? _actionInset : _textInset;
+    // A form owns its own width, so it also owns the insets around it.
+    final width = contentWidth;
+    final form = width != null;
+    final textInset = form ? _formInset : _textInset;
+    final contentInset = hasFields ? _actionInset : textInset;
     final glass = LiquidGlassScope.of(context);
     final colorScheme = context.colorScheme;
     final fill = glass ? glassFillOf(colorScheme) : null;
@@ -394,13 +417,14 @@ class AlertDialog extends StatelessWidget {
       color: glass
           ? Colors.transparent
           : SurfaceLevel.floatingOf(colorScheme).colorOf(colorScheme),
+      inset: form ? _formFrameInset : _AlertFrame._inset,
       child: IntrinsicWidth(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(_textInset, 21, _textInset, 0),
+              padding: EdgeInsets.fromLTRB(textInset, 21, textInset, 0),
               child: DefaultTextStyle(
                 style: hasFields
                     ? AppTextStyle.body.of(context)
@@ -432,9 +456,9 @@ class AlertDialog extends StatelessWidget {
                     container: true,
                     child: Container(
                       constraints: BoxConstraints(
-                        maxWidth: padding == null
-                            ? _alertWidth - contentInset * 2
-                            : _contentMaxWidth,
+                        maxWidth: padding != null
+                            ? _contentMaxWidth
+                            : width ?? _alertWidth - contentInset * 2,
                       ),
                       width: double.infinity,
                       child: SingleChildScrollView(

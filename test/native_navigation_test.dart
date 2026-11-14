@@ -21,8 +21,6 @@ import 'package:cy_shine_music/features/shell/widgets/mini_player_bar.dart';
 import 'package:cy_shine_music/features/songs/songs_toolbar_state.dart';
 import 'package:cy_shine_music/router.dart';
 import 'package:cy_shine_music/theme/app_theme.dart';
-import 'package:prism_ui/prism_ui.dart' as prism;
-import 'package:cy_shine_music/features/shell/shell_navigation.dart';
 
 import 'helpers/prism_test_environment.dart';
 
@@ -32,40 +30,25 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'floating capsule is the default and navigation settings switch live',
+    'floating capsule is the only navigation and settings drop the mode card',
     (tester) async {
       final harness = await _pumpApp(
         tester,
-        native: false,
         initialLocation: '/settings/appearance',
       );
-      expect(find.byType(NavigationBar), findsNothing);
       expect(find.byType(FloatingCapsuleBottomNavigation), findsOneWidget);
       expect(_miniPlayer.hitTestable(), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('navigation-mode-menu-anchor')),
+        findsNothing,
+      );
+      expect(find.text('导航模式'), findsNothing);
 
-      final setting = find.byKey(const ValueKey('navigation-mode-menu-anchor'));
-      await tester.ensureVisible(setting);
-      await _pumpUi(tester);
-      await tester.tap(setting);
-      await _pumpUi(tester);
-      await tester.tap(find.text('原生底栏').last);
-      await _pumpUi(tester);
-      expect(harness.location, '/settings/appearance');
-      expect(find.byType(FloatingCapsuleBottomNavigation), findsNothing);
-      expect(find.byType(NavigationBar).hitTestable(), findsOneWidget);
+      await _tapTab(tester, '发现');
+      expect(harness.location, '/');
+      expect(find.byType(FloatingCapsuleBottomNavigation), findsOneWidget);
       expect(_miniPlayer.hitTestable(), findsOneWidget);
       expect(harness.controller.snapshot.track?.id, _track.id);
-      expect(harness.controller.snapshot.playing, isTrue);
-
-      await tester.ensureVisible(setting);
-      await _pumpUi(tester);
-      await tester.tap(setting);
-      await _pumpUi(tester);
-      await tester.tap(find.text('悬浮胶囊').last);
-      await _pumpUi(tester);
-      expect(find.byType(NavigationBar), findsNothing);
-      expect(find.byType(FloatingCapsuleBottomNavigation), findsOneWidget);
-      expect(harness.location, '/settings/appearance');
       expect(harness.controller.snapshot.playing, isTrue);
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(seconds: 4));
@@ -77,7 +60,6 @@ void main() {
   ) async {
     final harness = await _pumpApp(
       tester,
-      native: false,
       initialLocation: '/settings/appearance',
     );
     expect(find.byType(FloatingCapsuleBottomNavigation), findsOneWidget);
@@ -125,168 +107,10 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
-  testWidgets(
-    'native player is visible for tracks and loading, including pause',
-    (tester) async {
-      final harness = await _pumpApp(tester, initialState: const PlayerState());
-      expect(find.byType(NavigationDestination), findsNWidgets(3));
-      expect(find.byTooltip('播放页'), findsNothing);
-      expect(_miniPlayer, findsNothing);
 
-      harness.controller.seed(const PlayerState(loading: true));
-      await _pumpUi(tester);
-      expect(_miniPlayer.hitTestable(), findsOneWidget);
-      harness.controller.seed(_playing.copyWith(playing: false));
-      await _pumpUi(tester);
-      expect(_miniPlayer.hitTestable(), findsOneWidget);
 
-      harness.controller.seed(const PlayerState());
-      await _pumpUi(tester);
-      expect(_miniPlayer, findsNothing);
-      expect(find.byType(NavigationBar).hitTestable(), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
 
-  testWidgets(
-    'native controls stay fixed while scrolling and reserve content space',
-    (tester) async {
-      await _pumpApp(tester);
-      final playerRect = tester.getRect(_miniPlayer);
-      final navigationRect = tester.getRect(find.byType(NavigationBar));
-      expect(
-        tester.getCenter(find.byType(MiniPlayerBar)).dy,
-        closeTo(playerRect.center.dy, 0.01),
-      );
-      expect(playerRect.bottom, lessThan(navigationRect.top));
-      expect(
-        tester.getBottomLeft(find.byType(SettingsPage)).dy,
-        lessThanOrEqualTo(navigationRect.top),
-      );
-      expect(
-        tester.getBottomLeft(find.byType(SettingsPage)).dy,
-        greaterThan(playerRect.top),
-      );
 
-      await tester.drag(
-        find.descendant(
-          of: find.byType(SettingsPage),
-          matching: find.byType(CustomScrollView),
-        ),
-        const Offset(0, -450),
-      );
-      await _pumpUi(tester);
-      expect(tester.getRect(_miniPlayer), playerRect);
-      expect(tester.getRect(find.byType(NavigationBar)), navigationRect);
-      expect(_miniPlayer.hitTestable(), findsOneWidget);
-      await _tapTab(tester, '发现');
-      final categoryFab = find.byKey(const ValueKey('discovery-category-fab'));
-      expect(categoryFab.hitTestable(), findsOneWidget);
-      expect(
-        tester.getBottomLeft(categoryFab).dy,
-        lessThan(tester.getTopLeft(_miniPlayer).dy),
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'native swipes change tracks once without navigating or opening player',
-    (tester) async {
-      final harness = await _pumpApp(tester);
-      await tester.drag(_miniPlayer, const Offset(-130, 0));
-      await _pumpUi(tester);
-      expect(harness.controller.nextCalls, 1);
-      expect(harness.controller.previousCalls, 0);
-      expect(harness.location, '/settings');
-
-      await tester.drag(_miniPlayer, const Offset(130, 0));
-      await _pumpUi(tester);
-      expect(harness.controller.previousCalls, 1);
-      expect(harness.location, '/settings');
-
-      await tester.drag(_miniPlayer, const Offset(-25, 0));
-      final gesture = await tester.startGesture(tester.getCenter(_miniPlayer));
-      await gesture.moveBy(const Offset(-130, 0));
-      await gesture.cancel();
-      await _pumpUi(tester);
-      expect(harness.controller.nextCalls, 1);
-
-      harness.controller.seed(_playing.copyWith(loading: true));
-      await _pumpUi(tester);
-      await tester.drag(_miniPlayer, const Offset(-130, 0));
-      await _pumpUi(tester);
-      expect(harness.controller.nextCalls, 1);
-      expect(harness.location, '/settings');
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'native tabs restore child routes and active taps return to the root',
-    (tester) async {
-      final harness = await _pumpApp(
-        tester,
-        initialLocation: '/settings/webdav',
-      );
-      expect(
-        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        2,
-      );
-      await _tapTab(tester, '歌曲');
-      expect(harness.location, '/songs');
-      expect(
-        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
-      );
-      await _tapTab(tester, '设置');
-      expect(harness.location, '/settings/webdav');
-      await _tapTab(tester, '设置');
-      expect(harness.location, '/settings');
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('native player tap and pulls preserve the full return URI', (
-    tester,
-  ) async {
-    const origin = '/settings/webdav?section=sync';
-    final harness = await _pumpApp(tester, initialLocation: origin);
-    await tester.tap(find.byTooltip('打开播放页'));
-    await _pumpUi(tester);
-    expect(harness.location, '/player');
-    expect(
-      tester.widget<PlayerPage>(find.byType(PlayerPage)).returnLocation,
-      origin,
-    );
-    expect(find.byType(NavigationBar).hitTestable(), findsNothing);
-    await tester.binding.handlePopRoute();
-    await _pumpUi(tester);
-    expect(harness.location, origin);
-
-    final playerElement = tester.element(find.byType(PlayerPage));
-    final shortPull = await tester.startGesture(tester.getCenter(_miniPlayer));
-    await shortPull.moveBy(const Offset(0, -20));
-    await shortPull.moveBy(const Offset(0, -30));
-    await shortPull.up();
-    await _pumpUi(tester);
-    expect(harness.location, origin);
-    expect(_miniPlayer.hitTestable(), findsOneWidget);
-
-    final longPull = await tester.startGesture(tester.getCenter(_miniPlayer));
-    await longPull.moveBy(const Offset(0, -20));
-    await longPull.moveBy(const Offset(0, -500));
-    await longPull.up();
-    await _pumpUi(tester);
-    expect(harness.location, '/player');
-    expect(tester.element(find.byType(PlayerPage)), same(playerElement));
-    await tester.binding.handlePopRoute();
-    await _pumpUi(tester);
-    expect(harness.location, origin);
-    expect(harness.controller.nextCalls, 0);
-    expect(harness.controller.previousCalls, 0);
-    expect(tester.takeException(), isNull);
-  });
 
   testWidgets('capsule morph keeps one cover and the originating page alive', (
     tester,
@@ -394,7 +218,7 @@ void main() {
       expect(player.progress.value, inExclusiveRange(0, .2));
       await tester.tap(
         find.descendant(
-          of: find.byType(NavigationBar),
+          of: find.byType(FloatingCapsuleBottomNavigation),
           matching: find.text('歌曲'),
         ),
       );
@@ -407,17 +231,19 @@ void main() {
     },
   );
 
-  for (final native in [false, true]) {
+  {
     testWidgets(
-      'a released player drag lets the list scroll through its remaining surface (native=$native)',
+      'a released player drag lets the list scroll through its remaining surface',
       (tester) async {
-        final harness = await _pumpApp(tester, native: native);
+        final harness = await _pumpApp(tester);
         await tester.tap(find.byTooltip('打开播放页'));
         await _pumpUi(tester);
         final player = tester.widget<PlayerPage>(find.byType(PlayerPage));
+        // The cover is the only surface wired to the pull-down handle; its tap
+        // gesture loses the arena once the drag clears the touch slop.
         final closing = await tester.startGesture(
           tester.getCenter(
-            find.byKey(const ValueKey('player-cover-menu-button')),
+            find.byKey(const ValueKey('player-cover-toggle-button')),
           ),
         );
         await closing.moveBy(const Offset(0, 20));
@@ -458,7 +284,7 @@ void main() {
     );
 
     testWidgets(
-      'closing cover stays opaque above capsule chrome (native=$native)',
+      'closing cover stays opaque above capsule chrome',
       (tester) async {
         final captureKey = GlobalKey();
         final bytes = base64Decode(
@@ -479,7 +305,6 @@ void main() {
         );
         await _pumpApp(
           tester,
-          native: native,
           initialState: state,
           captureKey: captureKey,
         );
@@ -545,67 +370,7 @@ void main() {
     },
   );
 
-  testWidgets(
-    'native controls recover after keyboard and search-player return',
-    (tester) async {
-      final harness = await _pumpApp(tester, initialLocation: '/songs/search');
-      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
-      await _pumpUi(tester);
-      expect(_miniPlayer.hitTestable(), findsNothing);
-      expect(find.byType(NavigationBar).hitTestable(), findsNothing);
-      tester.view.resetViewInsets();
-      await _pumpUi(tester);
-      expect(_miniPlayer.hitTestable(), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('header-search-field')));
-      await _pumpUi(tester);
-      expect(_miniPlayer.hitTestable(), findsNothing);
-      openPlayer(
-        tester.element(find.byKey(const ValueKey('header-search-field'))),
-        returnLocation: '/songs/search',
-      );
-      await _pumpUi(tester);
-      await tester.binding.handlePopRoute();
-      await _pumpUi(tester);
-      expect(harness.location, '/songs/search');
-      expect(
-        tester
-            .widget<prism.SearchField>(
-              find.byKey(const ValueKey('header-search-field')),
-            )
-            .focusNode
-            ?.hasFocus,
-        isFalse,
-      );
-      expect(_miniPlayer.hitTestable(), findsOneWidget);
-      expect(find.byType(NavigationBar).hitTestable(), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  for (final size in [const Size(320, 640), const Size(900, 500)]) {
-    testWidgets('native controls fit $size with safe area and large text', (
-      tester,
-    ) async {
-      await _pumpApp(
-        tester,
-        size: size,
-        textScale: 2,
-        initialLocation: '/downloads',
-      );
-      final playerRect = tester.getRect(_miniPlayer);
-      final navigationRect = tester.getRect(find.byType(NavigationBar));
-      expect(playerRect.left, greaterThanOrEqualTo(14));
-      expect(
-        tester.getCenter(find.byType(MiniPlayerBar)).dy,
-        closeTo(playerRect.center.dy, 0.01),
-      );
-      expect(playerRect.right, lessThanOrEqualTo(size.width - 14));
-      expect(playerRect.bottom, lessThan(navigationRect.top));
-      expect(navigationRect.bottom, size.height);
-      expect(tester.takeException(), isNull);
-    });
-  }
 }
 
 const _track = PlayerTrack(
@@ -655,7 +420,6 @@ class _Harness {
 
 Future<_Harness> _pumpApp(
   WidgetTester tester, {
-  bool native = true,
   String initialLocation = '/settings',
   PlayerState initialState = _playing,
   Size size = const Size(390, 844),
@@ -674,7 +438,6 @@ Future<_Harness> _pumpApp(
     tester.view.resetViewInsets();
   });
   SharedPreferences.setMockInitialValues({
-    if (native) 'use_native_navigation': true,
     'discovery_source_order': ['kw', 'kg', 'tx', 'wy', 'mg'],
   });
   final prefs = await SharedPreferences.getInstance();
@@ -724,7 +487,10 @@ Future<_Harness> _pumpApp(
 
 Future<void> _tapTab(WidgetTester tester, String label) async {
   await tester.tap(
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label)),
+    find.descendant(
+      of: find.byType(FloatingCapsuleBottomNavigation),
+      matching: find.text(label),
+    ),
   );
   await _pumpUi(tester);
 }

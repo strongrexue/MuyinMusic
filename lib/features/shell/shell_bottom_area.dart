@@ -1,20 +1,14 @@
 import 'package:flutter/widgets.dart';
 
-import '../../core/storage/settings_store.dart';
-
-/// Navigation controls reserve space or hover over content depending on [navigationMode].
-/// Pages pad their scrollables so the last item can still scroll clear of the controls.
+/// Navigation controls hover over content as a floating capsule dock.
+/// Pages pad their scrollables so the last item can still scroll clear of it.
 class ShellBottomArea extends InheritedWidget {
   const ShellBottomArea({
     super.key,
-    required this.navigationMode,
     required this.extent,
     required this.floatingExtent,
     required super.child,
   });
-
-  final AppNavigationMode navigationMode;
-  bool get nativeNavigation => navigationMode == AppNavigationMode.native;
 
   /// Full height of the bottom controls (navigation bar plus player strip).
   /// Overlays such as FABs stack above this.
@@ -29,11 +23,7 @@ class ShellBottomArea extends InheritedWidget {
   static double contentPadding(BuildContext context, double legacyPadding) {
     final area = maybeOf(context);
     if (area == null) return legacyPadding;
-    return switch (area.navigationMode) {
-      AppNavigationMode.native => 16 + area.floatingExtent,
-      AppNavigationMode.floatingCapsule =>
-        area.extent > 0 ? area.extent + 16 : legacyPadding,
-    };
+    return area.extent > 0 ? area.extent + 16 : legacyPadding;
   }
 
   /// Margins a scrollable keeps clear when it brings an item fully into view
@@ -46,7 +36,6 @@ class ShellBottomArea extends InheritedWidget {
 
   @override
   bool updateShouldNotify(ShellBottomArea oldWidget) =>
-      navigationMode != oldWidget.navigationMode ||
       extent != oldWidget.extent ||
       floatingExtent != oldWidget.floatingExtent;
 }

@@ -1041,6 +1041,31 @@ abstract final class AppGlyphs {
     ], closed: true),
   ]);
 
+  /// A filled, rounded house — the "home" in a solid form, matching Fat Tiger's
+  /// Material home_rounded. The door is a detail that clears a hole when filled.
+  static const homeFilled = Glyph([
+    GlyphPath(
+      'M12 2.4 2.8 11H5.3v8.2c0 .9.7 1.6 1.6 1.6h10.2c.9 0 1.6-.7'
+      ' 1.6-1.6V11h2.5L12 2.4Z',
+      role: GlyphRole.body,
+      solid: true,
+    ),
+    GlyphPath(
+      'M10.4 13.4v5.4h3.2v-5.4h-3.2Z',
+      role: GlyphRole.detail,
+      solid: true,
+    ),
+  ]);
+
+  static const home = Glyph([
+    GlyphPath('M3.4 10.4 12 3.4l8.6 7', role: GlyphRole.line),
+    GlyphPath(
+      'M5.7 9.1V18.9A1.9 1.9 0 0 0 7.6 20.8H16.4A1.9 1.9 0 0 0 18.3 18.9V9.1',
+      role: GlyphRole.line,
+    ),
+    GlyphPath('M9.9 20.8V14.9H14.1V20.8', role: GlyphRole.line),
+  ]);
+
   static const puzzle = Glyph([
     GlyphPath(
       'M3 10A2.2 2.2 0 0 1 5.2 7.8H7.94A2.6 2.6 0 1 1 11.26 7.8H14'

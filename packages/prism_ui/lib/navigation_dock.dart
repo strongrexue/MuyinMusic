@@ -6,7 +6,6 @@ import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:prism_ui/hct/hct.dart';
 import 'package:prism_ui/bar_item_presence.dart';
 import 'package:prism_ui/card_surface.dart';
 import 'package:prism_ui/common_button.dart';
@@ -21,7 +20,7 @@ import 'package:flutter/widgets.dart';
 
 import 'liquid_glass.dart';
 
-const double _barHeight = 62;
+const double _barHeight = 56;
 const double _barPadding = 4;
 const double _edgeMargin = 21;
 const double _shadowRoom = 8;
@@ -77,8 +76,8 @@ final _liftSpring = SpringDescription.withDurationAndBounce(
   duration: const Duration(milliseconds: 250),
 );
 final _travelSpring = SpringDescription.withDurationAndBounce(
-  duration: const Duration(milliseconds: 400),
-  bounce: 0.15,
+  duration: const Duration(milliseconds: 260),
+  bounce: 0.12,
 );
 final _jellySpring = SpringDescription.withDampingRatio(
   mass: 1,
@@ -1274,8 +1273,6 @@ class _FloatingNavigationBarState extends State<FloatingNavigationBar>
       (height, label) => math.max(height, label.height),
     );
     final glass = LiquidGlassScope.of(context);
-    final ultra =
-        LiquidGlassScope.qualityOf(context) == LiquidGlassQuality.ultra;
     final bar = _DockSurface(
       glass: glass,
       style: LiquidGlassStyle.pill(colorScheme),
@@ -1384,12 +1381,8 @@ class _FloatingNavigationBarState extends State<FloatingNavigationBar>
                         if (lensed)
                           AnimatedBuilder(
                             animation: _motion,
-                            builder: (_, child) => _LensContent(
-                              rect: lensRect(),
-                              lift: _lift.value,
-                              warp: ultra,
-                              child: child!,
-                            ),
+                            builder: (_, child) =>
+                                _LensContent(rect: lensRect(), child: child!),
                             child: items(_LensPart.inside),
                           ),
                       ],
@@ -1465,10 +1458,10 @@ class _Lens extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = context.colorScheme;
     final lifted = lift.clamp(0.0, 1.0);
-    final tone = colorScheme.brightness == Brightness.dark ? 4.0 : 90.0;
-    final secondary = Hct.fromInt(colorScheme.secondary.toARGB32());
-    final hct = Hct.from(secondary.hue, secondary.chroma, tone);
-    final platter = Color(hct.toInt()).withValues(alpha: 0.85);
+    // The selected glyph and label already paint in the accent hue; the capsule
+    // keeps only a neutral translucent wash so it never competes with them.
+    final dark = colorScheme.brightness == Brightness.dark;
+    final platter = colorScheme.onSurface.withValues(alpha: dark ? 0.14 : 0.06);
     return PositionedDirectional(
       start: rect.left,
       top: rect.top,
@@ -1505,16 +1498,35 @@ class _GlassLens extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final colorScheme = context.colorScheme;
+    final dark = colorScheme.brightness == Brightness.dark;
+    final amount = lift.clamp(0.0, 1.0);
+    // Painted rather than a LiquidGlass pane: the lens is rebuilt on every
+    // frame of a travel, and a shader capture per frame both stutters the bar
+    // and, on some renderers, comes back as a black rectangle. A translucent
+    // lift with the style's own rim reads the same and costs one paint.
+    final lifted = rect;
     return Positioned.directional(
       textDirection: Directionality.of(context),
-      start: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
+      start: lifted.left,
+      top: lifted.top,
+      width: lifted.width,
+      height: lifted.height,
       child: IgnorePointer(
-        child: LiquidGlass(
-          style: LiquidGlassStyle.lens(colorScheme).scale(lift),
-          shadows: _lensShadows(colorScheme, lift),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: Colors.white.withValues(
+              alpha: (dark ? 0.07 : 0.16) * amount,
+            ),
+            shape: AppShape.full.copyWith(
+              side: BorderSide(
+                color: Colors.white.withValues(
+                  alpha: (dark ? 0.3 : 0.6) * amount,
+                ),
+                width: 1.1,
+              ),
+            ),
+            shadows: _lensShadows(colorScheme, lift),
+          ),
         ),
       ),
     );
@@ -1538,55 +1550,22 @@ List<BoxShadow> _lensShadows(ColorScheme colorScheme, double lift) {
 /// [_GlassLens], with a pane of its own that warps only them: they are drawn
 /// offscreen, so that pane reads them and not the bar.
 class _LensContent extends StatelessWidget {
-  const _LensContent({
-    required this.rect,
-    required this.lift,
-    required this.warp,
-    required this.child,
-  });
+  const _LensContent({required this.rect, required this.child});
 
   final Rect rect;
-  final double lift;
-  final bool warp;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final textDirection = Directionality.of(context);
     final clipper = _LensClip(rect, textDirection);
-    if (!warp) {
-      return Positioned.fill(
-        child: IgnorePointer(
-          child: ExcludeSemantics(
-            child: ClipPath(clipper: clipper, child: child),
-          ),
-        ),
-      );
-    }
     return Positioned.fill(
       child: IgnorePointer(
         child: ExcludeSemantics(
           child: ClipPath(
             clipper: clipper,
-            clipBehavior: Clip.antiAliasWithSaveLayer,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned.fill(child: child),
-                Positioned.directional(
-                  textDirection: textDirection,
-                  start: rect.left,
-                  top: rect.top,
-                  width: rect.width,
-                  height: rect.height,
-                  child: LiquidGlass(
-                    style: LiquidGlassStyle.lensContent(
-                      context.colorScheme,
-                    ).scale(lift),
-                  ),
-                ),
-              ],
-            ),
+            clipBehavior: Clip.antiAlias,
+            child: child,
           ),
         ),
       ),

@@ -32,6 +32,14 @@ bool isImmersivePlaylistDetailLocation(String location) {
 bool isDiscoveryLocation(String location) =>
     location == '/' || location.startsWith('/discover/');
 
+bool isHomeLocation(String location) => location == '/home';
+
+/// 首页的搜索页自绘标题（与发现区同一套做法）。
+bool isHomeSearchLocation(String location) => location == '/home/search';
+
+/// 首页自己的下载页：返回键回到首页而不是歌曲 tab。
+bool isHomeDownloadsLocation(String location) => location == '/home/downloads';
+
 bool isSongsLibraryLocation(String location) {
   return location == '/songs' || location == '/songs/search';
 }
@@ -58,6 +66,7 @@ bool isPlayerReturnLocation(String location) {
   if (SettingsSection.fromLocation(path) != null) return true;
   return switch (path) {
     '/' ||
+    '/home' ||
     '/downloads' ||
     '/songs' ||
     '/songs/search' ||

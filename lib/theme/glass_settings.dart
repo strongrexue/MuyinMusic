@@ -3,11 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
-/// 玻璃外观三档（对齐大白话定稿：磨砂 / 透明 / 色调）。
+/// 玻璃外观两档（磨砂 / 透明）。
 enum GlassAppearance {
   frosted('frosted', '磨砂'),
-  clear('clear', '透明'),
-  tinted('tinted', '色调');
+  clear('clear', '透明');
 
   const GlassAppearance(this.code, this.label);
 
@@ -15,20 +14,27 @@ enum GlassAppearance {
   final String label;
 
   static GlassAppearance fromCode(String? code) => values.firstWhere(
-        (value) => value.code == code,
-        orElse: () => GlassAppearance.frosted,
-      );
+    (value) => value.code == code,
+    orElse: () => GlassAppearance.frosted,
+  );
 }
 
 double _clamp(double value) => value.clamp(0.0, 100.0);
 
-/// 一个 tab 的 3 个静态滑杆（0..100，默认 50）。
+/// The placeholder values older builds wrote for both presets.
+const GlassSettings _legacyDefault50 = GlassSettings(
+  clarity: 50,
+  transmission: 50,
+  reflection: 50,
+);
+
+/// 一个 tab 的 3 个静态滑杆（0..100）。
 @immutable
 class GlassSettings {
   const GlassSettings({
-    this.clarity = 50,
-    this.transmission = 50,
-    this.reflection = 50,
+    this.clarity = 47,
+    this.transmission = 59,
+    this.reflection = 38,
   });
 
   /// 通透度：越高玻璃越清、底色越透。
@@ -40,7 +46,27 @@ class GlassSettings {
   /// 反射亮度：边缘高光 / rim 亮度。
   final double reflection;
 
-  static const defaults = GlassSettings();
+  /// 磨砂预设：通透度 47% / 透射亮度 59% / 反射亮度 38%。
+  static const frosted = GlassSettings(
+    clarity: 47,
+    transmission: 59,
+    reflection: 38,
+  );
+
+  /// 透明预设：通透度 55% / 透射亮度 61% / 反射亮度 43%。
+  static const clear = GlassSettings(
+    clarity: 55,
+    transmission: 61,
+    reflection: 43,
+  );
+
+  static const defaults = frosted;
+
+  static GlassSettings presetFor(GlassAppearance appearance) =>
+      switch (appearance) {
+        GlassAppearance.frosted => frosted,
+        GlassAppearance.clear => clear,
+      };
 
   GlassSettings copyWith({
     double? clarity,
@@ -58,18 +84,23 @@ class GlassSettings {
     'reflection': reflection,
   };
 
-  static GlassSettings fromJson(Object? json) {
+  static GlassSettings fromJson(Object? json, [GlassSettings? fallback]) {
+    final defaults = fallback ?? GlassSettings.frosted;
     if (json is! Map) return defaults;
     double read(String key) {
       final value = json[key];
-      return value is num ? _clamp(value.toDouble()) : 50;
+      return value is num ? _clamp(value.toDouble()) : defaults.clarity;
     }
 
-    return GlassSettings(
+    final decoded = GlassSettings(
       clarity: read('clarity'),
       transmission: read('transmission'),
       reflection: read('reflection'),
     );
+    // Builds before the presets shipped defaulted every slider to 50%; those
+    // are indistinguishable from "never touched", so they follow the preset.
+    if (decoded == _legacyDefault50) return defaults;
+    return decoded;
   }
 
   /// 把当前滑杆 + 外观档映射成 prism 的 19 字段 style 变换。
@@ -77,19 +108,16 @@ class GlassSettings {
   prism.LiquidGlassStyle applyTo(
     prism.LiquidGlassStyle base,
     GlassAppearance appearance,
-    Color accent,
   ) {
     final clarity = _clamp(this.clarity) / 100;
     final transmission = _clamp(this.transmission) / 100;
     final reflection = _clamp(this.reflection) / 100;
 
-    // 三档外观预设。用 switch 表达式返回 record，避免任何控制流歧义。
-    final (tintAlpha, blurScale, haze, brightnessBias, tint) =
+    // 两档外观预设。用 switch 表达式返回 record，避免任何控制流歧义。
+    final (tintAlpha, blurScale, haze, brightnessBias) =
         switch (appearance) {
-      GlassAppearance.frosted => (0.62, 1.4, 0.35, -0.1, base.tint),
-      GlassAppearance.clear => (0.28, 0.7, 0.0, 0.15, base.tint),
-      // 色调档是唯一吃主题色的档；亮色玻璃 tint 原本是硬编码常量。
-      GlassAppearance.tinted => (0.82, 1.0, 0.0, 0.0, accent),
+      GlassAppearance.frosted => (0.62, 1.4, 0.35, -0.1),
+      GlassAppearance.clear => (0.28, 0.7, 0.0, 0.15),
     };
 
     // 通透度越高，底色越淡、模糊越小。
@@ -97,7 +125,7 @@ class GlassSettings {
     final blur = base.blur * blurScale * (1.4 - 0.8 * clarity);
 
     return prism.LiquidGlassStyle(
-      tint: tint.withValues(alpha: alpha),
+      tint: base.tint.withValues(alpha: alpha),
       contrast: base.contrast,
       blur: blur,
       haze: haze,
@@ -131,24 +159,21 @@ class GlassSettings {
   int get hashCode => Object.hash(clarity, transmission, reflection);
 }
 
-/// 三个 tab 各存各的一份设置。
+/// 两个 tab 各存各的一份设置。
 @immutable
 class GlassSettingsByTab {
   const GlassSettingsByTab({
-    this.frosted = GlassSettings.defaults,
-    this.clear = GlassSettings.defaults,
-    this.tinted = GlassSettings.defaults,
+    this.frosted = GlassSettings.frosted,
+    this.clear = GlassSettings.clear,
   });
 
   final GlassSettings frosted;
   final GlassSettings clear;
-  final GlassSettings tinted;
 
   GlassSettings forAppearance(GlassAppearance appearance) =>
       switch (appearance) {
         GlassAppearance.frosted => frosted,
         GlassAppearance.clear => clear,
-        GlassAppearance.tinted => tinted,
       };
 
   GlassSettingsByTab withAppearance(
@@ -157,31 +182,26 @@ class GlassSettingsByTab {
   ) => switch (appearance) {
     GlassAppearance.frosted => copyWith(frosted: settings),
     GlassAppearance.clear => copyWith(clear: settings),
-    GlassAppearance.tinted => copyWith(tinted: settings),
   };
 
   GlassSettingsByTab copyWith({
     GlassSettings? frosted,
     GlassSettings? clear,
-    GlassSettings? tinted,
   }) => GlassSettingsByTab(
     frosted: frosted ?? this.frosted,
     clear: clear ?? this.clear,
-    tinted: tinted ?? this.tinted,
   );
 
   Map<String, dynamic> toJson() => {
     'frosted': frosted.toJson(),
     'clear': clear.toJson(),
-    'tinted': tinted.toJson(),
   };
 
   static GlassSettingsByTab fromJson(Object? json) {
     if (json is! Map) return const GlassSettingsByTab();
     return GlassSettingsByTab(
-      frosted: GlassSettings.fromJson(json['frosted']),
-      clear: GlassSettings.fromJson(json['clear']),
-      tinted: GlassSettings.fromJson(json['tinted']),
+      frosted: GlassSettings.fromJson(json['frosted'], GlassSettings.frosted),
+      clear: GlassSettings.fromJson(json['clear'], GlassSettings.clear),
     );
   }
 
@@ -189,11 +209,10 @@ class GlassSettingsByTab {
   bool operator ==(Object other) =>
       other is GlassSettingsByTab &&
       other.frosted == frosted &&
-      other.clear == clear &&
-      other.tinted == tinted;
+      other.clear == clear;
 
   @override
-  int get hashCode => Object.hash(frosted, clear, tinted);
+  int get hashCode => Object.hash(frosted, clear);
 }
 
 /// 全部玻璃配置：当前 tab + 三 tab 设置，单 blob 持久化 / 同步。
@@ -217,13 +236,11 @@ class GlassConfig {
     tabs: tabs ?? this.tabs,
   );
 
-  /// 生成供 prism_ui 注入的 style 变换（捕获外观档 + 主题色）。
-  prism.LiquidGlassStyle Function(prism.LiquidGlassStyle) toStyleTransform(
-    Color accent,
-  ) {
+  /// 生成供 prism_ui 注入的 style 变换（捕获外观档）。
+  prism.LiquidGlassStyle Function(prism.LiquidGlassStyle) toStyleTransform() {
     final appearance = this.appearance;
     final settings = tabs.forAppearance(appearance);
-    return (base) => settings.applyTo(base, appearance, accent);
+    return (base) => settings.applyTo(base, appearance);
   }
 
   String encode() => jsonEncode({

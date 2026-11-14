@@ -3,8 +3,6 @@ import '../../theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/storage/settings_store.dart';
-import 'shell_bottom_area.dart';
 import 'shell_route_utils.dart';
 import 'widgets/shell_header.dart';
 import 'widgets/scrolling_page_header.dart';
@@ -25,16 +23,12 @@ class ShellPageFrame extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final area = ShellBottomArea.maybeOf(context);
-    // Floating controls own their system inset. The page can draw to the
-    // screen edge; ShellBottomArea pads scrollables to clear those controls.
-    final bottomPadding = area?.navigationMode == AppNavigationMode.native
-        ? area!.extent > 0
-              ? area.extent - area.floatingExtent
-              : MediaQuery.paddingOf(context).bottom
-        : 0.0;
+    // Floating controls own their system inset; pages draw to the screen edge
+    // and ShellBottomArea pads scrollables to clear those controls.
+    const bottomPadding = 0.0;
     final hidesHeader =
         isDiscoveryLocation(location) ||
+        isHomeSearchLocation(location) ||
         isImmersivePlaylistDetailLocation(location);
     return ColoredBox(
       color: location.startsWith('/settings')

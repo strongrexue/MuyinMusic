@@ -59,7 +59,7 @@ void openPlayer(BuildContext context, {required String returnLocation}) {
   }
 }
 
-/// Both navigation styles use the original logical tab indices (0, 1, 3),
+/// Both navigation styles use the original logical tab indices (4, 0, 1, 3),
 /// regardless of where their buttons are displayed.
 void navigateToShellTab(
   BuildContext context,
@@ -73,7 +73,7 @@ void navigateToShellTab(
   final switchesTab = toolbarIndexFor(location) != targetIndex;
   final navigation = ShellTabNavigationScope.maybeOf(context);
   if (switchesTab && navigation != null) {
-    navigation.goBranch(targetIndex == 3 ? 2 : targetIndex);
+    navigation.goBranch(shellBranchIndexFor(targetIndex));
     return;
   }
   final target = switchesTab
@@ -83,6 +83,16 @@ void navigateToShellTab(
     context.go(target, extra: switchesTab ? const ShellTabSwitch() : null);
   }
 }
+
+/// Maps a logical tab index to its branch, in the order the router declares
+/// them: 首页, 发现, 歌曲, 设置.
+int shellBranchIndexFor(int tabIndex) => switch (tabIndex) {
+  4 => 0,
+  0 => 1,
+  1 => 2,
+  3 => 3,
+  _ => 1,
+};
 
 void _dismissTransientRoutes(BuildContext context) {
   FocusManager.instance.primaryFocus?.unfocus();

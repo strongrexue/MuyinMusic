@@ -39,19 +39,19 @@ const String _kCarDisplaySizeKey = 'car_display_size';
 const String _kAutoPlayOnStartupKey = 'auto_play_on_startup';
 const String _kSkipStartupScreenKey = 'skip_startup_screen';
 const String _kCheckForUpdatesOnStartupKey = 'check_for_updates_on_startup';
-const String _kUseNativeNavigationKey = 'use_native_navigation';
-const String _kNavigationModeKey = 'navigation_mode';
 const String _kNetworkAdapterModeKey = 'network_adapter_mode';
 const String _kEnabledSearchSourcesKey = 'enabled_search_source_codes';
 const String _kDefaultSearchSourceKey = 'default_search_source';
 const String _kReplaceQueueOnSearchPlayKey = 'replace_queue_on_search_play';
 const String _kDiscoverySourceOrderKey = 'discovery_source_order';
 const String _kPlatformButtonOnLeftKey = 'platform_button_on_left';
+const String _kBottomBarBehaviorKey = 'bottom_bar_behavior';
 const String _kOnlinePlaybackQualityKey = 'online_playback_quality';
 const String _kBatchDownloadQualityKey = 'batch_download_quality';
 const String _kShowMiniLyricsKey = 'show_mini_lyrics';
 const String _kGrooveShiftEnabledKey = 'groove_shift_enabled';
 const String _kAllowMixWithOthersKey = 'allow_mix_with_others';
+const String _kPlayerVolumeKey = 'player_volume';
 const String _kBluetoothLyricEnabledKey = 'bluetooth_lyric_enabled';
 const String _kBluetoothFullLyricEnabledKey = 'bluetooth_full_lyric_enabled';
 const String _kBluetoothLyricNoticeSeenKey = 'bluetooth_lyric_notice_seen';
@@ -72,35 +72,6 @@ double normalizeLyricFontWeight(double value) =>
 
 double normalizeLyricFontSize(double value) =>
     value.clamp(kLyricFontSizeMin, kLyricFontSizeMax).roundToDouble();
-
-enum AppNavigationMode {
-  native('native', '原生底栏', '系统风格底部导航栏搭配悬浮播放条'),
-  floatingCapsule('floating_capsule', '悬浮胶囊', '液态悬浮底栏，支持拖拽跟随和弹性选中动画');
-
-  const AppNavigationMode(this.code, this.label, this.description);
-
-  final String code;
-  final String label;
-  final String description;
-
-  // Kept as source-compatible aliases for older integrations and persisted
-  // settings. They are intentionally absent from [values], so the settings
-  // UI only exposes the two supported shell layouts.
-  static const AppNavigationMode singleCapsule =
-      AppNavigationMode.floatingCapsule;
-  static const AppNavigationMode dualCapsule =
-      AppNavigationMode.floatingCapsule;
-
-  static AppNavigationMode fromCode(String? code) {
-    if (code == 'single_capsule' || code == 'dual_capsule') {
-      return AppNavigationMode.floatingCapsule;
-    }
-    for (final mode in values) {
-      if (mode.code == code) return mode;
-    }
-    return floatingCapsule;
-  }
-}
 
 @immutable
 class AppSettings {
@@ -126,18 +97,19 @@ class AppSettings {
     this.autoPlayOnStartup = false,
     this.skipStartupScreen = false,
     this.checkForUpdatesOnStartup = true,
-    required this.navigationMode,
     required this.networkAdapterMode,
     required this.enabledSearchSources,
     this.defaultSearchSource = MusicSource.all,
     this.replaceQueueOnSearchPlay = true,
     required this.discoverySourceOrder,
     this.platformButtonOnLeft = false,
+    this.bottomBarBehavior = BottomBarBehavior.always,
     required this.onlinePlaybackQuality,
     required this.batchDownloadQuality,
     required this.showMiniLyrics,
     this.grooveShiftEnabled = false,
     required this.allowMixWithOthers,
+    this.playerVolume = 1.0,
     required this.bluetoothLyricEnabled,
     required this.bluetoothFullLyricEnabled,
     required this.bluetoothLyricNoticeSeen,
@@ -176,8 +148,6 @@ class AppSettings {
   final bool autoPlayOnStartup;
   final bool skipStartupScreen;
   final bool checkForUpdatesOnStartup;
-  final AppNavigationMode navigationMode;
-  bool get useNativeNavigation => navigationMode == AppNavigationMode.native;
   final NetworkAdapterMode networkAdapterMode;
   final Set<MusicSource> enabledSearchSources;
   final MusicSource defaultSearchSource;
@@ -186,6 +156,9 @@ class AppSettings {
   final bool replaceQueueOnSearchPlay;
   final List<MusicSource> discoverySourceOrder;
   final bool platformButtonOnLeft;
+
+  /// What the mini player and the floating dock do while a list scrolls.
+  final BottomBarBehavior bottomBarBehavior;
   final OnlinePlaybackQuality onlinePlaybackQuality;
   final OnlinePlaybackQuality batchDownloadQuality;
   final bool showMiniLyrics;
@@ -194,6 +167,10 @@ class AppSettings {
   /// can continue playing at the same time.
   final bool grooveShiftEnabled;
   final bool allowMixWithOthers;
+
+  /// Playback gain in 0..1, applied to the BASS stream. Remembered so a level
+  /// dialled in for a quiet Bluetooth path survives restarts.
+  final double playerVolume;
   final bool bluetoothLyricEnabled;
   final bool bluetoothFullLyricEnabled;
   final bool bluetoothLyricNoticeSeen;
@@ -222,19 +199,19 @@ class AppSettings {
     bool? autoPlayOnStartup,
     bool? skipStartupScreen,
     bool? checkForUpdatesOnStartup,
-    AppNavigationMode? navigationMode,
-    bool? useNativeNavigation,
     NetworkAdapterMode? networkAdapterMode,
     Set<MusicSource>? enabledSearchSources,
     MusicSource? defaultSearchSource,
     bool? replaceQueueOnSearchPlay,
     List<MusicSource>? discoverySourceOrder,
     bool? platformButtonOnLeft,
+    BottomBarBehavior? bottomBarBehavior,
     OnlinePlaybackQuality? onlinePlaybackQuality,
     OnlinePlaybackQuality? batchDownloadQuality,
     bool? showMiniLyrics,
     bool? grooveShiftEnabled,
     bool? allowMixWithOthers,
+    double? playerVolume,
     bool? bluetoothLyricEnabled,
     bool? bluetoothFullLyricEnabled,
     bool? bluetoothLyricNoticeSeen,
@@ -268,13 +245,6 @@ class AppSettings {
     skipStartupScreen: skipStartupScreen ?? this.skipStartupScreen,
     checkForUpdatesOnStartup:
         checkForUpdatesOnStartup ?? this.checkForUpdatesOnStartup,
-    navigationMode:
-        navigationMode ??
-        (useNativeNavigation != null
-            ? (useNativeNavigation
-                  ? AppNavigationMode.native
-                  : AppNavigationMode.floatingCapsule)
-            : this.navigationMode),
     networkAdapterMode: networkAdapterMode ?? this.networkAdapterMode,
     enabledSearchSources: enabledSearchSources ?? this.enabledSearchSources,
     defaultSearchSource: defaultSearchSource ?? this.defaultSearchSource,
@@ -282,11 +252,13 @@ class AppSettings {
         replaceQueueOnSearchPlay ?? this.replaceQueueOnSearchPlay,
     discoverySourceOrder: discoverySourceOrder ?? this.discoverySourceOrder,
     platformButtonOnLeft: platformButtonOnLeft ?? this.platformButtonOnLeft,
+    bottomBarBehavior: bottomBarBehavior ?? this.bottomBarBehavior,
     onlinePlaybackQuality: onlinePlaybackQuality ?? this.onlinePlaybackQuality,
     batchDownloadQuality: batchDownloadQuality ?? this.batchDownloadQuality,
     showMiniLyrics: showMiniLyrics ?? this.showMiniLyrics,
     grooveShiftEnabled: grooveShiftEnabled ?? this.grooveShiftEnabled,
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
+    playerVolume: playerVolume ?? this.playerVolume,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
     bluetoothFullLyricEnabled:
         bluetoothFullLyricEnabled ?? this.bluetoothFullLyricEnabled,
@@ -304,7 +276,6 @@ class AppSettings {
     carPadModeEnabled: false,
     autoPlayOnStartup: false,
     skipStartupScreen: false,
-    navigationMode: AppNavigationMode.floatingCapsule,
     networkAdapterMode: NetworkAdapterMode.system,
     enabledSearchSources: kDefaultEnabledSearchSources,
     replaceQueueOnSearchPlay: true,
@@ -400,7 +371,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
       skipStartupScreen: _prefs.getBool(_kSkipStartupScreenKey) ?? false,
       checkForUpdatesOnStartup:
           _prefs.getBool(_kCheckForUpdatesOnStartupKey) ?? true,
-      navigationMode: _decodeNavigationMode(_prefs),
       networkAdapterMode: NetworkAdapterPreference.current,
       enabledSearchSources: enabledSearchSources,
       defaultSearchSource: enabledSearchSources.contains(defaultSearchSource)
@@ -412,6 +382,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
         _prefs.getStringList(_kDiscoverySourceOrderKey),
       ),
       platformButtonOnLeft: _prefs.getBool(_kPlatformButtonOnLeftKey) ?? false,
+      bottomBarBehavior: BottomBarBehavior.fromCode(
+        _prefs.getString(_kBottomBarBehaviorKey),
+      ),
       onlinePlaybackQuality: OnlinePlaybackQuality.fromCode(
         _prefs.getString(_kOnlinePlaybackQualityKey),
       ),
@@ -421,6 +394,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
       showMiniLyrics: _prefs.getBool(_kShowMiniLyricsKey) ?? true,
       grooveShiftEnabled: _prefs.getBool(_kGrooveShiftEnabledKey) ?? false,
       allowMixWithOthers: readAllowMixWithOthersPreference(_prefs),
+      playerVolume: (_prefs.getDouble(_kPlayerVolumeKey) ?? 1.0).clamp(
+        0.0,
+        1.0,
+      ),
       bluetoothLyricEnabled:
           _prefs.getBool(_kBluetoothLyricEnabledKey) ?? false,
       bluetoothFullLyricEnabled:
@@ -429,14 +406,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
           _prefs.getBool(_kBluetoothLyricNoticeSeenKey) ?? false,
       debugMode: _prefs.getBool(_kDebugModeKey) ?? false,
     );
-  }
-
-  static AppNavigationMode _decodeNavigationMode(SharedPreferences prefs) {
-    final code = prefs.getString(_kNavigationModeKey);
-    if (code != null) return AppNavigationMode.fromCode(code);
-    return (prefs.getBool(_kUseNativeNavigationKey) ?? false)
-        ? AppNavigationMode.native
-        : AppNavigationMode.floatingCapsule;
   }
 
   Future<void> setDownloadDir(String value) async {
@@ -682,21 +651,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(checkForUpdatesOnStartup: value);
   }
 
-  Future<void> setNavigationMode(AppNavigationMode mode) async {
-    await _prefs.setString(_kNavigationModeKey, mode.code);
-    await _prefs.setBool(
-      _kUseNativeNavigationKey,
-      mode == AppNavigationMode.native,
-    );
-    state = state.copyWith(navigationMode: mode);
-  }
-
-  Future<void> setUseNativeNavigation(bool value) async {
-    await setNavigationMode(
-      value ? AppNavigationMode.native : AppNavigationMode.floatingCapsule,
-    );
-  }
-
   Map<String, dynamic> exportAppearanceForSync() => {
     'themeMode': _encodeThemeMode(state.themeMode),
     'themeSeedArgb': state.themeSeed.toARGB32(),
@@ -912,6 +866,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await _prefs.setBool(_kPlatformButtonOnLeftKey, value);
   }
 
+  Future<void> setBottomBarBehavior(BottomBarBehavior behavior) async {
+    state = state.copyWith(bottomBarBehavior: behavior);
+    await _prefs.setString(_kBottomBarBehaviorKey, behavior.code);
+  }
+
   Future<void> setOnlinePlaybackQuality(OnlinePlaybackQuality quality) async {
     await _prefs.setString(_kOnlinePlaybackQualityKey, quality.code);
     state = state.copyWith(onlinePlaybackQuality: quality);
@@ -935,6 +894,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> setAllowMixWithOthers(bool value) async {
     await _prefs.setBool(_kAllowMixWithOthersKey, value);
     state = state.copyWith(allowMixWithOthers: value);
+  }
+
+  Future<void> setPlayerVolume(double value) async {
+    final volume = value.clamp(0.0, 1.0);
+    await _prefs.setDouble(_kPlayerVolumeKey, volume);
+    state = state.copyWith(playerVolume: volume);
   }
 
   Future<void> setBluetoothLyricEnabled(bool value) async {

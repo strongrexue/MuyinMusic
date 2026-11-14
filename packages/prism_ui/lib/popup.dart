@@ -33,7 +33,14 @@ typedef PopupAnchorResolver = Rect? Function();
 
 typedef PopupOpen = void Function();
 
-enum PopupPlacement { overAnchorEnd, overAnchorStart, belowPoint }
+enum PopupPlacement {
+  overAnchorEnd,
+  overAnchorStart,
+  belowPoint,
+  /// Fill the screen width and occupy the lower two thirds, so the card's top
+  /// edge sits one third of the screen height from the top.
+  screenLowerTwoThirds,
+}
 
 const _screenMargin = 16.0;
 
@@ -1294,6 +1301,12 @@ class _PopupLayoutDelegate extends SingleChildLayoutDelegate {
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    if (placement == PopupPlacement.screenLowerTwoThirds) {
+      return BoxConstraints.tightFor(
+        width: constraints.maxWidth,
+        height: constraints.maxHeight * 2 / 3,
+      );
+    }
     final insets = _insets;
     return BoxConstraints.loose(
       Size(
@@ -1305,6 +1318,9 @@ class _PopupLayoutDelegate extends SingleChildLayoutDelegate {
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
+    if (placement == PopupPlacement.screenLowerTwoThirds) {
+      return Offset(0, size.height / 3);
+    }
     final insets = _insets;
     final maxX = size.width - insets.right - childSize.width;
     final maxY = size.height - insets.bottom - childSize.height;
@@ -1324,6 +1340,7 @@ class _PopupLayoutDelegate extends SingleChildLayoutDelegate {
               anchor.left,
               _yBelowPoint(childSize.height, insets.top, maxY),
             ),
+            PopupPlacement.screenLowerTwoThirds => (0.0, size.height / 3),
           };
     final minY = placement == PopupPlacement.belowPoint
         ? insets.top

@@ -10,6 +10,7 @@ enum EmptyStateKind {
   history,
   cloud,
   logs,
+  liked,
 }
 
 /// Small line glyphs on the page itself, with no enclosing surface.
@@ -203,7 +204,8 @@ class _EmptyStatePainter extends CustomPainter {
       EmptyStateKind.playlist ||
       EmptyStateKind.search ||
       EmptyStateKind.downloads ||
-      EmptyStateKind.history => 64.0,
+      EmptyStateKind.history ||
+      EmptyStateKind.liked => 64.0,
       _ => 48.0,
     };
     canvas.scale(size.width / designSize, size.height / designSize);
@@ -226,6 +228,8 @@ class _EmptyStatePainter extends CustomPainter {
         _cloud(canvas, line, detail, breath);
       case EmptyStateKind.logs:
         _logs(canvas, line, detail, breath);
+      case EmptyStateKind.liked:
+        _liked(canvas, line, breath);
     }
     canvas.restore();
   }
@@ -396,6 +400,23 @@ class _EmptyStatePainter extends CustomPainter {
     canvas.drawLine(const Offset(25, 16), const Offset(38, 16), line);
     canvas.drawLine(const Offset(25, 23), const Offset(34, 23), line);
     canvas.drawLine(const Offset(25, 32), Offset(32 + breath * 2, 32), detail);
+  }
+
+  void _liked(Canvas canvas, Paint line, double breath) {
+    final heart = Path()
+      ..moveTo(32, 52)
+      ..cubicTo(11, 38, 10, 22, 20, 16.5)
+      ..cubicTo(26, 13.4, 30.5, 17, 32, 21)
+      ..cubicTo(33.5, 17, 38, 13.4, 44, 16.5)
+      ..cubicTo(54, 22, 53, 38, 32, 52)
+      ..close();
+    canvas.drawPath(
+      heart,
+      Paint()
+        ..color = ink.withValues(alpha: 0.16 + breath * 0.12)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(heart, line);
   }
 
   @override

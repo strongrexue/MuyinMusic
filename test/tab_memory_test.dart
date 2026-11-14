@@ -55,9 +55,7 @@ void main() {
     final router = await _pumpApp(tester, initialLocation: '/songs');
 
     // 经歌单管理进入详情，路由带 ?from=manage。
-    await tester.tap(find.byTooltip('歌单管理'));
-    await _pumpUi(tester);
-    await tester.tap(find.text('歌单管理'));
+    router.go('/playlists');
     await _pumpUi(tester);
     await tester.tap(find.text('夜晚循环'));
     await _pumpUi(tester);

@@ -24,7 +24,7 @@ class PrismEnvironment extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
     final enabled = mode != LiquidGlassMode.none;
-    final transform = glassConfig.toStyleTransform(scheme.primary);
+    final transform = glassConfig.toStyleTransform();
     return prism.Theme(
       data: prism.ThemeData(
         colorScheme: prism.ColorScheme(

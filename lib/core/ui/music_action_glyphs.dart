@@ -90,6 +90,16 @@ abstract final class MusicActionGlyphs {
     ),
   ]);
 
+  /// 评论：带左下尾角的对话气泡。
+  static const comment = Glyph([
+    GlyphPath(
+      'M7 4.5H17C18.4 4.5 19.5 5.6 19.5 7V13.5C19.5 14.9 18.4 16 17 16H11'
+      'L6.5 19.5V16H7C5.6 16 4.5 14.9 4.5 13.5V7C4.5 5.6 5.6 4.5 7 4.5Z'
+      'M8.5 8H15.5 M8.5 11.5H12.5',
+      role: GlyphRole.line,
+    ),
+  ]);
+
   /// 迷你歌词.
   static const lyrics = Glyph([
     GlyphPath(

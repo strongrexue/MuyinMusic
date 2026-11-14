@@ -14,8 +14,6 @@ import '../../songs/songs_toolbar_state.dart';
 import '../../playlists/widgets/expanding_header_search.dart';
 import '../../playlists/widgets/playlist_management_menu.dart';
 import '../shell_route_utils.dart';
-import 'library_view_menu.dart';
-import 'scrolling_page_header.dart';
 import 'settings_header_surface.dart';
 
 const double _songsHeaderActionGap = 12;
@@ -49,14 +47,15 @@ class ShellHeader extends ConsumerWidget {
         onlineCollectionDetail;
     final headerTitle =
         location == '/songs/search' &&
-            ref.watch(songsLibraryPlaylistIdProvider) != null
-        ? '搜索歌单歌曲'
+            ref.watch(songsLibraryTabProvider) == SongsLibraryTab.liked
+        ? '搜索喜欢的歌曲'
         : _titleFor(location);
     final settingsParent = settingsParentLocation(location);
     final parentLocation =
         settingsParent ??
         switch (location) {
           '/downloads' || '/playlists' || '/songs/search' => '/songs',
+          '/home/downloads' => '/home',
           _ => null,
         };
 
@@ -135,6 +134,7 @@ class ShellHeader extends ConsumerWidget {
     final settingsSection = SettingsSection.fromLocation(location);
     if (settingsSection != null) return settingsSection.title;
     if (location == '/') return '发现';
+    if (location == '/home') return '首页';
     if (location.startsWith('/discover/playlists/')) return '歌单详情';
     if (location.startsWith('/discover/leaderboards/')) {
       return location.split('/').length > 4 ? '榜单详情' : '排行榜';
@@ -149,6 +149,7 @@ class ShellHeader extends ConsumerWidget {
     switch (location) {
       case '/history':
       case '/downloads':
+      case '/home/downloads':
         return '下载';
       case '/songs':
         return '歌曲';
@@ -374,30 +375,20 @@ class SongsHeader extends StatelessWidget {
     final overflow = _LibraryOverflowMenu(
       onOpenHistory: state.onOpenHistory,
       onShuffle: state.hasSongs ? state.onShuffle : null,
-      onUpdatePlaylist: state.onUpdatePlaylist,
-      updatingPlaylist: state.updatingPlaylist,
     );
     final closedBar = Row(
       children: [
         Expanded(
           child: Align(
             alignment: Alignment.centerLeft,
-            child: FloatingHeaderSurface(
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: LibraryViewMenu(
-                title: state.libraryTitle,
-                activePlaylistId: state.activePlaylistId,
-                scheme: scheme,
-                onSelected: state.onSelectLibraryPlaylist ?? (_) {},
+              child: SizedBox(
+                height: 44,
+                child: Align(alignment: Alignment.centerLeft, child: title),
               ),
             ),
           ),
-        ),
-        const SizedBox(width: _songsHeaderActionGap),
-        _SongsHeaderIconButton(
-          tooltip: '歌单管理',
-          icon: Icons.queue_music_rounded,
-          onPressed: state.onOpenPlaylists,
         ),
         const SizedBox(width: _songsHeaderActionGap),
         // The inline search is painted above this row. Reserve its closed
@@ -496,17 +487,10 @@ class _SongsHeaderIconButton extends StatelessWidget {
 }
 
 class _LibraryOverflowMenu extends StatelessWidget {
-  const _LibraryOverflowMenu({
-    this.onOpenHistory,
-    this.onShuffle,
-    this.onUpdatePlaylist,
-    this.updatingPlaylist = false,
-  });
+  const _LibraryOverflowMenu({this.onOpenHistory, this.onShuffle});
 
   final VoidCallback? onOpenHistory;
   final VoidCallback? onShuffle;
-  final VoidCallback? onUpdatePlaylist;
-  final bool updatingPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -534,13 +518,6 @@ class _LibraryOverflowMenu extends StatelessWidget {
             executeImmediately: true,
             onPressed: onShuffle,
           ),
-          if (onUpdatePlaylist != null)
-            prism.PopupMenuItem(
-              label: updatingPlaylist ? '正在更新' : '更新歌单',
-              glyph: prism_glyphs.AppGlyphs.refresh,
-              executeImmediately: true,
-              onPressed: updatingPlaylist ? null : onUpdatePlaylist,
-            ),
           prism.PopupMenuItem(
             label: '下载历史',
             glyph: prism_glyphs.AppGlyphs.clock,

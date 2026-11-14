@@ -163,3 +163,24 @@ enum OnlinePlaybackQuality {
     return highest;
   }
 }
+
+/// What the mini player and the floating dock do while a list scrolls.
+enum BottomBarBehavior {
+  always('always', '始终显示', '底栏与迷你播放条一直保持可见'),
+  collapse('collapse', '滚动折叠', '向下滚动时收起为更紧凑的形态，向上滚动复原'),
+  leftFold('leftFold', '向左折叠', '向下滚动时折叠到左侧图标，向上滚动复原'),
+  hide('hide', '滚动隐藏', '向下滚动时完全隐藏，向上滚动复原');
+
+  const BottomBarBehavior(this.code, this.label, this.description);
+
+  final String code;
+  final String label;
+  final String description;
+
+  static BottomBarBehavior fromCode(String? code) {
+    for (final behavior in values) {
+      if (behavior.code == code) return behavior;
+    }
+    return always;
+  }
+}
