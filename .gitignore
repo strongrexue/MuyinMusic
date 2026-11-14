@@ -69,3 +69,7 @@ CLAUDE.md
 /android/signing/*.jks
 /android/signing/*.keystore
 /android/signing/*.properties
+
+# Locally built install packages and python caches
+/*.apk
+tools/__pycache__/
