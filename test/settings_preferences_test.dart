@@ -44,7 +44,6 @@ void main() {
       expect(settings.bluetoothLyricEnabled, isFalse);
       expect(settings.bluetoothFullLyricEnabled, isFalse);
       expect(settings.bluetoothLyricNoticeSeen, isFalse);
-      expect(settings.useNativeNavigation, isFalse);
       expect(settings.localMusicDir, settings.downloadDir);
       expect(settings.useBuiltInSourceFilePicker, isFalse);
     },
@@ -99,68 +98,20 @@ void main() {
     },
   );
 
-  test('native navigation is opt-in and persists across restarts', () async {
+  test('navigation mode is no longer a setting', () async {
     final prefs = await SharedPreferences.getInstance();
     final container = _settingsContainer(prefs);
-    expect(AppSettings.fallback.useNativeNavigation, isFalse);
-    expect(container.read(settingsProvider).useNativeNavigation, isFalse);
-    await container
-        .read(settingsProvider.notifier)
-        .setUseNativeNavigation(true);
-    container.dispose();
+    addTearDown(container.dispose);
+
+    // The dock is a single floating capsule now; a stale pref must not break
+    // startup or resurface the removed selector.
+    await prefs.setString('navigation_mode', 'native');
+    await prefs.setBool('use_native_navigation', true);
 
     final restored = _settingsContainer(prefs);
-    expect(restored.read(settingsProvider).useNativeNavigation, isTrue);
-    await restored
-        .read(settingsProvider.notifier)
-        .setUseNativeNavigation(false);
-    restored.dispose();
-
-    final disabled = _settingsContainer(prefs);
-    addTearDown(disabled.dispose);
-    expect(disabled.read(settingsProvider).useNativeNavigation, isFalse);
+    addTearDown(restored.dispose);
+    expect(prefs.getString('navigation_mode'), 'native');
   });
-
-  test(
-    'navigation mode persists across restarts and supports dual capsule',
-    () async {
-      final prefs = await SharedPreferences.getInstance();
-      final container = _settingsContainer(prefs);
-      expect(
-        AppSettings.fallback.navigationMode,
-        AppNavigationMode.singleCapsule,
-      );
-      expect(
-        container.read(settingsProvider).navigationMode,
-        AppNavigationMode.singleCapsule,
-      );
-
-      await container
-          .read(settingsProvider.notifier)
-          .setNavigationMode(AppNavigationMode.dualCapsule);
-      container.dispose();
-
-      final restored = _settingsContainer(prefs);
-      expect(
-        restored.read(settingsProvider).navigationMode,
-        AppNavigationMode.dualCapsule,
-      );
-      expect(restored.read(settingsProvider).useNativeNavigation, isFalse);
-
-      await restored
-          .read(settingsProvider.notifier)
-          .setNavigationMode(AppNavigationMode.native);
-      restored.dispose();
-
-      final nativeMode = _settingsContainer(prefs);
-      addTearDown(nativeMode.dispose);
-      expect(
-        nativeMode.read(settingsProvider).navigationMode,
-        AppNavigationMode.native,
-      );
-      expect(nativeMode.read(settingsProvider).useNativeNavigation, isTrue);
-    },
-  );
 
   test('GrooveShift switch persists under its current name', () async {
     final prefs = await SharedPreferences.getInstance();
@@ -330,6 +281,71 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  /// ③：动作行各自一张卡片。用一个两行 `SettingsCard` 与一个两行 `SettingsGroup`
+  /// 对照，断言同组两行之间不再共用一个不透明底板（即中间有真正的空隙）。
+  testWidgets('row actions are separate cards while content slabs stay whole', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: buildPrismTestEnvironment,
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SettingsCard(
+                children: [
+                  SettingsAction(
+                    key: const ValueKey('split-row-a'),
+                    icon: Icons.search_rounded,
+                    title: '第一行',
+                    onTap: () {},
+                  ),
+                  SettingsAction(
+                    key: const ValueKey('split-row-b'),
+                    icon: Icons.download_rounded,
+                    title: '第二行',
+                    onTap: () {},
+                  ),
+                ],
+              ),
+              SettingsCard(
+                insetContent: true,
+                children: [
+                  SettingsAction(
+                    key: const ValueKey('slab-row-a'),
+                    icon: Icons.search_rounded,
+                    title: '整块第一行',
+                    onTap: () {},
+                  ),
+                  SettingsAction(
+                    key: const ValueKey('slab-row-b'),
+                    icon: Icons.download_rounded,
+                    title: '整块第二行',
+                    onTap: () {},
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final splitGap =
+        tester.getRect(find.byKey(const ValueKey('split-row-b'))).top -
+        tester.getRect(find.byKey(const ValueKey('split-row-a'))).bottom;
+    final slabGap =
+        tester.getRect(find.byKey(const ValueKey('slab-row-b'))).top -
+        tester.getRect(find.byKey(const ValueKey('slab-row-a'))).bottom;
+
+    // 拆开的行之间留出 10pt 空隙；整块内容仍然紧贴（0）。
+    expect(splitGap, greaterThan(0));
+    expect(slabGap, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   test('legacy resolver setting is removed', () async {
     SharedPreferences.setMockInitialValues({
       'base_url': 'https://legacy.example.com',
@@ -379,17 +395,23 @@ void main() {
         container.read(settingsProvider).useBuiltInSourceFilePicker,
         isTrue,
       );
-      expect(find.text('WebDAV 同步'), findsOneWidget);
+      expect(find.text('WebDAV 同步'), findsNothing);
       expect(find.text('URL 解析服务器'), findsNothing);
       expect(find.text('解析服务器健康检查'), findsNothing);
+      await pumpSection(SettingsSection.sync);
+      expect(find.text('WebDAV 同步'), findsOneWidget);
       await pumpSection(SettingsSection.playback);
       expect(find.text('允许与其他 APP 共同播放'), findsOneWidget);
+      expect(find.text('定时关闭音乐'), findsNothing);
+      expect(find.text('点击搜索结果内单曲时'), findsNothing);
       await pumpSection(SettingsSection.downloads);
       expect(find.text('批量下载音质'), findsOneWidget);
       expect(find.text('目录'), findsOneWidget);
       expect(find.text('浏览U盘'), findsOneWidget);
       expect(find.text('添加 U 盘文件夹'), findsOneWidget);
       expect(find.text('下载位置'), findsOneWidget);
+      await pumpSection(SettingsSection.permissions);
+      expect(find.text('音乐和音频'), findsOneWidget);
       await pumpSection(SettingsSection.about);
       expect(find.text('检查更新'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -660,6 +682,60 @@ void main() {
     expect(find.byType(prism.PopupMenu), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('bottom bar behavior is picked from the appearance menu', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final prefs = await SharedPreferences.getInstance();
+    final container = _settingsContainer(prefs);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          builder: buildPrismTestEnvironment,
+          theme: AppTheme.light(),
+          home: const SettingsPage(section: SettingsSection.appearance),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final anchor = find.byKey(const ValueKey('bottom-bar-behavior-anchor'));
+    await tester.scrollUntilVisible(
+      anchor,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(anchor);
+    await tester.pumpAndSettle();
+
+    final menu = find.byType(prism.PopupMenu);
+    expect(menu, findsOneWidget);
+    for (final behavior in BottomBarBehavior.values) {
+      expect(
+        find.descendant(of: menu, matching: find.text(behavior.label)),
+        findsOneWidget,
+      );
+    }
+
+    await tester.tap(
+      find.descendant(
+        of: menu,
+        matching: find.text(BottomBarBehavior.hide.label),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      container.read(settingsProvider).bottomBarBehavior,
+      BottomBarBehavior.hide,
+    );
+    expect(prefs.getString('bottom_bar_behavior'), BottomBarBehavior.hide.code);
   });
 
   testWidgets('search source management stays open for multi-selection', (

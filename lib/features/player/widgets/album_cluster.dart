@@ -10,7 +10,6 @@ import '../../shell/player_transition.dart';
 import '../player_controller.dart';
 import 'mini_lyrics_panel.dart';
 import 'player_palette.dart';
-import 'player_cover_actions_sheet.dart';
 import 'spinning_cover_art.dart';
 import 'track_change_switcher.dart';
 
@@ -85,21 +84,16 @@ class AlbumPage extends ConsumerWidget {
                         // pull recognizer, so dragging still dismisses the page.
                         child: PlayerPullHandle(
                           child: Semantics(
-                            button: track != null,
-                            label: '打开当前歌曲菜单',
+                            button: true,
+                            label: square ? '切换为圆形封面' : '切换为方形封面',
                             child: GestureDetector(
-                              key: const ValueKey('player-cover-menu-button'),
+                              key: const ValueKey('player-cover-toggle-button'),
                               behavior: HitTestBehavior.opaque,
-                              onTap: track == null
-                                  ? null
-                                  : () => unawaited(
-                                      showPlayerCoverActionsSheet(
-                                        context,
-                                        ref,
-                                        track: track,
-                                        wide: wide,
-                                      ),
-                                    ),
+                              onTap: () => unawaited(
+                                ref
+                                    .read(settingsProvider.notifier)
+                                    .setSquareAlbumCoverEnabled(!square),
+                              ),
                               child: PlayerCoverAnchor(
                                 expanded: true,
                                 child: track == null

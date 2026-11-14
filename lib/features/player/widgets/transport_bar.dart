@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
+
 import '../../../theme/app_motion.dart';
 import '../player_controller.dart';
 import 'playback_queue_sheet.dart';
@@ -190,11 +192,16 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                       size: 38,
                     ),
                   ),
-                  PlaybackQueueButton(
-                    color: ink,
-                    count: vm.queueCount,
-                    enabled: vm.hasTrack,
-                    onPressed: () => showPlaybackQueueSheet(context),
+                  prism.PopupAnchor(
+                    placement:
+                        prism.PopupPlacement.screenLowerTwoThirds,
+                    targetBuilder: (open) => PlaybackQueueButton(
+                      color: ink,
+                      count: vm.queueCount,
+                      enabled: vm.hasTrack,
+                      onPressed: open,
+                    ),
+                    popupBuilder: (_) => const PlaybackQueuePopup(),
                   ),
                 ],
               ),

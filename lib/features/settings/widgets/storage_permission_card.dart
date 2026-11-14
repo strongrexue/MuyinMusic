@@ -21,6 +21,9 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
     with WidgetsBindingObserver {
   bool? _audioGranted;
   bool? _wideGranted;
+  bool? _notificationGranted;
+  bool? _backgroundGranted;
+  bool? _overlayGranted;
   bool _requesting = false;
   bool _checkFailed = false;
 
@@ -47,6 +50,9 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
       final status = await Future.wait([
         PermissionService.hasAudioLibraryRead(),
         PermissionService.hasExternalStorageWrite(),
+        PermissionService.hasNotificationPermission(),
+        PermissionService.hasBackgroundPlaybackProtection(),
+        PermissionService.hasOverlayPermission(),
       ]);
       if (!mounted) return;
       final newlyGranted =
@@ -55,6 +61,9 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
       setState(() {
         _audioGranted = status[0];
         _wideGranted = status[1];
+        _notificationGranted = status[2];
+        _backgroundGranted = status[3];
+        _overlayGranted = status[4];
         _checkFailed = false;
       });
       if (newlyGranted) {
@@ -67,6 +76,69 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
     } catch (_) {
       if (mounted) setState(() => _checkFailed = true);
     }
+  }
+
+  /// Runs [request] and reports the result, opening the system page when the
+  /// platform has already handed the decision to Settings.
+  Future<void> _run(
+    Future<bool> Function() request, {
+    required String grantedMessage,
+    required String deniedMessage,
+  }) async {
+    if (_requesting) return;
+    setState(() => _requesting = true);
+    try {
+      final granted = await request();
+      await _refreshPermission();
+      if (!mounted) return;
+      showAppToast(
+        context,
+        granted ? grantedMessage : deniedMessage,
+        type: granted ? AppToastType.success : AppToastType.warning,
+      );
+    } catch (_) {
+      if (mounted) {
+        showAppToast(context, '权限申请失败，请在系统设置中检查', type: AppToastType.error);
+      }
+    } finally {
+      if (mounted) setState(() => _requesting = false);
+    }
+  }
+
+  Future<void> _toggleNotification() async {
+    if (await PermissionService.hasNotificationPermission()) {
+      await PermissionService.openSystemAppSettings();
+      return;
+    }
+    await _run(
+      PermissionService.requestNotificationPermission,
+      grantedMessage: '已开启通知权限',
+      deniedMessage: '未开启通知权限，控制中心通知不会显示',
+    );
+  }
+
+  Future<void> _toggleBackground() async {
+    if (await PermissionService.hasBackgroundPlaybackProtection()) {
+      await PermissionService.openSystemAppSettings();
+      return;
+    }
+    await _run(
+      PermissionService.requestBackgroundPlaybackProtection,
+      grantedMessage: '已加入电池优化白名单',
+      deniedMessage: '未加入白名单，长时间后台播放可能被系统中断',
+    );
+  }
+
+  Future<void> _toggleOverlay() async {
+    if (await PermissionService.hasOverlayPermission()) {
+      await PermissionService.openSystemAppSettings();
+      return;
+    }
+    await _run(
+      PermissionService.requestOverlayPermission,
+      grantedMessage: '已开启悬浮窗权限',
+      deniedMessage: '未开启悬浮窗权限，部分浮层可能无法显示',
+    );
   }
 
   Future<void> _requestPermission({bool compatibility = false}) async {
@@ -99,28 +171,60 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
     }
   }
 
+  IconData _trailing(bool? granted) => granted == true
+      ? Icons.check_circle_outline_rounded
+      : Icons.chevron_right_rounded;
+
   @override
   Widget build(BuildContext context) {
-    return SettingsCard(
-      title: '权限',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 24,
       children: [
-        SettingsAction(
-          icon: Icons.library_music_outlined,
-          title: '音乐和音频',
-          value: _checkFailed ? '检查失败' : null,
-          trailing: _audioGranted == true
-              ? Icons.check_circle_outline_rounded
-              : Icons.chevron_right_rounded,
-          onTap: () => _requestPermission(),
+        SettingsCard(
+          title: '权限',
+          children: [
+            SettingsAction(
+              icon: Icons.library_music_outlined,
+              title: '音乐和音频',
+              value: _checkFailed ? '检查失败' : null,
+              trailing: _trailing(_audioGranted),
+              onTap: () => _requestPermission(),
+            ),
+            SettingsAction(
+              icon: Icons.folder_shared_outlined,
+              title: '所有文件访问（兼容）',
+              value: _checkFailed ? '检查失败' : null,
+              trailing: _trailing(_wideGranted),
+              onTap: () => _requestPermission(compatibility: true),
+            ),
+          ],
         ),
-        SettingsAction(
-          icon: Icons.folder_shared_outlined,
-          title: '所有文件访问（兼容）',
-          value: _checkFailed ? '检查失败' : null,
-          trailing: _wideGranted == true
-              ? Icons.check_circle_outline_rounded
-              : Icons.chevron_right_rounded,
-          onTap: () => _requestPermission(compatibility: true),
+        SettingsCard(
+          title: '播放与通知',
+          children: [
+            SettingsAction(
+              icon: Icons.notifications_active_outlined,
+              title: '通知权限',
+              value: _notificationGranted == true ? '已开启' : '未开启',
+              trailing: _trailing(_notificationGranted),
+              onTap: _toggleNotification,
+            ),
+            SettingsAction(
+              icon: Icons.battery_saver_outlined,
+              title: '后台播放保护',
+              value: _backgroundGranted == true ? '已保护' : '可能被系统中断',
+              trailing: _trailing(_backgroundGranted),
+              onTap: _toggleBackground,
+            ),
+            SettingsAction(
+              icon: Icons.picture_in_picture_alt_outlined,
+              title: '悬浮窗权限',
+              value: _overlayGranted == true ? '已开启' : '未开启',
+              trailing: _trailing(_overlayGranted),
+              onTap: _toggleOverlay,
+            ),
+          ],
         ),
       ],
     );

@@ -17,7 +17,10 @@ Future<({double weight, double size})> showLyricSettingsSheet(
   await showSettingsSheet<void>(
     context: context,
     useRootNavigator: true,
-
+    // Both type controls must be fully visible without scrolling; the default
+    // half-height sheet cut the second one off.
+    heightFraction: 0.72,
+    maxHeight: 640,
     showDragHandle: true,
     builder: (_) => _LyricSettingsSheet(
       weight: selected.weight,
@@ -88,8 +91,6 @@ class _LyricSettingsSheetState extends State<_LyricSettingsSheet> {
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         child: Column(
           children: [
-            LyricFontPreview(weight: _weight, size: _size),
-            const SizedBox(height: 16),
             prism.Card(
               inert: true,
               radius: 18,

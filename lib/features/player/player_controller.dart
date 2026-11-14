@@ -22,6 +22,7 @@ import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import '../downloads/download_history_store.dart';
 import '../equalizer/equalizer_store.dart';
+import '../home/recent_plays_store.dart';
 import 'bluetooth_lyric_metadata.dart';
 import 'lyric_parser.dart';
 import 'media_item_copy.dart';
@@ -192,12 +193,18 @@ class PlayerController extends StateNotifier<PlayerState>
               next.bluetoothFullLyricEnabled) {
         _syncBluetoothMetadata(force: true);
       }
+      if (previous?.playerVolume != next.playerVolume) {
+        unawaited(_applyPlayerVolume(next.playerVolume));
+      }
     });
     _ref.listen<EqualizerSettings>(equalizerProvider, (_, next) {
       _scheduleEqualizerApply(next);
     }, fireImmediately: true);
     unawaited(
       _configureGrooveShift(_ref.read(settingsProvider).grooveShiftEnabled),
+    );
+    unawaited(
+      _applyPlayerVolume(_ref.read(settingsProvider).playerVolume),
     );
     WidgetsBinding.instance.addObserver(this);
 
@@ -214,6 +221,18 @@ class PlayerController extends StateNotifier<PlayerState>
       unawaited(_sessionRestoreFuture);
     }
   }
+
+  Future<void> _applyPlayerVolume(double value) async {
+    try {
+      await _audioHandler.setUserVolume(value);
+    } catch (error) {
+      await AppLogger.write('player', 'apply volume failed: $error');
+    }
+  }
+
+  /// Sets the playback gain (0..1) and remembers it across launches.
+  Future<void> setPlaybackVolume(double value) =>
+      _ref.read(settingsProvider.notifier).setPlayerVolume(value);
 
   Future<void> _applyAudioMixingPreference(bool value) async {
     try {
@@ -1305,6 +1324,96 @@ class PlayerController extends StateNotifier<PlayerState>
     return _playQueueIndex(index, resetPlayOrder: true);
   }
 
+  /// Moves a queued entry from [oldIndex] to [newIndex], where [newIndex] is
+  /// the index the entry lands on after its own removal — the shape
+  /// [ReorderableListView.onReorderItem] reports.
+  void reorderQueue(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _queue.length) return;
+    if (newIndex < 0 || newIndex == oldIndex) return;
+    final current = _hasCurrentQueueTrack ? _queue[_queueIndex] : null;
+    final next = List<DownloadHistoryEntry>.of(_queue);
+    final moved = next.removeAt(oldIndex);
+    next.insert(newIndex.clamp(0, next.length), moved);
+    _queue = List<DownloadHistoryEntry>.unmodifiable(next);
+    _queueIndex = current == null
+        ? (next.length > oldIndex ? oldIndex : -1)
+        : _queue.indexWhere((item) => _sameEntry(item, current));
+    _rebuildPlayOrder(anchorIndex: _queueIndex);
+    _syncQueueAvailability();
+    _persistFullSession();
+  }
+
+  /// Drops one queued entry. Removing the playing entry continues with the
+  /// entry that slid into its slot; removing the last one stops playback.
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= _queue.length) return;
+    final wasCurrent = index == _queueIndex;
+    final current = _hasCurrentQueueTrack ? _queue[_queueIndex] : null;
+    final next = List<DownloadHistoryEntry>.of(_queue)..removeAt(index);
+    if (next.isEmpty) {
+      _clearQueue();
+      if (wasCurrent) await _stopAfterQueueRemoval();
+      _persistFullSession();
+      return;
+    }
+    _queue = List<DownloadHistoryEntry>.unmodifiable(next);
+    _queueIndex = current == null
+        ? -1
+        : _queue.indexWhere((item) => _sameEntry(item, current));
+    _rebuildPlayOrder(anchorIndex: _queueIndex);
+    _syncQueueAvailability();
+    _persistFullSession();
+    if (wasCurrent) {
+      await _playQueueIndex(
+        index < _queue.length ? index : _queue.length - 1,
+        resetPlayOrder: true,
+      );
+    }
+  }
+
+  /// Empties the queue and stops the current track.
+  Future<void> clearQueue() async {
+    if (_queue.isEmpty && state.track == null) return;
+    await _stopAfterQueueRemoval();
+    if (!mounted) return;
+    _completionHandledForTrackId = null;
+    _pendingRestoredSession = null;
+    _requestToken = Object();
+    _transportSuppressionToken = null;
+    _currentMusic = null;
+    _currentQuality = null;
+    _clearQueue(syncState: false);
+    state = state.copyWith(
+      track: null,
+      lyricInfo: null,
+      lyrics: const KaraokeLyrics([]),
+      loading: false,
+      lyricLoading: false,
+      playing: false,
+      position: Duration.zero,
+      duration: Duration.zero,
+      processingState: PlayerProcessingState.idle,
+      canPlayPrevious: false,
+      canPlayNext: false,
+      queue: const [],
+      queueIndex: -1,
+      error: null,
+    );
+    _publishPlaybackMode();
+    _syncQueueAvailability();
+    _queueStoreOperation(_sessionStore.clear);
+  }
+
+  Future<void> _stopAfterQueueRemoval() async {
+    try {
+      await _audioHandler.stop();
+    } catch (error) {
+      unawaited(
+        AppLogger.write('player-control', 'queue_stop_failed error=$error'),
+      );
+    }
+  }
+
   Future<bool> _playLocal(
     PlayerTrack track, {
     MusicInfo? fallbackMusic,
@@ -1573,6 +1682,7 @@ class PlayerController extends StateNotifier<PlayerState>
 
   Future<void> _playQueueEntry(DownloadHistoryEntry entry) {
     _pendingRestoredSession = null;
+    _recordRecentPlay(entry);
     final path = entry.savedPath?.trim();
     if (path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path)) {
       if (state.track?.localPath == path) {
@@ -1608,6 +1718,15 @@ class PlayerController extends StateNotifier<PlayerState>
     if (!mounted || pauseGeneration != _sleepTimerPauseGeneration) return;
     await _audioHandler.play();
     _persistPositionCheckpoint();
+  }
+
+  /// Keeps the home tab's 最近播放 shelf in sync with what actually played.
+  void _recordRecentPlay(DownloadHistoryEntry entry) {
+    try {
+      _ref.read(recentPlaysProvider.notifier).record(entry);
+    } catch (error) {
+      AppLogger.write('player-control', 'recent_play_record_failed error=$error');
+    }
   }
 
   void _autoAdvanceAfterCompletion() {

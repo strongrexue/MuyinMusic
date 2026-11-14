@@ -8,7 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cy_shine_music/core/storage/glass_preview_provider.dart';
 import 'package:cy_shine_music/core/storage/settings_store.dart';
+import 'package:cy_shine_music/features/settings/widgets/glass_settings_dialog.dart';
+import 'package:cy_shine_music/theme/app_theme.dart';
 import 'package:cy_shine_music/theme/glass_settings.dart';
+
+import 'helpers/prism_test_environment.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -19,21 +23,18 @@ void main() {
     expect(GlassConfig.decode(123), GlassConfig.defaults);
     final decoded = GlassConfig.decode(
       jsonEncode({
+        // A retired "色调" tab decodes back to the frosted preset.
         'appearance': 'tinted',
         'tabs': {
-          'clear': {
-            'clarity': 999,
-            'transmission': -5,
-            'reflection': 30,
-          },
+          'clear': {'clarity': 999, 'transmission': -5, 'reflection': 30},
         },
       }),
     );
-    expect(decoded.appearance, GlassAppearance.tinted);
+    expect(decoded.appearance, GlassAppearance.frosted);
     expect(decoded.tabs.clear.clarity, 100);
     expect(decoded.tabs.clear.transmission, 0);
     expect(decoded.tabs.clear.reflection, 30);
-    expect(decoded.tabs.frosted.reflection, 50);
+    expect(decoded.tabs.frosted.reflection, 38);
   });
 
   test('each glass tab keeps its own settings across restarts', () async {
@@ -48,12 +49,11 @@ void main() {
       GlassAppearance.clear,
       const GlassSettings(clarity: 80),
     );
-    await notifier.setGlassAppearance(GlassAppearance.tinted);
+    await notifier.setGlassAppearance(GlassAppearance.clear);
     final config = container.read(settingsProvider).glassConfig;
-    expect(config.appearance, GlassAppearance.tinted);
+    expect(config.appearance, GlassAppearance.clear);
     expect(config.tabs.clear.clarity, 80);
-    expect(config.tabs.frosted.clarity, 50);
-    expect(config.tabs.tinted.clarity, 50);
+    expect(config.tabs.frosted.clarity, 47);
     final restored = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
     );
@@ -61,7 +61,7 @@ void main() {
     expect(restored.read(settingsProvider).glassConfig.tabs.clear.clarity, 80);
     expect(
       restored.read(settingsProvider).glassConfig.appearance,
-      GlassAppearance.tinted,
+      GlassAppearance.clear,
     );
   });
 
@@ -77,13 +77,9 @@ void main() {
     expect(initial, GlassConfig.defaults);
 
     const draft = GlassConfig(
-      appearance: GlassAppearance.tinted,
+      appearance: GlassAppearance.clear,
       tabs: GlassSettingsByTab(
-        tinted: GlassSettings(
-          clarity: 90,
-          transmission: 10,
-          reflection: 20,
-        ),
+        clear: GlassSettings(clarity: 90, transmission: 10, reflection: 20),
       ),
     );
     container.read(glassPreviewProvider.notifier).state = draft;
@@ -125,11 +121,78 @@ void main() {
           transmission: value,
           reflection: value,
         );
-        final result = settings.applyTo(base, appearance, Colors.purple);
+        final result = settings.applyTo(base, appearance);
         expect(result.tint.a, inInclusiveRange(0.0, 1.0));
         expect(result.blur, greaterThanOrEqualTo(0));
         expect(result.haze, greaterThanOrEqualTo(0));
       }
     }
+  });
+
+  /// 首开红屏的回归：草稿曾经在 `initState` 里写 provider，首个 build 直接抛
+  /// `Tried to modify a provider while the widget tree was building`。
+  testWidgets('glass settings dialog reopens, previews and saves', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(container.dispose);
+    // app.dart:289 一直在 watch 这个 provider；没有监听者时 StateController
+    // 干脆不通知，红屏反而复现不出来。
+    container.listen(effectiveGlassConfigProvider, (_, _) {});
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          builder: buildPrismTestEnvironment,
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showGlassSettingsDialog(context),
+                child: const Text('打开玻璃设置'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // 第一次：打开 → 切 tab → 关闭（不写盘）。
+    await tester.tap(find.text('打开玻璃设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('玻璃设置'), findsOneWidget);
+    expect(container.read(glassPreviewProvider), GlassConfig.defaults);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('透明'));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(glassPreviewProvider)?.appearance,
+      GlassAppearance.clear,
+    );
+    expect(prefs.getString('glass_config'), isNull);
+
+    await tester.tapAt(const Offset(8, 8));
+    await tester.pumpAndSettle();
+    expect(find.text('玻璃设置'), findsNothing);
+    expect(container.read(glassPreviewProvider), isNull);
+
+    // 第二次：连开不炸，保存后落盘。
+    await tester.tap(find.text('打开玻璃设置'));
+    await tester.pumpAndSettle();
+    expect(container.read(glassPreviewProvider), GlassConfig.defaults);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('玻璃设置'), findsNothing);
+    expect(container.read(glassPreviewProvider), isNull);
+    expect(prefs.getString('glass_config'), isNotNull);
+    expect(container.read(settingsProvider).glassConfig, GlassConfig.defaults);
   });
 }

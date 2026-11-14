@@ -1,13 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/models/enums.dart';
 import '../../../core/models/music_info.dart';
-import '../../../core/ui/app_sheet.dart';
-import '../../../core/ui/app_toast.dart';
 import '../../../core/ui/widgets/quality_option_tile.dart';
 import '../player_controller.dart';
+import 'player_popup_card.dart';
 
 List<QualityOption> availablePlaybackQualityOptions(PlayerTrack track) {
   final parsedCurrent = Quality.tryFromCode(track.qualityLabel);
@@ -36,64 +36,72 @@ String playerQualityLabel(PlayerTrack track) {
   };
 }
 
-Future<void> showPlaybackQualitySheet(
-  BuildContext context,
-  WidgetRef ref, {
-  required PlayerTrack track,
-}) async {
-  final options = availablePlaybackQualityOptions(track);
-  final current = Quality.tryFromCode(track.qualityLabel);
-  if (track.isLocal || options.length < 2) return;
-  final container = ProviderScope.containerOf(context, listen: false);
-  final controller = ref.read(playerControllerProvider.notifier);
-  final selected = await showAppSheet<Quality>(
-    context: context,
-    detents: prism.snapSheetDetents,
-    neutralSurface: true,
-    fitsContent: true,
-    floating: true,
-    builder: (_) => _PlaybackQualitySheet(options: options, current: current),
-  );
-  if (selected == null || selected == current || !controller.mounted) return;
-  if (container.read(playerControllerProvider).track?.id != track.id) {
-    if (context.mounted) {
-      showAppToast(context, '当前歌曲已变化，请重新选择音质');
-    }
-    return;
-  }
-  await controller.switchQuality(selected);
+/// Compact quality tag for tight spots like the player top bar, where the full
+/// [playerQualityLabel] wording would crowd out the track title.
+String playerQualityShortLabel(PlayerTrack track) {
+  final quality = Quality.tryFromCode(track.qualityLabel);
+  return switch (quality) {
+    Quality.master => 'Master',
+    Quality.atmosPlus => 'Atmos+',
+    Quality.atmos => 'Atmos',
+    Quality.hires => 'Hi-Res',
+    Quality.flac24bit => '24bit',
+    Quality.flac => 'FLAC',
+    Quality.k320 => '320K',
+    Quality.k192 => '192K',
+    Quality.k128 => '128K',
+    null => track.qualityLabel,
+    _ => qualityName(quality),
+  };
 }
 
-class _PlaybackQualitySheet extends StatelessWidget {
-  const _PlaybackQualitySheet({required this.options, required this.current});
+/// The quality list as an anchored popup hanging off the top bar's source ·
+/// quality entry, so switching quality no longer covers the player.
+class PlaybackQualityPopup extends ConsumerWidget {
+  const PlaybackQualityPopup({super.key, required this.track});
 
-  final List<QualityOption> options;
-  final Quality? current;
+  final PlayerTrack track;
 
   @override
-  Widget build(BuildContext context) => AppSheetLayout(
-    key: const ValueKey('player-quality-sheet'),
-    title: '播放音质',
-    centerTitle: true,
-    body: SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final options = availablePlaybackQualityOptions(track);
+    final current = Quality.tryFromCode(track.qualityLabel);
+    return PlayerPopupCard(
+      key: const ValueKey('player-quality-popup'),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          prism.generateGroup([
-            for (final option in options)
-              QualityOptionTile(
-                key: ValueKey('player-quality-option-${option.type.code}'),
-                option: option,
-                selected: option.type == current,
-                onPressed: () => Navigator.of(context).pop(option.type),
-              ),
-          ]),
-          const prism.ListFooter(text: '切换后保留当前播放进度。'),
+          const PlayerPopupHeader(title: '播放音质', subtitle: '切换后保留当前播放进度'),
+          for (final option in options)
+            PlayerPopupRow(
+              key: ValueKey('player-quality-option-${option.type.code}'),
+              label: qualityName(option.type),
+              subtitle: _knownQualitySize(option),
+              selected: option.type == current,
+              onTap: () => _select(context, ref, option.type),
+            ),
         ],
       ),
-    ),
-  );
+    );
+  }
+
+  /// Applies [quality] once the popup has closed. The controller and container
+  /// are read up front because dismissing the route disposes this widget, and
+  /// the track is re-checked so a tap cannot change the quality of a song that
+  /// started playing in the meantime.
+  void _select(BuildContext context, WidgetRef ref, Quality quality) {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final controller = ref.read(playerControllerProvider.notifier);
+    Navigator.of(context).pop();
+    unawaited(() async {
+      if (!controller.mounted) return;
+      if (container.read(playerControllerProvider).track?.id != track.id) {
+        return;
+      }
+      await controller.switchQuality(quality);
+    }());
+  }
 }
 
 String? _knownQualitySize(QualityOption option) {

@@ -15,11 +15,16 @@ class SettingsCard extends StatelessWidget {
     this.title,
     required this.children,
     this.insetContent = false,
+    this.separate,
   });
 
   final String? title;
   final List<Widget> children;
   final bool insetContent;
+
+  /// 每行各占一张卡片。默认随 [insetContent] 走：整块内容的卡片不拆，逐行
+  /// 动作的卡片拆开。
+  final bool? separate;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -27,6 +32,7 @@ class SettingsCard extends StatelessWidget {
     children: [
       if (title != null && title!.isNotEmpty) prism.ListHeader(title: title!),
       SettingsGroup(
+        separate: separate ?? !insetContent,
         children: insetContent
             ? [
                 Padding(
@@ -45,20 +51,67 @@ class SettingsCard extends StatelessWidget {
 
 /// The section owns its corners, including rows with separate action buttons
 /// and footers that do not paint a DecorationListItem background of their own.
+///
+/// [separate] breaks that one slab into one card per row, spaced apart: rows
+/// no longer share a fill, so a list of actions reads as a list of entries.
 class SettingsGroup extends StatelessWidget {
-  const SettingsGroup({super.key, required this.children});
+  const SettingsGroup({
+    super.key,
+    required this.children,
+    this.separate = false,
+  });
+
   final List<Widget> children;
+  final bool separate;
+
+  static const _gap = 10.0;
 
   @override
-  Widget build(BuildContext context) => ClipRSuperellipse(
+  Widget build(BuildContext context) {
+    final scheme = prism.Theme.of(context).colorScheme;
+    final fill = prism.SurfaceLevel.card.colorOf(scheme);
+    if (!separate || children.length < 2) {
+      return _slab(fill, prism.generateGroup(children));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: _gap,
+      children: [
+        for (final child in children)
+          // 行间隔（SizedBox / Divider）和按钮页脚本来就只是留白 / 附属操作，
+          // 别给它们发一张和设置行一样的卡片。
+          if (_isSpacer(child) || child is SettingsFooter)
+            child
+          else
+            _slab(
+              fill,
+              prism.ItemPositionProvider(
+                position: prism.ItemPosition.startAndEnd,
+                child: child,
+              ),
+            ),
+      ],
+    );
+  }
+
+  static bool _isSpacer(Widget child) =>
+      (child is SizedBox && child.child == null) || child is Divider;
+
+  Widget _slab(Color fill, Widget child) => ClipRSuperellipse(
     borderRadius: prism.AppRadius.xl,
-    child: ColoredBox(
-      color: prism.SurfaceLevel.card.colorOf(
-        prism.Theme.of(context).colorScheme,
-      ),
-      child: prism.generateGroup(children),
-    ),
+    child: ColoredBox(color: fill, child: child),
   );
+}
+
+/// Marks a child of a [SettingsGroup] as a footer: a button strip under the
+/// rows. It never gets a card of its own, however the group is laid out.
+class SettingsFooter extends StatelessWidget {
+  const SettingsFooter({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 Widget _positionedRow(BuildContext context, Widget row) =>

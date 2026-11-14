@@ -9,6 +9,7 @@ import 'player_controller.dart';
 import 'widgets/album_cluster.dart';
 import 'widgets/immersive_background.dart';
 import 'widgets/lyrics_panel.dart';
+import 'widgets/player_action_row.dart';
 import 'widgets/player_layout.dart';
 import 'widgets/top_chrome_row.dart';
 import 'widgets/transport_bar.dart';
@@ -94,7 +95,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 child: Column(
                   children: [
                     TopChromeRow(
-                      onOpenSongs: () => widget.onDismissRequested('/songs'),
+                      onOpenEqualizer: () =>
+                          widget.onDismissRequested('/settings/equalizer'),
                     ),
                     Expanded(
                       child: showEmpty
@@ -243,6 +245,7 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     ),
                   ),
                   const SizedBox(height: 4),
+                  const PlayerActionRow(),
                   ConstrainedBox(
                     constraints: const BoxConstraints(
                       maxWidth: playerWideTransportMaxWidth,
@@ -324,6 +327,10 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                 ),
               ),
             ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
+            child: PlayerActionRow(),
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: playerContentInset),

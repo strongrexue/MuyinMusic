@@ -21,9 +21,6 @@ import '../../core/sync/webdav_sync_controller.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/car_display_layout.dart';
 import '../debug/widgets/log_recording_menu.dart';
-import '../equalizer/equalizer_store.dart';
-import '../player/sleep_timer_controller.dart';
-import '../player/widgets/player_sleep_timer_sheet.dart';
 import '../shell/shell_toolbar_visibility.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
@@ -33,7 +30,6 @@ import 'settings_section.dart';
 import 'widgets/app_icon_sheet.dart';
 import 'widgets/appearance_theme_settings.dart';
 import 'widgets/discovery_source_order_sheet.dart';
-import 'widgets/player_appearance_settings.dart';
 import 'widgets/settings_action.dart';
 import 'widgets/settings_menu.dart';
 import 'widgets/storage_permission_card.dart';
@@ -50,11 +46,10 @@ class SettingsPage extends ConsumerWidget {
     final sourceState = section == SettingsSection.network
         ? ref.watch(musicSourceControllerProvider)
         : null;
-    final webDavState = section == SettingsSection.network
+    final webDavState =
+        section == SettingsSection.sync ||
+            section == SettingsSection.network
         ? ref.watch(webDavSyncControllerProvider)
-        : null;
-    final equalizer = section == SettingsSection.playback
-        ? ref.watch(equalizerProvider)
         : null;
     final appIcon =
         section == SettingsSection.appearance && supportsCustomAppIcons
@@ -137,14 +132,6 @@ class SettingsPage extends ConsumerWidget {
                                     .read(settingsProvider.notifier)
                                     .setUseBuiltInSourceFilePicker(value),
                               ),
-                              SettingsAction(
-                                key: const ValueKey('webdav-sync-setting'),
-                                icon: Icons.cloud_sync_outlined,
-                                title: 'WebDAV 同步',
-                                value: _webDavSubtitle(webDavState!),
-                                trailing: Symbols.chevron_right,
-                                destination: '/settings/webdav',
-                              ),
                               SettingsMenuAction(
                                 key: const ValueKey('network-adapter-menu'),
                                 menuId: 'network-adapter-menu',
@@ -223,7 +210,7 @@ class SettingsPage extends ConsumerWidget {
                                     SettingsMenuOption(
                                       id: source.code,
                                       label: source == MusicSource.all
-                                          ? '全平台'
+                                          ? '聚合'
                                           : source.label,
                                       selected:
                                           source ==
@@ -236,31 +223,6 @@ class SettingsPage extends ConsumerWidget {
                                           .read(settingsProvider.notifier)
                                           .setDefaultSearchSource(source),
                                     ),
-                                ],
-                              ),
-                              SettingsMenuAction(
-                                key: const ValueKey('search-playback-menu'),
-                                menuId: 'search-playback-menu',
-                                icon: Icons.playlist_play_rounded,
-                                title: '点击搜索结果内单曲时',
-                                options: [
-                                  SettingsMenuOption(
-                                    id: 'play-song',
-                                    label: '播放歌曲',
-                                    selected:
-                                        !settings.replaceQueueOnSearchPlay,
-                                    onSelected: () => ref
-                                        .read(settingsProvider.notifier)
-                                        .setReplaceQueueOnSearchPlay(false),
-                                  ),
-                                  SettingsMenuOption(
-                                    id: 'replace-queue',
-                                    label: '播放歌曲并替换播放列表',
-                                    selected: settings.replaceQueueOnSearchPlay,
-                                    onSelected: () => ref
-                                        .read(settingsProvider.notifier)
-                                        .setReplaceQueueOnSearchPlay(true),
-                                  ),
                                 ],
                               ),
                               SettingsMenuAction(
@@ -285,32 +247,6 @@ class SettingsPage extends ConsumerWidget {
                                           ),
                                     ),
                                 ],
-                              ),
-                              SettingsAction(
-                                key: const ValueKey('equalizer-setting'),
-                                icon: Icons.graphic_eq_rounded,
-                                title: '均衡器',
-                                value: equalizer!.summary,
-                                trailing: Symbols.chevron_right,
-                                destination: '/settings/equalizer',
-                              ),
-                              Consumer(
-                                builder: (context, ref, _) {
-                                  final remaining = ref.watch(
-                                    sleepTimerProvider,
-                                  );
-                                  return SettingsAction(
-                                    key: const ValueKey('sleep-timer-setting'),
-                                    icon: Icons.timer_outlined,
-                                    title: '定时关闭音乐',
-                                    value: remaining == null
-                                        ? '未开启'
-                                        : formatSleepTimerRemaining(remaining),
-                                    trailing: Symbols.chevron_right,
-                                    onTap: () =>
-                                        showPlayerSleepTimerSheet(context, ref),
-                                  );
-                                },
                               ),
                               SettingsSwitchAction(
                                 key: const ValueKey(
@@ -371,10 +307,24 @@ class SettingsPage extends ConsumerWidget {
                               ),
                             ],
                           ),
-                        if (section == SettingsSection.downloads) ...[
+                        if (section == SettingsSection.permissions) ...[
                           const StoragePermissionCard(),
                           const SizedBox(height: 24),
                         ],
+                        if (section == SettingsSection.sync)
+                          SettingsCard(
+                            title: null,
+                            children: [
+                              SettingsAction(
+                                key: const ValueKey('webdav-sync-setting'),
+                                icon: Icons.cloud_sync_outlined,
+                                title: 'WebDAV 同步',
+                                value: _webDavSubtitle(webDavState!),
+                                trailing: Symbols.chevron_right,
+                                destination: '/settings/webdav',
+                              ),
+                            ],
+                          ),
                         if (section == SettingsSection.downloads)
                           SettingsCard(
                             title: '下载',
@@ -431,55 +381,57 @@ class SettingsPage extends ConsumerWidget {
                                 trailing: Symbols.chevron_right,
                                 onTap: () => _pickDownloadDir(context, ref),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  12,
-                                  16,
-                                  16,
-                                ),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Wrap(
-                                    spacing: 10,
-                                    runSpacing: 8,
-                                    children: [
-                                      FilledButton.tonalIcon(
-                                        onPressed: () =>
-                                            _resetDownloadDir(context, ref),
-                                        icon: VariedIcon.varied(
-                                          Symbols.restart_alt,
-                                          size: 18,
-                                          weight: 300,
-                                        ),
-                                        label: const Text('恢复默认'),
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(0, 40),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 20,
-                                            vertical: 10,
+                              SettingsFooter(
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    12,
+                                    16,
+                                    16,
+                                  ),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Wrap(
+                                      spacing: 10,
+                                      runSpacing: 8,
+                                      children: [
+                                        FilledButton.tonalIcon(
+                                          onPressed: () =>
+                                              _resetDownloadDir(context, ref),
+                                          icon: VariedIcon.varied(
+                                            Symbols.restart_alt,
+                                            size: 18,
+                                            weight: 300,
                                           ),
-                                          shape: const StadiumBorder(),
-                                        ),
-                                      ),
-                                      FilledButton.tonalIcon(
-                                        onPressed: () =>
-                                            _browseDownloadDir(context, ref),
-                                        icon: const Icon(
-                                          Icons.storage_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('浏览U盘'),
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(0, 40),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 20,
-                                            vertical: 10,
+                                          label: const Text('恢复默认'),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size(0, 40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 10,
+                                            ),
+                                            shape: const StadiumBorder(),
                                           ),
-                                          shape: const StadiumBorder(),
                                         ),
-                                      ),
-                                    ],
+                                        FilledButton.tonalIcon(
+                                          onPressed: () =>
+                                              _browseDownloadDir(context, ref),
+                                          icon: const Icon(
+                                            Icons.storage_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('浏览U盘'),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size(0, 40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 10,
+                                            ),
+                                            shape: const StadiumBorder(),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -529,54 +481,58 @@ class SettingsPage extends ConsumerWidget {
                                 trailing: Icons.add_rounded,
                                 onTap: () => _pickLocalMusicDir(context, ref),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  12,
-                                  16,
-                                  16,
-                                ),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Wrap(
-                                    spacing: 10,
-                                    runSpacing: 8,
-                                    children: [
-                                      FilledButton.tonalIcon(
-                                        onPressed: () =>
-                                            _resetLocalMusicDir(context, ref),
-                                        icon: const Icon(
-                                          Icons.sync_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('仅扫描下载位置'),
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(0, 40),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 20,
-                                            vertical: 10,
+                              SettingsFooter(
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    12,
+                                    16,
+                                    16,
+                                  ),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Wrap(
+                                      spacing: 10,
+                                      runSpacing: 8,
+                                      children: [
+                                        FilledButton.tonalIcon(
+                                          onPressed: () =>
+                                              _resetLocalMusicDir(context, ref),
+                                          icon: const Icon(
+                                            Icons.sync_rounded,
+                                            size: 18,
                                           ),
-                                          shape: const StadiumBorder(),
-                                        ),
-                                      ),
-                                      FilledButton.tonalIcon(
-                                        onPressed: () =>
-                                            _browseLocalMusicDir(context, ref),
-                                        icon: const Icon(
-                                          Icons.storage_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('添加 U 盘文件夹'),
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(0, 40),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 20,
-                                            vertical: 10,
+                                          label: const Text('仅扫描下载位置'),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size(0, 40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 10,
+                                            ),
+                                            shape: const StadiumBorder(),
                                           ),
-                                          shape: const StadiumBorder(),
                                         ),
-                                      ),
-                                    ],
+                                        FilledButton.tonalIcon(
+                                          onPressed: () => _browseLocalMusicDir(
+                                            context,
+                                            ref,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.storage_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('添加 U 盘文件夹'),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size(0, 40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 10,
+                                            ),
+                                            shape: const StadiumBorder(),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -622,25 +578,6 @@ class SettingsPage extends ConsumerWidget {
                               ),
                               const SizedBox(height: 4),
                               SettingsMenuAction(
-                                key: const ValueKey('navigation-mode-menu'),
-                                menuId: 'navigation-mode-menu',
-                                icon: Icons.view_day_outlined,
-                                title: '导航模式',
-                                options: [
-                                  for (final mode in AppNavigationMode.values)
-                                    SettingsMenuOption(
-                                      id: mode.code,
-                                      label: mode.label,
-                                      selected: mode == settings.navigationMode,
-                                      onSelected: () => _setNavigationMode(
-                                        context,
-                                        ref,
-                                        mode,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              SettingsMenuAction(
                                 key: const ValueKey('platform-button-position'),
                                 menuId: 'platform-button-position',
                                 icon: Icons.swap_horiz_rounded,
@@ -659,6 +596,26 @@ class SettingsPage extends ConsumerWidget {
                                       onSelected: () => ref
                                           .read(settingsProvider.notifier)
                                           .setPlatformButtonOnLeft(option.key),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              SettingsMenuAction(
+                                key: const ValueKey('bottom-bar-behavior'),
+                                menuId: 'bottom-bar-behavior',
+                                icon: Icons.vertical_align_bottom_rounded,
+                                title: '底栏行为',
+                                options: [
+                                  for (final option
+                                      in BottomBarBehavior.values)
+                                    SettingsMenuOption(
+                                      id: option.code,
+                                      label: option.label,
+                                      selected:
+                                          settings.bottomBarBehavior == option,
+                                      onSelected: () => ref
+                                          .read(settingsProvider.notifier)
+                                          .setBottomBarBehavior(option),
                                     ),
                                 ],
                               ),
@@ -719,8 +676,6 @@ class SettingsPage extends ConsumerWidget {
                             ],
                           ),
                         ],
-                        if (section == SettingsSection.appearance)
-                          const PlayerAppearanceSettings(),
                         if (section == SettingsSection.about)
                           SettingsCard(
                             title: null,
@@ -763,19 +718,6 @@ class SettingsPage extends ConsumerWidget {
                               ],
                             ],
                           ),
-                        if (section == null) ...[
-                          const SizedBox(height: 32),
-                          Text(
-                            versionLabel,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: scheme.outline,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -1140,22 +1082,6 @@ class SettingsPage extends ConsumerWidget {
         ? AppToastType.warning
         : AppToastType.success;
     showAppToast(context, '网络适配器已切换为 ${selected.label}', type: type);
-  }
-
-  Future<void> _setNavigationMode(
-    BuildContext context,
-    WidgetRef ref,
-    AppNavigationMode selected,
-  ) async {
-    final current = ref.read(settingsProvider).navigationMode;
-    if (selected == current) return;
-    await ref.read(settingsProvider.notifier).setNavigationMode(selected);
-    if (!context.mounted) return;
-    showAppToast(
-      context,
-      '导航模式已切换为 ${selected.label}',
-      type: AppToastType.success,
-    );
   }
 
   Future<void> _setSearchSourceEnabled(

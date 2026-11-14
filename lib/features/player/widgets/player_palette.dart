@@ -29,3 +29,13 @@ Color playerMuted(BuildContext context) {
       ? scheme.onSurfaceVariant
       : kPlayerMuted;
 }
+
+/// Warm accent for the source/quality entry. A deeper orange keeps the small
+/// 12pt label legible on the light player surface, while the dark theme keeps a
+/// brighter one against the dark backdrop.
+Color playerAccent(BuildContext context) {
+  final scheme = Theme.of(context).colorScheme;
+  return scheme.brightness == Brightness.dark
+      ? const Color(0xFFE8A24B)
+      : const Color(0xFFB45309);
+}

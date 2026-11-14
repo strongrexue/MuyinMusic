@@ -1,19 +1,20 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/services/tagger.dart';
 import '../../../core/ui/cover_image_source.dart';
-import '../../../core/ui/app_sheet.dart';
 import '../../../theme/app_motion.dart';
 import '../../downloads/download_history_store.dart';
+import '../../songs/liked_songs_store.dart';
 import '../player_controller.dart';
 import 'player_palette.dart';
+import 'player_popup_card.dart';
 
 const _queueEntryHeight = 66.0;
 const _queueEntrySpacing = 6.0;
@@ -39,51 +40,60 @@ class PlaybackQueueButton extends StatelessWidget {
     final color = enabled
         ? (this.color ?? playerInk(context))
         : playerMuted(context);
-    return IconButton(
-      tooltip: count > 0 ? '播放列表，共 $count 首' : '播放列表',
-      onPressed: enabled ? onPressed : null,
-      style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-      icon: ExcludeSemantics(
-        child: SizedBox.square(
-          dimension: 30,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Align(
-                alignment: Alignment.center,
-                child: Icon(Icons.queue_music_rounded, color: color, size: 27),
-              ),
-              if (enabled && count > 0)
-                Positioned(
-                  top: -3,
-                  right: -4,
-                  child: Container(
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: playerSurface(context).withValues(alpha: 0.92),
-                        width: 1.5,
+    // A Material IconButton cannot anchor a popup (PopupAnchor only takes a
+    // PressSurface or PressRegion), so the button is prism's while the tooltip
+    // stays Material's, which is what the navigation tests look for.
+    return Tooltip(
+      message: count > 0 ? '播放列表，共 $count 首' : '播放列表',
+      child: prism.IconButton(
+        onPressed: enabled ? onPressed : null,
+        style: prism.ButtonStyle.from(fixedSize: const Size.square(48)),
+        icon: ExcludeSemantics(
+          child: SizedBox.square(
+            dimension: 30,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Align(
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.queue_music_rounded,
+                    color: color,
+                    size: 27,
+                  ),
+                ),
+                if (enabled && count > 0)
+                  Positioned(
+                    top: -3,
+                    right: -4,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
                       ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      count > 99 ? '99+' : '$count',
-                      style: TextStyle(
-                        color: playerSurface(context),
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: playerSurface(context).withValues(alpha: 0.92),
+                          width: 1.5,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        count > 99 ? '99+' : '$count',
+                        style: TextStyle(
+                          color: playerSurface(context),
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -91,18 +101,13 @@ class PlaybackQueueButton extends StatelessWidget {
   }
 }
 
-Future<void> showPlaybackQueueSheet(BuildContext context) {
-  return showAppSheet<void>(
-    context: context,
-    detents: const [0.72, 0.92],
-    maxHeight: 1000,
-    floating: false,
-    builder: (_) => const _PlaybackQueueSheet(),
-  );
-}
-
-class _PlaybackQueueSheet extends ConsumerWidget {
-  const _PlaybackQueueSheet();
+/// The play queue as an anchored popup off the transport bar's queue button.
+///
+/// It reuses the sheet's list so the entry keys, the active highlight and the
+/// "scroll the current track to the middle" behaviour stay identical; only the
+/// frame around the list is narrower.
+class PlaybackQueuePopup extends ConsumerWidget {
+  const PlaybackQueuePopup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -123,32 +128,86 @@ class _PlaybackQueueSheet extends ConsumerWidget {
     final currentPosition = vm.queueIndex >= 0 && vm.queueIndex < count
         ? vm.queueIndex + 1
         : (vm.queue.isEmpty && vm.track != null ? 1 : null);
-    return AppSheetLayout(
-      title: '播放列表',
-      subtitle: currentPosition == null
-          ? '$count 首 · ${vm.mode.label}'
-          : '$currentPosition / $count 首 · ${vm.mode.label}',
-      body: vm.queue.isNotEmpty
-          ? _PlaybackQueueList(
-              queue: vm.queue,
-              queueIndex: vm.queueIndex,
-              track: vm.track,
-              playing: vm.playing,
-              onSelect: (index) => ref
-                  .read(playerControllerProvider.notifier)
-                  .playQueueItem(index),
-            )
-          : vm.track == null
-          ? const _PlaybackQueueEmpty()
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-              children: [
-                _PlaybackQueueCurrentTrackTile(
-                  track: vm.track!,
-                  playing: vm.playing,
-                ),
-              ],
+    final controller = ref.read(playerControllerProvider.notifier);
+    return PlayerPopupCard(
+      key: const ValueKey('playback-queue-popup'),
+      maxWidth: double.infinity,
+      maxHeight: double.infinity,
+      scrollable: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              controller.cyclePlaybackMode();
+            },
+            child: PlayerPopupHeader(
+              title: '播放列表',
+              subtitle: currentPosition == null
+                  ? '$count 首 · ${vm.mode.label}'
+                  : '$currentPosition / $count 首 · ${vm.mode.label}',
+              trailing: vm.queue.isEmpty
+                  ? null
+                  : Tooltip(
+                      message: '清空当前队列',
+                      child: prism.IconButton(
+                        key: const ValueKey('playback-queue-clear'),
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          unawaited(controller.clearQueue());
+                        },
+                        style: prism.ButtonStyle.from(
+                          fixedSize: const Size.square(34),
+                        ),
+                        icon: Icon(
+                          Icons.delete_sweep_rounded,
+                          size: 18,
+                          color: playerMuted(context),
+                        ),
+                      ),
+                    ),
             ),
+          ),
+          if (vm.queue.isNotEmpty)
+            Expanded(
+              child: _PlaybackQueueList(
+                queue: vm.queue,
+                queueIndex: vm.queueIndex,
+                track: vm.track,
+                playing: vm.playing,
+                onSelect: (index) {
+                  controller.playQueueItem(index);
+                  Navigator.of(context).pop();
+                },
+                onReorder: controller.reorderQueue,
+                onRemove: (index) =>
+                    unawaited(controller.removeFromQueue(index)),
+              ),
+            )
+          else if (vm.track != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+              child: _PlaybackQueueCurrentTrackTile(
+                track: vm.track!,
+                playing: vm.playing,
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              child: Text(
+                '还没有正在播放的歌曲',
+                style: TextStyle(
+                  color: playerMuted(context),
+                  fontSize: 13,
+                  height: 1.3,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -160,6 +219,8 @@ class _PlaybackQueueList extends StatefulWidget {
     required this.track,
     required this.playing,
     required this.onSelect,
+    required this.onReorder,
+    required this.onRemove,
   });
 
   final List<DownloadHistoryEntry> queue;
@@ -167,6 +228,8 @@ class _PlaybackQueueList extends StatefulWidget {
   final PlayerTrack? track;
   final bool playing;
   final ValueChanged<int> onSelect;
+  final void Function(int oldIndex, int newIndex) onReorder;
+  final ValueChanged<int> onRemove;
 
   @override
   State<_PlaybackQueueList> createState() => _PlaybackQueueListState();
@@ -194,6 +257,17 @@ class _PlaybackQueueListState extends State<_PlaybackQueueList> {
     return math.max(0, currentItemCenter - viewportHeight / 2);
   }
 
+  /// Identity of a queue entry, matching how the controller dedupes the queue
+  /// so the reorderable list can key each row by the song it shows.
+  static String _entryIdentity(DownloadHistoryEntry entry) {
+    final path = entry.savedPath?.trim();
+    if (path != null && path.isNotEmpty) return 'file:$path';
+    if (entry.musicId.isNotEmpty) {
+      return 'music:${entry.sourceCode}:${entry.musicId}';
+    }
+    return 'entry:${entry.id}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -214,23 +288,36 @@ class _PlaybackQueueListState extends State<_PlaybackQueueList> {
             );
           });
         }
-        return ListView.builder(
+        return ReorderableListView.builder(
           key: const ValueKey('playback-queue-list'),
-          controller: _scrollController,
+          scrollController: _scrollController,
           padding: const EdgeInsets.fromLTRB(14, _queueListTopPadding, 14, 18),
           itemCount: widget.queue.length,
-          itemExtent: _queueItemExtent,
+          buildDefaultDragHandles: false,
+          onReorderItem: (oldIndex, newIndex) {
+            HapticFeedback.selectionClick();
+            widget.onReorder(oldIndex, newIndex);
+          },
           itemBuilder: (context, index) {
+            final entry = widget.queue[index];
             final active = index == widget.queueIndex;
             return Padding(
+              key: ValueKey('playback-queue-item-${_entryIdentity(entry)}'),
               padding: const EdgeInsets.only(bottom: _queueEntrySpacing),
-              child: _PlaybackQueueEntryTile(
-                key: ValueKey('playback-queue-entry-$index'),
-                entry: widget.queue[index],
-                active: active,
-                playing: active && widget.playing,
-                currentTrack: active ? widget.track : null,
-                onTap: () => widget.onSelect(index),
+              child: ReorderableDelayedDragStartListener(
+                index: index,
+                child: SizedBox(
+                  height: _queueEntryHeight,
+                  child: _PlaybackQueueEntryTile(
+                    key: ValueKey('playback-queue-entry-$index'),
+                    entry: entry,
+                    active: active,
+                    playing: active && widget.playing,
+                    currentTrack: active ? widget.track : null,
+                    onTap: () => widget.onSelect(index),
+                    onRemove: () => widget.onRemove(index),
+                  ),
+                ),
               ),
             );
           },
@@ -240,7 +327,7 @@ class _PlaybackQueueListState extends State<_PlaybackQueueList> {
   }
 }
 
-class _PlaybackQueueEntryTile extends StatelessWidget {
+class _PlaybackQueueEntryTile extends ConsumerWidget {
   const _PlaybackQueueEntryTile({
     super.key,
     required this.entry,
@@ -248,6 +335,7 @@ class _PlaybackQueueEntryTile extends StatelessWidget {
     required this.playing,
     required this.currentTrack,
     required this.onTap,
+    required this.onRemove,
   });
 
   final DownloadHistoryEntry entry;
@@ -255,9 +343,10 @@ class _PlaybackQueueEntryTile extends StatelessWidget {
   final bool playing;
   final PlayerTrack? currentTrack;
   final VoidCallback onTap;
+  final VoidCallback onRemove;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final title = active ? currentTrack?.title ?? entry.name : entry.name;
     final artist = active ? currentTrack?.artist ?? entry.singer : entry.singer;
     final album = active
@@ -319,6 +408,8 @@ class _PlaybackQueueEntryTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            _QueueLikeButton(entry: entry),
+            const SizedBox(width: 4),
             if (active)
               _PlaybackStateIcon(playing: playing)
             else
@@ -332,8 +423,54 @@ class _PlaybackQueueEntryTile extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            IconButton(
+              key: ValueKey('playback-queue-remove-${entry.id}'),
+              onPressed: onRemove,
+              iconSize: 16,
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+              tooltip: '移出队列',
+              color: prism.Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              icon: const Icon(Icons.close_rounded),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Heart on a queue row: toggles the entry's like without leaving the queue.
+class _QueueLikeButton extends ConsumerWidget {
+  const _QueueLikeButton({required this.entry});
+
+  final DownloadHistoryEntry entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final key = songIdentityKey(entry);
+    final liked = ref.watch(
+      likedSongsProvider.select(
+        (items) => items.any((row) => songIdentityKey(row) == key),
+      ),
+    );
+    final scheme = prism.Theme.of(context).colorScheme;
+    return IconButton(
+      key: ValueKey('playback-queue-like-${entry.id}'),
+      onPressed: () => ref.read(likedSongsProvider.notifier).toggle(entry),
+      iconSize: 17,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+      tooltip: liked ? '取消喜欢' : '喜欢',
+      color: liked
+          ? scheme.primary
+          : scheme.onSurfaceVariant.withValues(alpha: 0.72),
+      icon: Icon(
+        liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
       ),
     );
   }
@@ -725,24 +862,6 @@ class _QueueArtworkState extends State<_QueueArtwork> {
         ),
       ),
       child: artwork,
-    );
-  }
-}
-
-class _PlaybackQueueEmpty extends StatelessWidget {
-  const _PlaybackQueueEmpty();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        '当前没有可显示的播放列表',
-        style: TextStyle(
-          color: prism.Theme.of(context).colorScheme.onSurfaceVariant,
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
     );
   }
 }

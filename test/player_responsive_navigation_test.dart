@@ -15,6 +15,7 @@ import 'package:cy_shine_music/features/player/player_audio_handler.dart';
 import 'package:cy_shine_music/features/player/player_controller.dart';
 import 'package:cy_shine_music/features/player/lyric_parser.dart';
 import 'package:cy_shine_music/features/player/player_page.dart';
+import 'package:cy_shine_music/features/player/sleep_timer_controller.dart';
 import 'package:cy_shine_music/features/player/widgets/album_cluster.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_line_text.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_lyrics_view.dart';
@@ -67,7 +68,7 @@ void main() {
   });
 
   testWidgets(
-    'compact remote player moves quality and source into the cover menu',
+    'compact remote player shows quality in the top bar and menus for actions',
     (tester) async {
       final controller = await _pumpPlayer(
         tester,
@@ -132,45 +133,40 @@ void main() {
       expect(artist.style?.fontWeight, FontWeight.w400);
 
       expect(find.byKey(const ValueKey('player-source-chip')), findsNothing);
-      expect(find.byKey(const ValueKey('player-quality-tag')), findsNothing);
+      // The source and the quality share one tappable label that opens the
+      // quality popup.
+      final qualityEntry = find.byKey(
+        const ValueKey('player-quality-entry-label'),
+      );
+      expect(tester.widget<Text>(qualityEntry).data, 'QQ 320K');
 
-      await tester.tap(find.byKey(const ValueKey('player-cover-menu-button')));
-      await _pumpUi(tester);
-
+      // The cover only toggles its artwork shape; the actions moved into the
+      // row above the transport bar.
       expect(
-        find.byKey(const ValueKey('player-cover-actions-sheet')),
+        find.byKey(const ValueKey('player-cover-menu-button')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('player-cover-toggle-button')),
         findsOneWidget,
       );
-      expect(find.text('窄屏在线歌曲'), findsNWidgets(2));
-      expect(find.text('高品质 320K'), findsOneWidget);
-      expect(find.text('不应在封面下重复的歌手 · QQ'), findsOneWidget);
-      expect(
-        tester
-            .widget<prism.DecorationListItem>(
-              find.byKey(const ValueKey('player-cover-action-download')),
-            )
-            .onPressed,
-        isNotNull,
-      );
-      expect(
-        tester
-            .widget<prism.DecorationListItem>(
-              find.byKey(const ValueKey('player-cover-action-playlist')),
-            )
-            .onPressed,
-        isNotNull,
-      );
+      for (final key in [
+        'player-action-lyric-settings',
+        'player-action-like',
+        'player-action-playlist',
+        'player-action-download',
+        'player-action-volume',
+      ]) {
+        expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
+      }
+      expect(_actionEnabled(tester, 'player-action-playlist'), isTrue);
+      expect(_actionEnabled(tester, 'player-action-download'), isTrue);
 
-      await tester.tap(
-        find.byKey(const ValueKey('player-cover-action-playlist')),
-      );
+      await tester.tap(find.byKey(const ValueKey('player-action-playlist')));
       await _pumpUi(tester);
 
       expect(
-        find.descendant(
-          of: find.byType(prism.AppBar),
-          matching: find.text('添加到歌单'),
-        ),
+        find.byKey(const ValueKey('playlist-add-popup')),
         findsOneWidget,
       );
       await tester.tap(find.text('在线收藏'));
@@ -192,18 +188,22 @@ void main() {
       expect(storedTrack.musicJson, music.toJson());
       expect(storedTrack.musicInfo?.toJson(), music.toJson());
 
-      // Closing the nested playlist picker returns to the cover actions.
+      // Picking a playlist dismisses the picker and lands back on the player.
+      expect(find.text('添加到歌单'), findsNothing);
       expect(
-        find.byKey(const ValueKey('player-cover-actions-sheet')),
+        find.byKey(const ValueKey('playlist-add-popup')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('player-compact-pager')),
         findsOneWidget,
       );
-      await tester.tap(
-        find.byKey(const ValueKey('player-cover-action-quality')),
-      );
+      // Quality lives in the top bar entry, not in any cover menu.
+      await tester.tap(find.byKey(const ValueKey('player-quality-entry')));
       await _pumpUi(tester);
 
       expect(
-        find.byKey(const ValueKey('player-quality-sheet')),
+        find.byKey(const ValueKey('player-quality-popup')),
         findsOneWidget,
       );
       expect(find.text('9.48 MB'), findsOneWidget);
@@ -221,12 +221,12 @@ void main() {
       await _pumpUi(tester);
 
       expect(controller.switchedQuality, Quality.k128);
-      expect(find.byKey(const ValueKey('player-quality-sheet')), findsNothing);
+      expect(find.byKey(const ValueKey('player-quality-popup')), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('compact local player disables inapplicable cover actions', (
+  testWidgets('compact local player disables inapplicable actions', (
     tester,
   ) async {
     await _pumpPlayer(
@@ -246,36 +246,184 @@ void main() {
 
     expect(find.text('窄屏本地歌曲'), findsOneWidget);
     expect(find.text('本地歌手'), findsOneWidget);
-    expect(find.byKey(const ValueKey('player-quality-button')), findsNothing);
     expect(find.byKey(const ValueKey('player-source-chip')), findsNothing);
-    expect(find.byKey(const ValueKey('player-quality-tag')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('player-cover-menu-button')));
+    // Local files have nothing to switch to, so the top-bar quality entry is
+    // inert and tapping it must not open the sheet.
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('player-quality-entry-label')),
+          )
+          .data,
+      'QQ FLAC',
+    );
+    await tester.tap(find.byKey(const ValueKey('player-quality-entry')));
     await _pumpUi(tester);
-    expect(find.text('本地歌手 · 本地'), findsOneWidget);
+    expect(find.byKey(const ValueKey('player-quality-popup')), findsNothing);
+
+    // Local files have nothing to add to a playlist or download, so those
+    // actions are disabled while the lyric one stays usable. The like action
+    // needs song metadata, and this bare seeded track carries none.
+    expect(_actionEnabled(tester, 'player-action-playlist'), isFalse);
+    expect(_actionEnabled(tester, 'player-action-download'), isFalse);
+    expect(_actionEnabled(tester, 'player-action-lyric-settings'), isTrue);
+    expect(_actionEnabled(tester, 'player-action-like'), isFalse);
     expect(
-      tester
-          .widget<prism.DecorationListItem>(
-            find.byKey(const ValueKey('player-cover-action-download')),
-          )
-          .onPressed,
-      isNull,
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact top bar opens the equalizer instead of the song list', (
+    tester,
+  ) async {
+    final destinations = <String?>[];
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'tx:equalizer-entry',
+        kind: PlayerTrackKind.remote,
+        title: '迷你歌词测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+      onDismissRequested: ([String? target]) => destinations.add(target),
+    );
+
+    final equalizerButton = find.byKey(
+      const ValueKey('player-equalizer-button'),
+    );
+    expect(equalizerButton, findsOneWidget);
+    expect(find.byTooltip('歌曲列表'), findsNothing);
+    expect(find.byTooltip('均衡器'), findsOneWidget);
+
+    await tester.tap(equalizerButton);
+    await _pumpUi(tester);
+
+    expect(
+      find.byKey(const ValueKey('player-equalizer-popup')),
+      findsOneWidget,
+    );
+    expect(destinations, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('player-equalizer-open-page')));
+    await _pumpUi(tester);
+
+    expect(destinations, ['/settings/equalizer']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sleep timer popup stepper starts a custom duration', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'tx:sleep-timer',
+        kind: PlayerTrackKind.remote,
+        title: '定时关闭',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PlayerPage)),
+    );
+    expect(container.read(sleepTimerProvider), isNull);
+
+    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-button')));
+    await _pumpUi(tester);
+    expect(
+      find.byKey(const ValueKey('player-sleep-timer-popup')),
+      findsOneWidget,
+    );
+
+    // Custom minutes expand an in-card stepper instead of covering the
+    // player with the old full-screen sheet.
+    await tester.tap(
+      find.byKey(const ValueKey('player-sleep-timer-custom-entry')),
+    );
+    await _pumpUi(tester);
+    expect(
+      find.byKey(const ValueKey('player-sleep-timer-custom-entry')),
+      findsNothing,
     );
     expect(
-      tester
-          .widget<prism.DecorationListItem>(
-            find.byKey(const ValueKey('player-cover-action-quality')),
-          )
-          .onPressed,
-      isNull,
+      _stepperMinutes(tester),
+      '30 分钟',
     );
+
+    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-plus')));
+    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-plus')));
+    await _pumpUi(tester);
+    expect(
+      _stepperMinutes(tester),
+      '40 分钟',
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('player-sleep-timer-custom-start')),
+    );
+    await _pumpUi(tester);
+    expect(
+      find.byKey(const ValueKey('player-sleep-timer-popup')),
+      findsNothing,
+    );
+    expect(container.read(sleepTimerProvider), const Duration(minutes: 40));
+
+    // With a timer running the popup offers a cancel entry.
+    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-button')));
+    await _pumpUi(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('player-sleep-timer-cancel-entry')),
+    );
+    await _pumpUi(tester);
+    expect(container.read(sleepTimerProvider), isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('top bar quality entry survives a very narrow viewport', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(360, 780),
+      currentMusic: _remoteMusic(),
+      track: const PlayerTrack(
+        id: 'wy:narrow-song',
+        kind: PlayerTrackKind.remote,
+        title: '开关测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: '网易',
+        qualityLabel: 'flac24bit',
+        availableQualityOptions: [
+          QualityOption(type: Quality.flac24bit, size: '38.4 MB'),
+          QualityOption(type: Quality.k320, size: '9.48 MB'),
+        ],
+        remoteUrl: 'https://audio.example/narrow-song.flac',
+      ),
+    );
+
     expect(
       tester
-          .widget<prism.DecorationListItem>(
-            find.byKey(const ValueKey('player-cover-action-playlist')),
+          .widget<Text>(
+            find.byKey(const ValueKey('player-quality-entry-label')),
           )
-          .onPressed,
-      isNull,
+          .data,
+      '网易 24bit',
+    );
+    expect(
+      find.byKey(const ValueKey('player-equalizer-button')),
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
   });
@@ -284,9 +432,9 @@ void main() {
     tester,
   ) async {
     const lyrics = KaraokeLyrics([
-      KaraokeLyricLine(startMs: 0, endMs: 3000, text: '第一句歌词'),
-      KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '第二句歌词'),
-      KaraokeLyricLine(startMs: 6000, endMs: 9000, text: '第三句歌词'),
+        KaraokeLyricLine(startMs: 0, endMs: 3000, text: '宽屏第一句'),
+        KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '宽屏第二句'),
+        KaraokeLyricLine(startMs: 6000, endMs: 9000, text: '宽屏第三句'),
       KaraokeLyricLine(startMs: 9000, endMs: 12000, text: '第四句歌词'),
     ]);
     final controller = await _pumpPlayer(
@@ -409,7 +557,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('cover menu switch hides compact mini lyrics immediately', (
+  testWidgets('lyric settings popup switch hides compact mini lyrics', (
     tester,
   ) async {
     const lyrics = KaraokeLyrics([
@@ -432,22 +580,28 @@ void main() {
       lyrics: lyrics,
     );
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsOneWidget);
-    final liftedCoverTop = tester.getTopLeft(
-      find.byKey(const ValueKey('player-cover-menu-button')),
-    );
+    final coverToggle = find.byKey(const ValueKey('player-cover-toggle-button'));
+    final liftedCoverTop = tester.getTopLeft(coverToggle);
 
-    await tester.tap(find.byKey(const ValueKey('player-cover-menu-button')));
+    await tester.tap(find.byKey(const ValueKey('player-action-lyric-settings')));
     await _pumpUi(tester);
-    await tester.tap(
-      find.byKey(const ValueKey('player-cover-action-mini-lyrics-switch')),
-    );
+
+    // The anchored glass card stays open while its toggle applies live.
+    final popup = find.byKey(const ValueKey('lyric-settings-popup'));
+    expect(popup, findsOneWidget);
+    expect(find.text('迷你歌词'), findsOneWidget);
+
+    await tester.tap(find.text('迷你歌词'));
     await tester.pumpAndSettle();
 
+    expect(popup, findsOneWidget);
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsNothing);
-    final centeredCoverTop = tester.getTopLeft(
-      find.byKey(const ValueKey('player-cover-menu-button')),
-    );
+    final centeredCoverTop = tester.getTopLeft(coverToggle);
     expect(centeredCoverTop.dy - liftedCoverTop.dy, 36);
+
+    await tester.tapAt(const Offset(4, 4));
+    await _pumpUi(tester);
+    expect(popup, findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -716,13 +870,13 @@ void main() {
         startMs: 0,
         endMs: 1000,
         text: '前一句',
-        words: [KaraokeWordTiming(text: '前一句', startMs: 0, endMs: 1000)],
+    words: [KaraokeWordTiming(text: '前一句', startMs: 0, endMs: 1000)],
       ),
       KaraokeLyricLine(
         startMs: 1000,
         endMs: 3000,
         text: '新一句',
-        words: [KaraokeWordTiming(text: '新一句', startMs: 1000, endMs: 2000)],
+    words: [KaraokeWordTiming(text: '新一句', startMs: 1000, endMs: 2000)],
       ),
     ]);
     final controller = await _pumpLyricsPanel(
@@ -829,13 +983,27 @@ void main() {
     expect(find.text('宽屏歌手'), findsOneWidget);
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('player-cover-menu-button')));
-    await _pumpUi(tester);
+    // The action row is shared by both layouts, so the wide player shows it
+    // above the transport bar instead of hiding it behind a cover menu.
     expect(
-      find.byKey(const ValueKey('player-cover-actions-sheet')),
+      find.byKey(const ValueKey('player-action-volume')),
       findsOneWidget,
     );
-    expect(find.text('仅在手机播放封面页显示。'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('player-cover-menu-button')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('player-action-lyric-settings')));
+    await _pumpUi(tester);
+    final popup = find.byKey(const ValueKey('lyric-settings-popup'));
+    expect(popup, findsOneWidget);
+    expect(find.text('迷你歌词'), findsOneWidget);
+    expect(find.text('关闭歌词视图模糊'), findsOneWidget);
+    expect(find.text('歌词界面设置'), findsWidgets);
+    await tester.tapAt(const Offset(4, 4));
+    await _pumpUi(tester);
+    expect(popup, findsNothing);
     expect(tester.takeException(), isNull);
   });
 }
@@ -940,6 +1108,7 @@ Future<_SeededPlayerController> _pumpPlayer(
   Duration position = Duration.zero,
   MusicInfo? currentMusic,
   bool carPadModeEnabled = false,
+  void Function([String? target]) onDismissRequested = _ignoreDismiss,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
@@ -986,7 +1155,7 @@ Future<_SeededPlayerController> _pumpPlayer(
           returnLocation: '/songs',
           progress: const AlwaysStoppedAnimation<double>(1),
           active: true,
-          onDismissRequested: _ignoreDismiss,
+          onDismissRequested: onDismissRequested,
         ),
       ),
     ),
@@ -995,6 +1164,18 @@ Future<_SeededPlayerController> _pumpPlayer(
   controller.setStateForTest(initialState);
   await _pumpUi(tester);
   return controller;
+}
+
+/// The visible readout inside the sleep-timer popup's custom stepper.
+String _stepperMinutes(WidgetTester tester) {
+  return tester
+      .widget<Text>(
+        find.descendant(
+          of: find.byKey(const ValueKey('player-sleep-timer-custom-value')),
+          matching: find.byType(Text),
+        ),
+      )
+      .data!;
 }
 
 KaraokeLyrics _timedLyrics(int count) {
@@ -1049,6 +1230,17 @@ ThemeData _theme() {
 
 void _ignoreDismiss([String? target]) {}
 
+/// Whether the action row's button with [key] accepts taps. The keys sit on
+/// private wrapper widgets, so read the prism button they render instead.
+bool _actionEnabled(WidgetTester tester, String key) {
+  final button = find.descendant(
+    of: find.byKey(ValueKey(key)),
+    matching: find.byType(prism.IconButton),
+  );
+  expect(button, findsOneWidget, reason: key);
+  return tester.widget<prism.IconButton>(button).onPressed != null;
+}
+
 Future<void> _pumpUi(WidgetTester tester) async {
   for (var index = 0; index < 12; index++) {
     await tester.pump(const Duration(milliseconds: 100));
@@ -1069,3 +1261,4 @@ MusicInfo _remoteMusic() => MusicInfo.fromJson({
     ],
   },
 });
+

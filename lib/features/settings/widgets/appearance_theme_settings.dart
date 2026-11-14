@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/settings_store.dart';
-import 'glass_settings_sheet.dart';
+import 'glass_settings_dialog.dart';
 import 'settings_action.dart';
 import 'settings_menu.dart';
 import 'theme_color_settings.dart';
@@ -56,7 +56,7 @@ class AppearanceThemeSettings extends ConsumerWidget {
               SettingsAction(
                 icon: Icons.tune_rounded,
                 title: '玻璃设置',
-                onTap: () => showGlassSettingsSheet(context),
+                onTap: () => showGlassSettingsDialog(context),
               ),
           ],
         ),

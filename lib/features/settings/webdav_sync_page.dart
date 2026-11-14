@@ -90,6 +90,8 @@ class _WebDavSyncPageState extends ConsumerState<WebDavSyncPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SettingsCard(
+                        // 连接表单是一整块输入区，跟着开关和按钮拆开会散架。
+                        separate: false,
                         title: '连接',
                         children: [
                           Padding(

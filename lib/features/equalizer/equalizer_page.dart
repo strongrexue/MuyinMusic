@@ -64,6 +64,7 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SettingsCard(
+                        separate: false,
                         children: [
                           SettingsSwitchAction(
                             icon: Icons.graphic_eq_rounded,
@@ -139,6 +140,8 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
                       ),
                       const SizedBox(height: 12),
                       SettingsCard(
+                        // 均衡器页保持整块，跟设置页的逐行卡片区分开。
+                        separate: false,
                         title: '预设配置',
                         children: [
                           SettingsAction(

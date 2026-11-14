@@ -152,4 +152,61 @@ class PermissionService {
   }
 
   static Future<void> openSystemAppSettings() => openAppSettings();
+
+  // ---------------------------------------------------------------------------
+  // Playback support permissions.
+
+  /// Android 13+ needs POST_NOTIFICATIONS before the media notification (and
+  /// therefore keep-alive playback controls) can be posted.
+  static Future<bool> hasNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+    return Permission.notification.isGranted;
+  }
+
+  static Future<bool> requestNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+    final status = await Permission.notification.status;
+    if (status.isGranted) return true;
+    if (status.isPermanentlyDenied) {
+      await openSystemAppSettings();
+      return Permission.notification.isGranted;
+    }
+    return (await Permission.notification.request()).isGranted;
+  }
+
+  /// Battery optimisation can stop the foreground playback service while the
+  /// screen is off; the exemption keeps background playback alive.
+  static Future<bool> hasBackgroundPlaybackProtection() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.ignoreBatteryOptimizations.isGranted) return true;
+    // Devices without the opt-out still report granted, so fall back to the
+    // "not restricted" flag rather than nagging the user forever.
+    final status = await Permission.ignoreBatteryOptimizations.status;
+    return !status.isDenied;
+  }
+
+  static Future<bool> requestBackgroundPlaybackProtection() async {
+    if (!Platform.isAndroid) return true;
+    final status = await Permission.ignoreBatteryOptimizations.status;
+    if (status.isGranted || status.isRestricted) return status.isGranted;
+    if (status.isPermanentlyDenied) {
+      await openSystemAppSettings();
+      return Permission.ignoreBatteryOptimizations.isGranted;
+    }
+    return (await Permission.ignoreBatteryOptimizations.request()).isGranted;
+  }
+
+  /// Floating window access is a special permission; the request opens the
+  /// system list where the user flips the switch themselves.
+  static Future<bool> hasOverlayPermission() async {
+    if (!Platform.isAndroid) return true;
+    return Permission.systemAlertWindow.isGranted;
+  }
+
+  static Future<bool> requestOverlayPermission() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.systemAlertWindow.isGranted) return true;
+    await Permission.systemAlertWindow.request();
+    return Permission.systemAlertWindow.isGranted;
+  }
 }

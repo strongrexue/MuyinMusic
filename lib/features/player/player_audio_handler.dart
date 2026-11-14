@@ -140,6 +140,19 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _ducked = false;
   int _pauseGeneration = 0;
 
+  /// Gain the listener dialled in (0..1). Kept separate from the ducking factor
+  /// so an interruption that begins and ends around a pause can never leave the
+  /// stream stuck at the ducked level — the low-volume Bluetooth symptom.
+  double _userVolume = 1;
+
+  Future<void> setUserVolume(double value) async {
+    _userVolume = value.clamp(0.0, 1.0);
+    await _applyVolume();
+  }
+
+  Future<void> _applyVolume() =>
+      _player.setVolume(_ducked ? _userVolume * 0.2 : _userVolume);
+
   Duration _loadTimeoutFor(Uri sourceUri) {
     return switch (sourceUri.scheme.toLowerCase()) {
       'http' || 'https' || 'ftp' => _remoteLoadTimeout,
@@ -283,7 +296,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     if (event.type == AudioInterruptionType.duck) {
       _ducked = event.begin;
-      await _player.setVolume(event.begin ? 0.2 : 1);
+      await _applyVolume();
       return;
     }
     if (event.begin) {
@@ -301,7 +314,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     _resumeAfterInterruption = false;
     if (_ducked) {
       _ducked = false;
-      await _player.setVolume(1);
+      await _applyVolume();
     }
     if (pauseGeneration != _pauseGeneration) return;
     await play();
@@ -597,6 +610,9 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       if (!granted) return;
     }
     if (pauseGeneration != _pauseGeneration) return;
+    // Re-assert the gain: a duck event that arrived while paused must not keep
+    // the next start quiet (and vice versa after a Bluetooth hand-off).
+    await _applyVolume();
     await _player.play();
   }
 
