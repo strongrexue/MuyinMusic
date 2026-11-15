@@ -65,7 +65,7 @@ class BatchDownloadController extends Notifier<List<BatchDownloadTask>> {
     final items = <BatchDownloadItem>[];
     for (final music in musics) {
       final item = BatchDownloadItem(music: music);
-      if (!reserved.add(item.musicKey) || progress.isMusicBusy(music.id)) {
+      if (!reserved.add(item.musicKey) || progress.isMusicActive(music.id)) {
         skippedCount += 1;
         continue;
       }

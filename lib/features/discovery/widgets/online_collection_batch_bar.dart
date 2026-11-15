@@ -60,7 +60,7 @@ class _OnlineCollectionBatchBarState
   Future<bool> _download(List<MusicInfo> selected) async {
     final progress = ref.read(downloadProgressProvider);
     final musics = selected
-        .where((music) => !progress.isMusicBusy(music.id))
+        .where((music) => !progress.isMusicActive(music.id))
         .toList(growable: false);
     if (musics.isEmpty) {
       showAppToast(context, '所选歌曲已在下载中', type: AppToastType.info);

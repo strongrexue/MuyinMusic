@@ -82,6 +82,14 @@ abstract final class MusicActionGlyphs {
     ),
   ]);
 
+  /// 暂停.
+  static const pause = Glyph([
+    GlyphPath(
+      'M9 5V19 M15 5V19',
+      role: GlyphRole.line,
+    ),
+  ]);
+
   /// 播放音质.
   static const quality = Glyph([
     GlyphPath(

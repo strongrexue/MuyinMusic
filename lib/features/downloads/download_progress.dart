@@ -11,6 +11,7 @@ enum DownloadStage {
   fetchingMeta,
   tagging,
   finishing,
+  paused,
   done,
   failed,
 }
@@ -43,7 +44,14 @@ class DownloadTask {
   bool get isBusy =>
       stage != DownloadStage.idle &&
       stage != DownloadStage.done &&
-      stage != DownloadStage.failed;
+      stage != DownloadStage.failed &&
+      stage != DownloadStage.paused;
+
+  /// A paused task is not running, but it still owns a row in the queue: the
+  /// user can resume it instead of starting over from the search list.
+  bool get isPaused => stage == DownloadStage.paused;
+
+  bool get isActive => isBusy || isPaused;
 
   double? get fraction {
     if (total == null || total! <= 0) return null;
@@ -102,6 +110,15 @@ class DownloadProgress {
     return null;
   }
 
+  /// Like [taskForMusic] but a paused transfer counts too — callers use this to
+  /// avoid spawning a second task for music that already has a row.
+  DownloadTask? activeTaskForMusic(String id) {
+    for (final task in tasks.reversed) {
+      if (task.musicId == id && task.isActive) return task;
+    }
+    return null;
+  }
+
   DownloadTask? latestTaskForMusic(String id) {
     for (final task in tasks.reversed) {
       if (task.musicId == id) return task;
@@ -110,6 +127,8 @@ class DownloadProgress {
   }
 
   bool isMusicBusy(String id) => taskForMusic(id) != null;
+
+  bool isMusicActive(String id) => activeTaskForMusic(id) != null;
 }
 
 class DownloadProgressNotifier extends Notifier<DownloadProgress> {
@@ -220,13 +239,13 @@ class DownloadProgressNotifier extends Notifier<DownloadProgress> {
 
   void clearFinished() {
     state = DownloadProgress(
-      tasks: state.tasks.where((task) => task.isBusy).toList(),
+      tasks: state.tasks.where((task) => task.isActive).toList(),
     );
   }
 
   void remove(String id) {
     state = DownloadProgress(
-      tasks: state.tasks.where((task) => task.id != id || task.isBusy).toList(),
+      tasks: state.tasks.where((task) => task.id != id || task.isActive).toList(),
     );
   }
 
@@ -260,6 +279,8 @@ String describeStage(DownloadStage stage) {
       return '写入标签';
     case DownloadStage.finishing:
       return '移动到下载目录';
+    case DownloadStage.paused:
+      return '已暂停';
     case DownloadStage.done:
       return '完成';
     case DownloadStage.failed:

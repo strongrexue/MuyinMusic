@@ -5,6 +5,7 @@ import 'package:prism_ui/icons/icons.dart' as prism_glyph;
 import '../../../core/ui/music_action_glyphs.dart';
 import '../../../theme/app_motion.dart';
 import '../../downloads/download_progress.dart';
+import '../../downloads/widgets/download_task_chip.dart';
 import '../../songs/liked_songs_store.dart';
 import '../resolved_playlist_track.dart';
 import 'playlist_artwork.dart';
@@ -32,19 +33,13 @@ class _TrackDownloadButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final busy = task?.isBusy ?? false;
     final done = downloaded || task?.stage == DownloadStage.done;
-    if (busy) {
-      return SizedBox.square(
+    final paused = task?.isPaused ?? false;
+    if ((busy || paused) && task != null) {
+      return DownloadTaskChip(
+        task: task!,
         dimension: 44,
-        child: Center(
-          child: SizedBox.square(
-            dimension: 20,
-            child: CircularProgressIndicator(
-              value: task?.fraction,
-              strokeWidth: 2.2,
-              color: scheme.primary,
-            ),
-          ),
-        ),
+        progressSize: 20,
+        color: paused ? scheme.tertiary : scheme.primary,
       );
     }
     return prism.IconButton(

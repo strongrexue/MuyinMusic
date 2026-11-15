@@ -13,6 +13,7 @@ import '../../../core/ui/music_action_glyphs.dart';
 import '../../../theme/app_motion.dart';
 import '../../../theme/app_theme.dart';
 import '../../downloads/download_progress.dart';
+import '../../downloads/widgets/download_task_chip.dart';
 import '../../playlists/playlist_models.dart';
 import '../../songs/liked_songs_store.dart';
 
@@ -212,36 +213,40 @@ class SearchResultTile extends ConsumerWidget {
                                 : scheme.onSurfaceVariant,
                           ),
                         ),
-                        prism.IconButton(
-                          key: ValueKey('search-download-${music.id}'),
-                          tooltip: done ? '已下载' : '下载',
-                          style: prism.ButtonStyle.from(
-                            fixedSize: const Size.square(40),
-                            tapTargetSize: prism.TapTargetSize.shrinkWrap,
-                            padding: EdgeInsets.zero,
+                        if (task != null && !done && !failed && task.isActive)
+                          DownloadTaskChip(
+                            key: ValueKey('search-download-${music.id}'),
+                            task: task,
+                            dimension: 40,
+                            progressSize: 19,
+                            strokeWidth: 2,
+                            color: task.isPaused
+                                ? scheme.tertiary
+                                : scheme.primary,
+                          )
+                        else
+                          prism.IconButton(
+                            key: ValueKey('search-download-${music.id}'),
+                            tooltip: done ? '已下载' : '下载',
+                            style: prism.ButtonStyle.from(
+                              fixedSize: const Size.square(40),
+                              tapTargetSize: prism.TapTargetSize.shrinkWrap,
+                              padding: EdgeInsets.zero,
+                            ),
+                            onPressed: done ? null : onDownload,
+                            icon: prism_glyph.GlyphIcon(
+                              done
+                                  ? MusicActionGlyphs.downloaded
+                                  : MusicActionGlyphs.download,
+                              size: 21,
+                              fill: 0,
+                              color: done
+                                  ? scheme.onSurfaceVariant.withValues(
+                                      alpha: 0.4,
+                                    )
+                                  : scheme.onSurfaceVariant,
+                            ),
                           ),
-                          onPressed: done ? null : onDownload,
-                          icon: task != null && !done && !failed
-                              ? SizedBox.square(
-                                  dimension: 19,
-                                  child: CircularProgressIndicator(
-                                    value: task.fraction,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : prism_glyph.GlyphIcon(
-                                  done
-                                      ? MusicActionGlyphs.downloaded
-                                      : MusicActionGlyphs.download,
-                                  size: 21,
-                                  fill: 0,
-                                  color: done
-                                      ? scheme.onSurfaceVariant.withValues(
-                                          alpha: 0.4,
-                                        )
-                                      : scheme.onSurfaceVariant,
-                                ),
-                        ),
                         prism.IconButton(
                           key: ValueKey('search-playlist-${music.id}'),
                           tooltip: '加入歌单',

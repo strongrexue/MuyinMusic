@@ -12,6 +12,7 @@ import '../../../core/ui/cover_image_source.dart';
 import '../../../theme/app_motion.dart';
 import '../../downloads/download_history_store.dart';
 import '../../downloads/download_progress.dart';
+import '../../downloads/widgets/download_task_chip.dart';
 import 'song_actions_menu.dart';
 
 const double _songRowCoverSize = 52;
@@ -208,6 +209,15 @@ class SongRow extends ConsumerWidget {
                                   entry.savedPath?.trim().isNotEmpty == true,
                               liked: liked,
                               onToggleLike: onToggleLike,
+                              onPauseDownload: task == null
+                                  ? null
+                                  : () => pauseDownload(context, ref, task.id),
+                              onResumeDownload: task == null
+                                  ? null
+                                  : () => resumeDownload(context, ref, task.id),
+                              onCancelDownload: task == null
+                                  ? null
+                                  : () => cancelDownload(context, ref, task.id),
                             )
                           : SongActionsMenu.local(
                               key: ValueKey('song-menu-${entry.id}'),

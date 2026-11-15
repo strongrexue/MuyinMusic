@@ -10,6 +10,7 @@ import '../../../core/ui/app_toast.dart';
 import '../../../core/ui/music_action_glyphs.dart';
 import '../../downloads/download_history_store.dart';
 import '../../downloads/download_progress.dart';
+import '../../downloads/widgets/download_task_chip.dart';
 import '../../playlists/playlist_models.dart';
 import '../../playlists/playlist_store.dart';
 import '../../playlists/widgets/playlist_add_popup.dart';
@@ -261,6 +262,7 @@ class _DownloadActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final busy = task?.isBusy ?? false;
+    final paused = task?.isPaused ?? false;
     final done = downloaded || task?.stage == DownloadStage.done;
     final fraction = task?.fraction;
     final tooltip = done
@@ -273,19 +275,12 @@ class _DownloadActionButton extends StatelessWidget {
         ? '下载'
         : disabledReason;
 
-    if (busy) {
-      return SizedBox.square(
+    if ((busy || paused) && task != null) {
+      return DownloadTaskChip(
+        task: task!,
         dimension: _playerActionTargetSize,
-        child: Center(
-          child: SizedBox.square(
-            dimension: _playerActionGlyphSize,
-            child: CircularProgressIndicator(
-              value: fraction,
-              strokeWidth: 2.2,
-              color: playerInk(context),
-            ),
-          ),
-        ),
+        progressSize: _playerActionGlyphSize,
+        color: playerInk(context),
       );
     }
     return _PlayerActionButton(

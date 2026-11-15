@@ -103,13 +103,7 @@ void main() {
       );
       final cancelled = expectLater(
         download,
-        throwsA(
-          isA<DioException>().having(
-            (error) => error.type,
-            'type',
-            DioExceptionType.cancel,
-          ),
-        ),
+        throwsA(isA<DownloadCancelledException>()),
       );
       await received.future.timeout(const Duration(seconds: 5));
       expect(
@@ -129,6 +123,139 @@ void main() {
       expect(fixture.cache.listSync(), isEmpty);
     },
   );
+
+  test('cancelTask aborts a standalone download by its task id', () async {
+    final adapter = _HoldingAudioAdapter();
+    final fixture = await _fixture(adapter: adapter);
+    final received = Completer<void>();
+    fixture.container.listen(downloadProgressProvider, (_, progress) {
+      if (!received.isCompleted &&
+          progress.tasks.any((task) => task.received > 0)) {
+        received.complete();
+      }
+    });
+
+    final download = fixture.service.downloadOne(
+      music: _music('standalone-song'),
+      embed: _withoutMetadata,
+    );
+    final cancelled = expectLater(
+      download,
+      throwsA(isA<DownloadCancelledException>()),
+    );
+    await received.future.timeout(const Duration(seconds: 5));
+
+    final task = fixture.container.read(downloadProgressProvider).tasks.single;
+    expect(fixture.service.isTaskCancellable(task.id), isTrue);
+    expect(fixture.service.cancelTask(task.id), isTrue);
+    await cancelled;
+
+    expect(fixture.service.isTaskCancellable(task.id), isFalse);
+    expect(fixture.container.read(downloadProgressProvider).tasks, isEmpty);
+    expect(fixture.container.read(downloadHistoryProvider), isEmpty);
+    expect(fixture.downloads.listSync(), isEmpty);
+    expect(fixture.cache.listSync(), isEmpty);
+  });
+
+  test(
+    'pauseTask keeps the row and resumeTask starts a fresh transfer',
+    () async {
+      final adapter = _HoldingAudioAdapter();
+      final fixture = await _fixture(adapter: adapter);
+      final received = Completer<void>();
+      fixture.container.listen(downloadProgressProvider, (_, progress) {
+        if (!received.isCompleted &&
+            progress.tasks.any((task) => task.received > 0)) {
+          received.complete();
+        }
+      });
+
+      final download = fixture.service.downloadOne(
+        music: _music('paused-resumable'),
+        embed: _withoutMetadata,
+      );
+      final paused = expectLater(
+        download,
+        throwsA(isA<DownloadPausedException>()),
+      );
+      await received.future.timeout(const Duration(seconds: 5));
+
+      final task = fixture.container.read(downloadProgressProvider).tasks.single;
+      expect(fixture.service.isTaskRunning(task.id), isTrue);
+      expect(fixture.service.pauseTask(task.id), isTrue);
+      await paused;
+
+      final parked = fixture.container
+          .read(downloadProgressProvider)
+          .tasks
+          .single;
+      expect(parked.id, task.id);
+      expect(parked.isPaused, isTrue);
+      expect(parked.isActive, isTrue);
+      expect(fixture.service.isTaskResumable(task.id), isTrue);
+      expect(fixture.container.read(downloadHistoryProvider), isEmpty);
+
+      // Resuming re-downloads from scratch; the holding adapter keeps the new
+      // transfer open, so abort it instead of waiting for it to finish.
+      expect(fixture.service.resumeTask(task.id), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final rows = fixture.container.read(downloadProgressProvider).tasks;
+      expect(rows.length, 1);
+      expect(rows.single.musicId, 'paused-resumable');
+      expect(rows.single.isPaused, isFalse);
+      expect(fixture.downloads.listSync(), isEmpty);
+
+      expect(fixture.service.isTaskRunning(rows.single.id), isTrue);
+      expect(fixture.service.cancelTask(rows.single.id), isTrue);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (fixture.container.read(downloadProgressProvider).tasks.isNotEmpty &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(fixture.container.read(downloadProgressProvider).tasks, isEmpty);
+    },
+  );
+
+  test('cancelTask drops a paused task and its row', () async {
+    final adapter = _HoldingAudioAdapter();
+    final fixture = await _fixture(adapter: adapter);
+    final received = Completer<void>();
+    fixture.container.listen(downloadProgressProvider, (_, progress) {
+      if (!received.isCompleted &&
+          progress.tasks.any((task) => task.received > 0)) {
+        received.complete();
+      }
+    });
+
+    final download = fixture.service.downloadOne(
+      music: _music('paused-then-cancelled'),
+      embed: _withoutMetadata,
+    );
+    final paused = expectLater(
+      download,
+      throwsA(isA<DownloadPausedException>()),
+    );
+    await received.future.timeout(const Duration(seconds: 5));
+
+    final task = fixture.container.read(downloadProgressProvider).tasks.single;
+    expect(fixture.service.pauseTask(task.id), isTrue);
+    await paused;
+    expect(
+      fixture.container.read(downloadProgressProvider).tasks.single.isPaused,
+      isTrue,
+    );
+
+    // A paused task no longer owns a live token, but cancelling it must still
+    // succeed and remove the row (the downloads page shows "取消下载").
+    expect(fixture.service.cancelTask(task.id), isTrue);
+    expect(fixture.container.read(downloadProgressProvider).tasks, isEmpty);
+    expect(fixture.service.isTaskResumable(task.id), isFalse);
+    expect(fixture.downloads.listSync(), isEmpty);
+    expect(fixture.container.read(downloadHistoryProvider), isEmpty);
+
+    // The id is gone now, so a second cancel reports nothing to do.
+    expect(fixture.service.cancelTask(task.id), isFalse);
+  });
 }
 
 Future<
@@ -207,7 +334,9 @@ class _AudioAdapter implements HttpClientAdapter {
 }
 
 class _HoldingAudioAdapter implements HttpClientAdapter {
-  final _stream = StreamController<Uint8List>();
+  // One controller per transfer: a resumed download opens a second request, and
+  // a single-subscription stream cannot be listened to twice.
+  final _streams = <StreamController<Uint8List>>[];
 
   @override
   Future<ResponseBody> fetch(
@@ -215,9 +344,11 @@ class _HoldingAudioAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    _stream.add(Uint8List.fromList([0x49, 0x44, 0x33]));
+    final stream = StreamController<Uint8List>();
+    _streams.add(stream);
+    stream.add(Uint8List.fromList([0x49, 0x44, 0x33]));
     return ResponseBody(
-      _stream.stream,
+      stream.stream,
       200,
       headers: {
         Headers.contentLengthHeader: ['100'],
@@ -227,7 +358,9 @@ class _HoldingAudioAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {
-    unawaited(_stream.close());
+    for (final stream in _streams) {
+      unawaited(stream.close());
+    }
   }
 }
 
