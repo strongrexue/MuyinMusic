@@ -3,7 +3,8 @@ import UIKit
 
 /// iOS placeholder for the forked audio_service plugin.
 /// Registers both client/handler channels the Android side exposes and
-/// answers `notImplemented` until the AVAudioSession implementation lands.
+/// answers every call with a successful no-op. `AudioService.init` awaits
+/// `configure` at startup; a notImplemented answer would white-screen the app.
 public class AudioServicePlugin: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = AudioServicePlugin()
@@ -14,6 +15,6 @@ public class AudioServicePlugin: NSObject, FlutterPlugin {
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    result(FlutterMethodNotImplemented)
+    result(nil)
   }
 }
