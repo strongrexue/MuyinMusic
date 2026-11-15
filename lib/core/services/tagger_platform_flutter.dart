@@ -23,7 +23,7 @@ class TaggerPlatformBackend {
     required bool includeLyrics,
     required bool includeArtwork,
   }) async {
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       try {
         final result = await _nativeTagger
             .invokeMapMethod<String, Object?>('read', <String, Object?>{
@@ -81,7 +81,7 @@ class TaggerPlatformBackend {
           'hasArtwork=$hasArtwork',
     );
 
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       try {
         final result = await _writeWithNativeTagger(
           path,

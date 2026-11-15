@@ -66,7 +66,7 @@ class StorageBrowserService {
 
   final MethodChannel _channel;
 
-  bool get isSupported => Platform.isAndroid;
+  bool get isSupported => Platform.isAndroid || Platform.isIOS;
 
   Future<List<StorageBrowserEntry>> listRoots() async {
     if (!isSupported) return const [];

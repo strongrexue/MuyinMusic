@@ -5,7 +5,8 @@ name: iOS Build
 # (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
 #
 # Batch-1 scope: BASS 播放 + JS 音源运行时 + Runner 原生通道 + 后台/锁屏。
-# 灵动岛实时活动（WidgetKit 扩展）与备用图标属第二批次，这里暂不打包。
+# Batch-2 scope: 灵动岛实时活动 + 桌面小组件（WidgetKit 扩展，build_widget_extension.sh
+#               独立编译后嵌入 PlugIns/）+ 备用图标运行时 + iOS 文件打开（takePendingAudio）。
 on:
   # Manual dispatch is available once this workflow is merged to the default branch.
   workflow_dispatch:
@@ -132,11 +133,22 @@ jobs:
           cat "ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" 2>&1
           echo "::endgroup::"
 
+      - name: Verify live activity authorization
+        run: node tool/verify_live_activity_auth.mjs
+
       - name: Build iOS (no codesign)
         run: |
           flutter build ios --release --no-codesign \
             --build-name="${{ steps.version.outputs.name }}" \
             --build-number="${{ steps.version.outputs.number }}"
+
+      # Batch-2: WidgetKit 扩展（灵动岛实时活动 + 桌面小组件）。
+      # 扩展不进 Runner.xcodeproj，用 xcrun swiftc 独立编译成 .appex 再塞进 PlugIns/。
+      # 失败最多只是没有小组件，主 App 照常出包。
+      - name: Build WidgetKit extension
+        run: |
+          APP_PATH=build/ios/iphoneos/Runner.app
+          bash tool/build_widget_extension.sh "$APP_PATH"
 
       - name: Package unsigned IPA
         run: |
@@ -150,6 +162,11 @@ jobs:
           zip -qry ../MuyinMusic-unsigned.ipa Payload
           cd ../..
           ls -lh build/MuyinMusic-unsigned.ipa
+          # Batch-2 校验：WidgetKit 扩展是否真的被打进 IPA。
+          echo "::group::Widget extension on disk"
+          ls -la "$APP_PATH/PlugIns" 2>&1 || true
+          find "$APP_PATH/PlugIns" -maxdepth 2 -name '*.appex' 2>&1 || true
+          echo "::endgroup::"
           echo "### 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

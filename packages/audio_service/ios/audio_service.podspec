@@ -1,18 +1,21 @@
 Pod::Spec.new do |s|
   s.name             = 'audio_service'
   s.version          = '0.0.1'
-  s.summary          = 'iOS stub for the forked audio_service plugin.'
+  s.summary          = 'Flutter plugin to play audio in the background while the screen is off.'
   s.description      = <<-DESC
-Placeholder iOS registration so the app compiles; the AVAudioSession /
-MPNowPlayingInfoCenter backed service lands in a later iOS-branch commit.
+Flutter plugin to play audio in the background while the screen is off.
+Backing the forked audio_service (lib/audio_service.dart identical to
+audio_service 0.18.19). The iOS/darwin side (MPNowPlayingInfoCenter lock-screen
+card, AVAudioSession activation, MediaPlayer controls) is supplied verbatim
+from the upstream darwin/ directory; source kept inside packages/audio_service/ios/.
                        DESC
-  s.homepage         = 'https://github.com/strongrexue/MuyinMusic'
+  s.homepage         = 'https://github.com/ryanheise/audio_service'
   s.license          = { :type => 'MIT' }
-  s.author           = { 'Muyin' => 'strongrexue@users.noreply.github.com' }
+  s.author           = { 'Ryan Heise' => 'ryan@ryanheise.com' }
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
-  s.dependency 'Flutter'
-  s.platform = :ios, '15.0'
-  s.swift_version = '5.0'
+  s.source_files = 'audio_service/Sources/audio_service/**/*.{h,m}'
+  s.public_header_files = 'audio_service/Sources/audio_service/include/**/*.h'
+  s.ios.dependency 'Flutter'
+  s.ios.deployment_target = '12.0'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
 end

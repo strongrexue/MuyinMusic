@@ -21,6 +21,7 @@ import 'features/music_sources/music_source_update_prompt.dart';
 import 'features/player/player_controller.dart';
 import 'features/playlists/playlist_store.dart';
 import 'features/player/music_home_widget_service.dart';
+import 'features/player/live_activity_service.dart';
 import 'features/songs/local_song_scan_cache.dart';
 import 'features/startup/startup_gate.dart';
 import 'features/update/app_update_prompt.dart';
@@ -48,6 +49,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   bool _openedExternalAudio = false;
   bool _sourceUpdatePromptsReady = false;
   MusicHomeWidgetService? _homeWidgetService;
+  LiveActivityService? _liveActivityService;
 
   @override
   void initState() {
@@ -63,6 +65,13 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
         await _openPendingExternalAudio();
       });
     }
+    // iOS 的灵动岛 / 锁屏实时活动。真正的推流由 liveActivitySyncProvider
+    // 在首帧之后激活（与桌面小组件同一套节奏）。
+    if (Platform.isIOS) {
+      final liveActivity = ref.read(liveActivityProvider);
+      liveActivity.onOpenPlayer = _openLiveActivityPlayer;
+      _liveActivityService = liveActivity;
+    }
     // Warm persisted library and player state after the first frame, even when
     // the startup screen is skipped.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -75,6 +84,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       ref.read(webDavSyncControllerProvider);
       ref.read(playerControllerProvider.notifier);
       if (Platform.isAndroid) ref.read(musicHomeWidgetSyncProvider);
+      if (Platform.isIOS) ref.read(liveActivitySyncProvider);
       unawaited(_initializeLocalLibrary());
     });
   }
@@ -82,6 +92,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   @override
   void dispose() {
     _homeWidgetService?.onOpenPlayer = null;
+    _liveActivityService?.onOpenPlayer = null;
     if (Platform.isAndroid) _audioIntentChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -160,11 +171,20 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     }
   }
 
+  /// 点灵动岛 / 锁屏实时活动卡片时把播放器推到前台。
+  Future<void> _openLiveActivityPlayer() async {
+    if (!mounted) return;
+    final location = appRouter.routeInformationProvider.value.uri;
+    if (location.path != '/player') {
+      unawaited(appRouter.push<void>('/player', extra: location.toString()));
+    }
+  }
+
   Future<void> _openPendingExternalAudio() async {
-    if (!Platform.isAndroid ||
-        !mounted ||
-        !_externalAudioReady ||
-        _handlingExternalAudio) {
+    // iOS 的 audio_intent 通道实现了 takePendingAudio，会把
+    // 「文件 App → 用沐音打开」的文件复制进沙盒并返回真实路径，
+    // 与 Android 语义一致；缺失插件由 MissingPluginException 兜住。
+    if (!mounted || !_externalAudioReady || _handlingExternalAudio) {
       return;
     }
     _handlingExternalAudio = true;
