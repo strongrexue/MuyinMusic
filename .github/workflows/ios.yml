@@ -4,8 +4,11 @@ name: iOS Build
 # The unsigned .ipa it produces can be signed on Windows with Sideloadly/AltStore
 # (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
 on:
+  # Manual dispatch is available once this workflow is merged to the default branch.
   workflow_dispatch:
   push:
+    branches:
+      - ios
     tags:
       - 'ios-*'
 
