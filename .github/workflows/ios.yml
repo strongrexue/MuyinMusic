@@ -23,6 +23,7 @@ jobs:
 
       - name: Install pods
         run: |
+          flutter pub get
           cd ios
           pod install --repo-update
 
