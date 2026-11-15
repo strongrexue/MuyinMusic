@@ -73,3 +73,7 @@ CLAUDE.md
 # Locally built install packages and python caches
 /*.apk
 tools/__pycache__/
+
+# Cloned analysis repos (not part of this app)
+/repos/
+/*.ipa

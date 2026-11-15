@@ -3,47 +3,176 @@ name: iOS Build
 # Builds the iOS app on a hosted macOS runner, so a Mac is not needed locally.
 # The unsigned .ipa it produces can be signed on Windows with Sideloadly/AltStore
 # (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
+#
+# Batch-1 scope: BASS 播放 + JS 音源运行时 + Runner 原生通道 + 后台/锁屏。
+# 灵动岛实时活动（WidgetKit 扩展）与备用图标属第二批次，这里暂不打包。
 on:
   # Manual dispatch is available once this workflow is merged to the default branch.
   workflow_dispatch:
+    inputs:
+      ref:
+        description: '要构建的分支或 tag'
+        required: false
+        default: ''
   push:
     branches:
       - ios
     tags:
       - 'ios-*'
+    # 文档/截图等改动没必要跑 10 分钟的 macOS 构建。
+    paths-ignore:
+      - '**/*.md'
+      - 'screenshots/**'
+      - 'repos/**'
+
+env:
+  # 项目要求 Flutter >= 3.41.0（pubspec: sdk ^3.11.4，flutter >=3.47.9）。
+  FLUTTER_VERSION: '3.47.9'
+  FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
 
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.47.9'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
-      - name: Install pods
+      - name: Flutter doctor / version
         run: |
-          flutter pub get
-          cd ios
-          pod install --repo-update
+          flutter --version
+          flutter doctor -v
 
-      - name: Build unsigned app
-        run: flutter build ios --release --no-codesign
+      # BASS 的二进制按官方要求不入库，构建前从 un4seen 取。
+      # 没有这一步，pod install 会直接报「未找到 BASS iOS 二进制」。
+      - name: Fetch BASS iOS binaries
+        run: bash tool/fetch_bass_ios.sh
 
-      - name: Package unsigned ipa
+      # preload.js 在 Android 与 iOS 各有一份，必须是同一份内容。
+      - name: Verify preload.js parity
         run: |
           set -e
-          mkdir -p build/ios/ipa/Payload
-          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa
-          zip -qry MuyinMusic-unsigned.ipa Payload
-          ls -lh MuyinMusic-unsigned.ipa
+          a=android/app/src/main/assets/music_source_preload.js
+          b=packages/music_source_runtime/ios/Resources/music_source_preload.js
+          if ! diff -q "$a" "$b"; then
+            echo "::error::music_source_preload.js 两端不一致。请同步："
+            echo "  cp $a $b"
+            exit 1
+          fi
+          echo "preload.js md5: $(md5 -q "$a")"
+
+      # preload.js 的协议与执行顺序是两端共用的硬约束。
+      - name: Verify preload protocol & call order
+        run: node tool/verify_preload_protocol.mjs
+
+      # Swift 私有方法改了参数而调用点漏改这类签名不匹配，编译前先抓。
+      - name: Verify Swift call sites
+        run: node tool/verify_swift_call_sites.mjs
+
+      # patch_xcodeproj.py 已把 ALTERNATE_APPICON_NAMES 注入构建设置，
+      # 需先生成备用图标集，否则 actool 会因找不到 icon set 而失败。
+      - name: Prepare iOS alternate icons
+        run: bash tool/fetch_app_icons.sh
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # iOS 有独立版本号体系（tool/ios_version.txt 是唯一来源）。
+      - name: Resolve iOS version
+        id: version
+        run: |
+          set -e
+          VERSION="$(tr -d '[:space:]' < tool/ios_version.txt)"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){0,2}$'; then
+            echo "::error::tool/ios_version.txt 内容 '$VERSION' 不是 x.y.z 形式"
+            exit 1
+          fi
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "iOS 版本: $VERSION (${{ github.run_number }})"
+
+      # 幂等：把新增 Swift 文件接进 Runner Compile Sources，部署目标对齐 16.2。
+      - name: Ensure Xcode project wiring
+        run: python3 tool/patch_xcodeproj.py
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Unit tests
+        # 上游测试里有若干依赖真机/网络的诊断用例，失败不阻断出包。
+        continue-on-error: true
+        run: flutter test
+
+      - name: Pod install
+        working-directory: ios
+        run: |
+          pod repo update || true
+          pod install --verbose
+
+      # 链接失败时最难查的就是「pod 到底有没有把 BASS 链进来」。
+      - name: Dump pod link settings (diagnostics)
+        run: |
+          set +e
+          echo "::group::BASS frameworks on disk"
+          ls -la packages/bass_player/ios/Frameworks/ 2>&1
+          find packages/bass_player/ios/Frameworks -maxdepth 2 -name 'Info.plist' 2>&1 | head -20
+          echo "::endgroup::"
+          echo "::group::bass_player xcconfig (Release)"
+          cat "ios/Pods/Target Support Files/bass_player/bass_player.release.xcconfig" 2>&1
+          echo "::endgroup::"
+          echo "::group::Pods-Runner xcconfig (Release)"
+          cat "ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" 2>&1
+          echo "::endgroup::"
+
+      - name: Build iOS (no codesign)
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-name="${{ steps.version.outputs.name }}" \
+            --build-number="${{ steps.version.outputs.number }}"
+
+      - name: Package unsigned IPA
+        run: |
+          set -e
+          APP_PATH=build/ios/iphoneos/Runner.app
+          test -d "$APP_PATH" || { echo "::error::$APP_PATH 不存在，构建没有产出 app"; exit 1; }
+          rm -rf build/ipa
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          zip -qry ../MuyinMusic-unsigned.ipa Payload
+          cd ../..
+          ls -lh build/MuyinMusic-unsigned.ipa
+          echo "### 产物" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "未签名 IPA: build/MuyinMusic-unsigned.ipa" >> "$GITHUB_STEP_SUMMARY"
+          echo "版本: ${{ steps.version.outputs.name }} (${{ steps.version.outputs.number }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "App 大小: $(du -sh "$APP_PATH" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "安装方式：用 AltStore / Sideloadly 侧载（免费证书 7 天有效，需定期重签）。" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
           name: MuyinMusic-unsigned-ipa
-          path: build/ios/ipa/MuyinMusic-unsigned.ipa
+          path: build/MuyinMusic-unsigned.ipa
           retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            ios/Pods/Target Support Files/**/*.log
+            build/ios/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7

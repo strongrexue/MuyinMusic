@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/services/app_logger.dart';
+import 'core/services/native_log_bridge.dart';
 import 'core/debug/debug_paint_guard.dart';
 import 'core/sdk/qishui_sdk.dart';
 import 'core/storage/settings_store.dart';
@@ -30,6 +31,9 @@ Future<void> _startApp() async {
   AppLogger.configureRecording(prefs);
   await AppLogger.logEnvironment();
   DebugPaintGuard.install();
+  // iOS 原生失败（实时活动 / 备用图标…）默认只写 NSLog，Release 包用户看不到。
+  // 尽早装上这条桥，后面原生一有问题就直接出现在 App 内的「日志」页。
+  if (Platform.isIOS) NativeLogBridge.install();
   if (Platform.isAndroid) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
