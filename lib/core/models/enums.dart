@@ -18,6 +18,9 @@ enum MusicSource {
     for (final source in MusicSource.values) {
       if (source.code == code) return source;
     }
+    // Imported 汽水 scripts declare the upstream code `qs`; our enum uses
+    // `qishui`. Accept both so such scripts pass validation and resolve.
+    if (code == 'qs') return MusicSource.qishui;
     return null;
   }
 }

@@ -56,12 +56,10 @@ HttpClientAdapter createPlatformAdapter({NetworkAdapterMode? adapterMode}) {
 }
 
 HttpClientAdapter _createSystemAdapter() {
-  if (Platform.isAndroid || Platform.isWindows || Platform.isLinux) {
-    return IOHttpClientAdapter();
-  }
-  if (Platform.isIOS || Platform.isMacOS) {
-    return _createNativeAdapter();
-  }
+  // Use dart:io's IOHttpClientAdapter on every platform. The native_dio_adapter /
+  // cupertino_http (URLSession) stack is less reliable against the Chinese
+  // anti-bot endpoints we call (163/kugou/qq/migu…): leaderboard / playlist
+  // previews commonly fail there while the same request succeeds via dart:io.
   return IOHttpClientAdapter();
 }
 

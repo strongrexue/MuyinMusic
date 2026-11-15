@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>栖弦</string>
+	<string>沐音</string>
 	<!-- Widget Extension 的可执行文件名，必须与 .appex 里的二进制同名 -->
 	<key>CFBundleExecutable</key>
 	<string>CyShineMusicWidget</string>
