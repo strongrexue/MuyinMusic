@@ -968,7 +968,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       final music = entry.musicInfo;
       if (music == null ||
           (entry.savedPath?.isNotEmpty ?? false) ||
-          progress.isMusicBusy(music.id)) {
+          progress.isMusicActive(music.id)) {
         skipped++;
         continue;
       }

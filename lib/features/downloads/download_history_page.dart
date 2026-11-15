@@ -2,9 +2,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/services/saf_storage.dart';
 import '../../core/services/local_audio_source.dart';
+import '../../core/services/download_service.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/animated_empty_state.dart';
 import '../../core/ui/configurable_m3e_progress.dart';
@@ -32,12 +34,12 @@ class _DownloadHistoryPageState extends ConsumerState<DownloadHistoryPage> {
     final progress = ref.watch(downloadProgressProvider);
     final history = ref.watch(downloadHistoryProvider);
     final busyTasks = progress.tasks
-        .where((task) => task.isBusy)
+        .where((task) => task.isActive)
         .toList(growable: false)
         .reversed
         .toList(growable: false);
     final finishedTasks = progress.tasks
-        .where((task) => !task.isBusy)
+        .where((task) => !task.isActive)
         .toList(growable: false)
         .reversed
         .toList(growable: false);
@@ -300,16 +302,23 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _TaskCard extends StatelessWidget {
+class _TaskCard extends ConsumerWidget {
   const _TaskCard({required this.task});
 
   final DownloadTask task;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final tone = _toneFor(task.stage, scheme);
     final fraction = task.fraction;
+    // Batch items are driven by BatchDownloadController (pause/resume live in
+    // the batch sheet), so only standalone downloads get inline controls.
+    final standalone = task.batchTaskId == null;
+    final paused = task.isPaused;
+    // A cancelled transfer drops the row, so awaiting the cancel is unnecessary:
+    // the service does it from the interrupted download loop.
+    final showPause = standalone && (task.isBusy || paused);
 
     return AnimatedContainer(
       duration: AppMotion.medium,
@@ -360,6 +369,12 @@ class _TaskCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               _PercentPill(task: task, color: tone),
+              if (showPause) ...[
+                const SizedBox(width: 4),
+                _PauseDownloadButton(taskId: task.id, paused: paused),
+                const SizedBox(width: 2),
+                _CancelDownloadButton(taskId: task.id, paused: paused),
+              ],
             ],
           ),
           const SizedBox(height: 14),
@@ -418,6 +433,85 @@ class _TaskCard extends StatelessWidget {
   }
 }
 
+class _PauseDownloadButton extends ConsumerWidget {
+  const _PauseDownloadButton({required this.taskId, required this.paused});
+
+  final String taskId;
+  final bool paused;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final service = ref.read(downloadServiceProvider);
+    return prism.IconButton(
+      key: ValueKey('download-pause-$taskId'),
+      tooltip: paused ? '继续下载' : '暂停下载',
+      style: prism.ButtonStyle.from(
+        fixedSize: const Size.square(30),
+        tapTargetSize: prism.TapTargetSize.shrinkWrap,
+        padding: EdgeInsets.zero,
+      ),
+      onPressed: () {
+        if (paused) {
+          final resumed = service.resumeTask(taskId);
+          if (!resumed) {
+            showAppToast(context, '该任务已经结束', type: AppToastType.info);
+          }
+          return;
+        }
+        final stopped = service.pauseTask(taskId);
+        if (!stopped) {
+          showAppToast(context, '该任务已经结束', type: AppToastType.info);
+        }
+      },
+      icon: Icon(
+        paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+        size: 19,
+        color: paused
+            ? scheme.primary
+            : scheme.onSurfaceVariant.withValues(alpha: 0.78),
+      ),
+    );
+  }
+}
+
+class _CancelDownloadButton extends ConsumerWidget {
+  const _CancelDownloadButton({required this.taskId, this.paused = false});
+
+  final String taskId;
+  final bool paused;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    return prism.IconButton(
+      key: ValueKey('download-cancel-$taskId'),
+      tooltip: paused ? '移除任务' : '取消下载',
+      style: prism.ButtonStyle.from(
+        fixedSize: const Size.square(30),
+        tapTargetSize: prism.TapTargetSize.shrinkWrap,
+        padding: EdgeInsets.zero,
+      ),
+      onPressed: () {
+        final service = ref.read(downloadServiceProvider);
+        if (paused) {
+          service.discardTask(taskId);
+          return;
+        }
+        final cancelled = service.cancelTask(taskId);
+        if (!cancelled) {
+          showAppToast(context, '该任务已经结束', type: AppToastType.info);
+        }
+      },
+      icon: Icon(
+        Icons.close_rounded,
+        size: 17,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
+      ),
+    );
+  }
+}
+
 class _TaskStatusIcon extends StatelessWidget {
   const _TaskStatusIcon({required this.stage, required this.color});
 
@@ -428,6 +522,7 @@ class _TaskStatusIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final icon = switch (stage) {
       DownloadStage.downloading => Icons.arrow_downward_rounded,
+      DownloadStage.paused => Icons.pause_rounded,
       DownloadStage.done => Icons.check_rounded,
       DownloadStage.failed => Icons.error_outline_rounded,
       _ => Icons.music_note_rounded,

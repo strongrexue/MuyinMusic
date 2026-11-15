@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -66,6 +67,23 @@ class DownloadSourceFallbackException implements Exception {
   String toString() => message;
 }
 
+/// Thrown by [DownloadService.downloadOne] when the user cancels the task.
+class DownloadCancelledException implements Exception {
+  const DownloadCancelledException();
+
+  @override
+  String toString() => '已取消下载';
+}
+
+/// Thrown by [DownloadService.downloadOne] when the user pauses the task.
+/// Unlike a cancel the progress row survives, so the user can resume it.
+class DownloadPausedException implements Exception {
+  const DownloadPausedException();
+
+  @override
+  String toString() => '已暂停下载';
+}
+
 class BatchDownloadResult {
   const BatchDownloadResult({required this.music, this.result, this.error});
 
@@ -74,6 +92,22 @@ class BatchDownloadResult {
   final Object? error;
 
   bool get success => result != null;
+}
+
+/// Everything [DownloadService.resumeTask] needs to start a paused transfer
+/// over: the original request, since the partial file is discarded.
+class _ResumableDownload {
+  const _ResumableDownload({
+    required this.music,
+    required this.quality,
+    required this.embed,
+    required this.batchTaskId,
+  });
+
+  final MusicInfo music;
+  final Quality? quality;
+  final EmbedRequest embed;
+  final String? batchTaskId;
 }
 
 class DownloadService {
@@ -85,6 +119,83 @@ class DownloadService {
 
   final Set<String> _batchDownloadKeys = {};
   final Set<String> _reservedTargetPaths = {};
+
+  /// Live cancel tokens per download task id, so the downloads page can abort
+  /// a running transfer (single downloads get their own token; batch items
+  /// pass one in from [BatchDownloadController]).
+  final Map<String, CancelToken> _activeTaskTokens = {};
+
+  /// Task ids the user paused. [downloadOne] checks this when its token gets
+  /// cancelled so a pause keeps the progress row instead of dropping it.
+  final Set<String> _pausedTaskIds = {};
+
+  /// What a paused task needs to start over: [downloadOne] has no ranged
+  /// resume, so resuming re-runs the transfer from zero.
+  final Map<String, _ResumableDownload> _resumableTasks = {};
+
+  bool isTaskCancellable(String taskId) =>
+      _activeTaskTokens.containsKey(taskId);
+
+  /// True while a transfer is still running, i.e. it can be paused or aborted.
+  bool isTaskRunning(String taskId) => _activeTaskTokens.containsKey(taskId);
+
+  bool isTaskResumable(String taskId) => _resumableTasks.containsKey(taskId);
+
+  /// Aborts a running download. Returns false when the task already finished.
+  /// The transfer itself reports completion: [downloadOne] observes the
+  /// cancelled token and clears the progress task. A paused task has no live
+  /// token any more, so it is dropped together with its resumable snapshot.
+  bool cancelTask(String taskId) {
+    final wasPaused =
+        _resumableTasks.remove(taskId) != null ||
+        _pausedTaskIds.remove(taskId);
+    final token = _activeTaskTokens.remove(taskId);
+    if (token != null && !token.isCancelled) {
+      token.cancel('用户取消下载');
+      return true;
+    }
+    if (wasPaused) {
+      _ref.read(downloadProgressProvider.notifier).cancel(taskId);
+      return true;
+    }
+    return false;
+  }
+
+  /// Stops the transfer but keeps its progress row so [resumeTask] can restart
+  /// it. Returns false when the task already finished or was paused before.
+  bool pauseTask(String taskId) {
+    final token = _activeTaskTokens.remove(taskId);
+    if (token == null || token.isCancelled) return false;
+    _pausedTaskIds.add(taskId);
+    token.cancel('用户暂停下载');
+    return true;
+  }
+
+  /// Restarts a paused task from the beginning. Returns false when nothing is
+  /// pending for that id.
+  bool resumeTask(String taskId) {
+    final pending = _resumableTasks.remove(taskId);
+    if (pending == null) return false;
+    _ref.read(downloadProgressProvider.notifier).cancel(taskId);
+    unawaited(
+      downloadOne(
+        music: pending.music,
+        quality: pending.quality,
+        embed: pending.embed,
+        batchTaskId: pending.batchTaskId,
+        // Nobody awaits this transfer, so swallow its failure here: pause,
+        // cancel and errors already land on the progress row.
+      ).then<void>((_) {}, onError: (Object error, StackTrace stack) {}),
+    );
+    return true;
+  }
+
+  /// Drops a paused task's row without touching the network.
+  void discardTask(String taskId) {
+    _resumableTasks.remove(taskId);
+    _pausedTaskIds.remove(taskId);
+    _ref.read(downloadProgressProvider.notifier).cancel(taskId);
+  }
 
   Future<List<BatchDownloadResult>> downloadMany({
     required List<MusicInfo> musics,
@@ -176,6 +287,11 @@ class DownloadService {
     final progress = _ref.read(downloadProgressProvider.notifier);
     final taskId = progress.start(music, batchTaskId: batchTaskId);
 
+    // A single download owns its token so the downloads page can cancel it by
+    // task id; batch items arrive with a token from BatchDownloadController.
+    final token = cancelToken ?? CancelToken();
+    _activeTaskTokens[taskId] = token;
+
     final api = _ref.read(musicApiProvider);
     final dio = _ref.read(apiClientProvider);
     final settings = _ref.read(settingsProvider);
@@ -185,7 +301,7 @@ class DownloadService {
     }
 
     void ensureActive() {
-      final cancellation = cancelToken?.cancelError;
+      final cancellation = token.cancelError;
       if (cancellation != null) throw cancellation;
     }
 
@@ -218,9 +334,7 @@ class DownloadService {
         sourceResult = await resolver.useFirstAvailable<_DownloadedAudio>(
           music: music,
           quality: requestedQuality,
-          isCancelled: cancelToken == null
-              ? null
-              : () => cancelToken.isCancelled,
+          isCancelled: () => token.isCancelled,
           shouldFallbackOnConsumerError: _shouldFallbackAfterDownloadError,
           use: (source, musicUrl) async {
             ensureActive();
@@ -255,7 +369,7 @@ class DownloadService {
               await dio.download(
                 musicUrl.url,
                 candidateTmpPath,
-                cancelToken: cancelToken,
+                cancelToken: token,
                 options: Options(
                   headers: const {
                     'User-Agent':
@@ -321,7 +435,7 @@ class DownloadService {
             dio,
             music,
             log,
-            cancelToken: cancelToken,
+            cancelToken: token,
           );
           log('step4 cover bytes=${coverBytes?.length ?? 0}');
         }
@@ -430,10 +544,25 @@ class DownloadService {
       await _attachDownload(music, resolvedQuality, finalPath, log);
       return DownloadResult(path: finalPath);
     } catch (e, s) {
-      if (cancelToken?.isCancelled ?? false) {
+      if (token.isCancelled) {
+        if (_pausedTaskIds.remove(taskId)) {
+          log('PAUSED: $e');
+          progress.updateStage(
+            taskId,
+            DownloadStage.paused,
+            message: '已暂停，点继续重新下载',
+          );
+          _resumableTasks[taskId] = _ResumableDownload(
+            music: music,
+            quality: quality,
+            embed: embed,
+            batchTaskId: batchTaskId,
+          );
+          throw const DownloadPausedException();
+        }
         log('CANCELLED: $e');
         progress.cancel(taskId);
-        rethrow;
+        throw const DownloadCancelledException();
       }
       log('FAILED at outer catch: $e');
       log('stack: $s');
@@ -446,6 +575,7 @@ class DownloadService {
       );
       rethrow;
     } finally {
+      _activeTaskTokens.remove(taskId);
       if (taskCacheDir != null) {
         try {
           if (taskCacheDir.existsSync()) {

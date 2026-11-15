@@ -834,7 +834,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
       final music = item.track.musicInfo;
       if (item.localEntry != null ||
           music == null ||
-          progress.isMusicBusy(music.id)) {
+          progress.isMusicActive(music.id)) {
         continue;
       }
       selected.add(item);

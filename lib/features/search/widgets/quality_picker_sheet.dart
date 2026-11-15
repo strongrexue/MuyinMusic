@@ -363,6 +363,22 @@ class _QualityPickerSheetState extends ConsumerState<QualityPickerSheet> {
         duration: const Duration(seconds: 4),
       );
     } catch (e) {
+      if (e is DownloadCancelledException) {
+        showAppToastOnOverlay(
+          toastOverlay,
+          '已取消下载',
+          type: AppToastType.info,
+        );
+        return;
+      }
+      if (e is DownloadPausedException) {
+        showAppToastOnOverlay(
+          toastOverlay,
+          '已暂停下载，可在下载页继续',
+          type: AppToastType.info,
+        );
+        return;
+      }
       showAppToastOnOverlay(toastOverlay, '下载失败：$e', type: AppToastType.error);
     }
   }
