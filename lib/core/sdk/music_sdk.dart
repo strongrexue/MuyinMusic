@@ -6,7 +6,7 @@ import 'internal/builders.dart';
 import 'kg_sdk.dart';
 import 'kw_sdk.dart';
 import 'mg_sdk.dart';
-import 'qishui_sdk.dart';
+import 'qs_sdk.dart';
 import 'tx_sdk.dart';
 import 'wy_sdk.dart';
 
@@ -30,8 +30,8 @@ class MusicSdkAggregator {
         return TxSdk.search(keyword, page: page, limit: limit);
       case MusicSource.wy:
         return WySdk.search(keyword, page: page, limit: limit);
-      case MusicSource.qishui:
-        return QishuiSdk.search(keyword, page: page, limit: limit);
+      case MusicSource.qs:
+        return QsSdk.search(keyword, page: page, limit: limit);
       case MusicSource.all:
         throw ArgumentError('use search() for source=all');
     }
@@ -49,8 +49,8 @@ class MusicSdkAggregator {
         return TxSdk.tip(keyword);
       case MusicSource.wy:
         return WySdk.tip(keyword);
-      case MusicSource.qishui:
-        return QishuiSdk.tip(keyword);
+      case MusicSource.qs:
+        return QsSdk.tip(keyword);
       case MusicSource.all:
         throw ArgumentError('use tip() for source=all');
     }
@@ -196,8 +196,8 @@ class MusicSdkAggregator {
         return TxSdk.getLyric(info);
       case MusicSource.wy:
         return WySdk.getLyric(info);
-      case MusicSource.qishui:
-        return QishuiSdk.getLyric(info);
+      case MusicSource.qs:
+        return QsSdk.getLyric(info);
       case MusicSource.all:
         throw ArgumentError('lyric requires a concrete source');
     }
@@ -231,8 +231,8 @@ class MusicSdkAggregator {
           return await TxSdk.getPicUrl(info);
         case MusicSource.wy:
           return await WySdk.getPicUrl(info);
-        case MusicSource.qishui:
-          return await QishuiSdk.getPicUrl(info);
+        case MusicSource.qs:
+          return await QsSdk.getPicUrl(info);
         case MusicSource.all:
           return null;
       }

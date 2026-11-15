@@ -5,20 +5,27 @@ enum MusicSource {
   tx('tx', 'QQ'),
   wy('wy', '网易云'),
   mg('mg', '咪咕'),
-  qishui('qishui', '汽水');
+  qs('qs', '汽水');
 
   const MusicSource(this.code, this.label);
   final String code;
   final String label;
 
+  /// Codes used by releases before the source was renamed to match imported
+  /// sources (`qs`). Saved playlists, download history and settings still carry
+  /// the old value, so both spellings must resolve to the same source.
+  static const Map<String, MusicSource> _legacyCodes = {
+    'qishui': MusicSource.qs,
+  };
+
   static MusicSource fromCode(String code) =>
-      MusicSource.values.firstWhere((s) => s.code == code, orElse: () => all);
+      tryFromCode(code) ?? MusicSource.all;
 
   static MusicSource? tryFromCode(String code) {
     for (final source in MusicSource.values) {
       if (source.code == code) return source;
     }
-    return null;
+    return _legacyCodes[code];
   }
 }
 
@@ -29,14 +36,14 @@ const List<MusicSource> kManageableSearchSources = [
   MusicSource.tx,
   MusicSource.wy,
   MusicSource.mg,
-  MusicSource.qishui,
+  MusicSource.qs,
 ];
 const Set<MusicSource> kDefaultEnabledSearchSources = {
   MusicSource.kw,
   MusicSource.kg,
   MusicSource.tx,
   MusicSource.wy,
-  MusicSource.qishui,
+  MusicSource.qs,
 };
 
 enum DownloadFileNameFormat {

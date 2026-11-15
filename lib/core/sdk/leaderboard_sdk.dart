@@ -18,7 +18,7 @@ import 'playlist_adapters/kg_playlist_adapter.dart';
 import 'playlist_adapters/kw_playlist_adapter.dart';
 import 'playlist_adapters/mg_playlist_adapter.dart';
 import 'playlist_sdk.dart';
-import 'qishui_sdk.dart';
+import 'qs_sdk.dart';
 
 typedef LeaderboardJsonPoster =
     Future<dynamic> Function(
@@ -67,6 +67,13 @@ class LeaderboardSdk {
     LeaderboardJsonPoster? jsonPoster,
     LeaderboardPlaylistLoader? playlistLoader,
   }) async {
+    // The homepage shelf already carries the first tracks, so a preview taken
+    // from it costs no request.
+    if (board.source == MusicSource.qs && board.previewTracks.isNotEmpty) {
+      return board.copyWith(
+        previewTracks: board.previewTracks.take(limit).toList(growable: false),
+      );
+    }
     final detail = await get(
       source: board.source,
       boardId: board.boardId,
@@ -118,7 +125,7 @@ class LeaderboardSdk {
         maxTracks: maxTracks,
         load: jsonLoader ?? SdkHttp.getJson,
       ),
-      MusicSource.qishui => _getQishui(board, maxTracks: maxTracks),
+      MusicSource.qs => _getQs(board, maxTracks: maxTracks),
       MusicSource.all => throw Exception('排行榜不支持“全部”音源'),
     };
   }
@@ -158,21 +165,13 @@ class LeaderboardSdk {
     return _decodeJson(response.body);
   }
 
-  static Future<PlaylistInfo> _getQishui(
+  static Future<PlaylistInfo> _getQs(
     LeaderboardSummary board, {
     int? maxTracks,
-  }) async {
-    final tracks = await QishuiSdk.chart(
-      board.boardId,
-      limit: maxTracks ?? 50,
-    );
-    return PlaylistInfo(
-      id: board.boardId,
-      name: board.name,
-      source: MusicSource.qishui,
-      tracks: tracks,
-      trackCount: tracks.length,
-    );
+  }) {
+    // The detail reply carries the platform's own title, blurb and cover; the
+    // local directory only knows the id.
+    return QsSdk.leaderboard(board.boardId, maxTracks: maxTracks);
   }
 
   static Future<PlaylistInfo> _getTx(

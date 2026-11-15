@@ -34,7 +34,7 @@ const _miguPlaylistCategories = <PlaylistCatalogCategory>[
   PlaylistCatalogCategory(id: '15127315', label: '推荐'),
 ];
 
-const _qishuiPlaylistCategories = <PlaylistCatalogCategory>[
+const _qsPlaylistCategories = <PlaylistCatalogCategory>[
   PlaylistCatalogCategory(id: 'mix', label: '推荐'),
 ];
 
@@ -46,7 +46,7 @@ List<PlaylistCatalogCategory> playlistCatalogCategoriesFor(
   MusicSource.tx => _qqPlaylistCategories,
   MusicSource.wy => _neteasePlaylistCategories,
   MusicSource.mg => _miguPlaylistCategories,
-  MusicSource.qishui => _qishuiPlaylistCategories,
+  MusicSource.qs => _qsPlaylistCategories,
   MusicSource.all => const <PlaylistCatalogCategory>[],
 };
 

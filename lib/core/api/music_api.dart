@@ -16,6 +16,7 @@ import '../sdk/leaderboard_sdk.dart';
 import '../sdk/music_sdk.dart' as sdk;
 import '../sdk/playlist_catalog_sdk.dart';
 import '../sdk/playlist_sdk.dart';
+import '../sdk/qs_sdk.dart';
 import '../storage/settings_store.dart';
 
 class MusicApi {
@@ -259,6 +260,9 @@ class MusicApi {
   }
 
   Future<List<LeaderboardSummary>> getLeaderboards(MusicSource source) async {
+    // 汽水音乐 publishes its chart list on the homepage, so the directory has
+    // to be asked for rather than read from a static table.
+    if (source == MusicSource.qs) return QsSdk.boards();
     return LeaderboardSdk.boards(source);
   }
 

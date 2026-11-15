@@ -7,15 +7,15 @@ import 'catalog/kw_catalog.dart';
 import 'catalog/mg_catalog.dart';
 import 'catalog/tx_catalog.dart';
 import 'catalog/wy_catalog.dart';
-import 'qishui_sdk.dart';
+import 'qs_sdk.dart';
 
 class CatalogSdk {
   static bool supports(MusicSource source, SearchCategory category) {
     if (category == SearchCategory.songs || category == SearchCategory.all) {
       return true;
     }
-    // Qishui offers singers, albums and a browsable playlist feed.
-    if (source == MusicSource.qishui) {
+    // Soda offers singers, albums and a browsable playlist feed.
+    if (source == MusicSource.qs) {
       return true;
     }
     return const {
@@ -39,10 +39,10 @@ class CatalogSdk {
     MusicSource.tx => TxCatalog.search(keyword, category, page, limit),
     MusicSource.kg => KgCatalog.search(keyword, category, page, limit),
     MusicSource.mg => MgCatalog.search(keyword, category, page, limit),
-    MusicSource.qishui => switch (category) {
-      SearchCategory.artists => QishuiSdk.searchArtists(keyword, page, limit),
-      SearchCategory.albums => QishuiSdk.searchAlbums(keyword, page, limit),
-      _ => QishuiSdk.searchPlaylists(keyword, page, limit),
+    MusicSource.qs => switch (category) {
+      SearchCategory.artists => QsSdk.searchArtists(keyword, page, limit),
+      SearchCategory.albums => QsSdk.searchAlbums(keyword, page, limit),
+      _ => QsSdk.searchPlaylists(keyword, page, limit),
     },
     _ => throw UnsupportedError('${source.label}暂不支持${category.label}搜索'),
   };
@@ -68,9 +68,9 @@ class CatalogSdk {
       artist: artist,
       maxTracks: maxTracks,
     ),
-    MusicSource.qishui => artist
-        ? QishuiSdk.artistDetail(id, maxTracks: maxTracks)
-        : QishuiSdk.albumDetail(id, maxTracks: maxTracks),
+    MusicSource.qs => artist
+        ? QsSdk.artistDetail(id, maxTracks: maxTracks)
+        : QsSdk.albumDetail(id, maxTracks: maxTracks),
     MusicSource.kg => KgCatalog.detail(
       id,
       artist: artist,

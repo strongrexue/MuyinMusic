@@ -5,7 +5,7 @@ import '../models/playlist_category.dart';
 import '../models/playlist_summary.dart';
 import 'internal/format.dart';
 import 'internal/sdk_http.dart';
-import 'qishui_sdk.dart';
+import 'qs_sdk.dart';
 
 class PlaylistCatalogSdk {
   const PlaylistCatalogSdk._();
@@ -68,7 +68,7 @@ class PlaylistCatalogSdk {
         requestedCategory,
         load,
       ),
-      MusicSource.qishui => await _featuredQishui(page, limit),
+      MusicSource.qs => await _featuredQs(page, limit),
       MusicSource.all => const <PlaylistSummary>[],
     };
     final seen = <String>{};
@@ -264,13 +264,13 @@ class PlaylistCatalogSdk {
     ];
   }
 
-  static Future<List<PlaylistSummary>> _featuredQishui(
+  static Future<List<PlaylistSummary>> _featuredQs(
     int page,
     int limit,
   ) {
     // The feed is a recommendation stream, so the SDK keeps a de-duplicated
     // pool and hands the grid consecutive slices of it.
-    return QishuiSdk.featuredPlaylistsPaged(page: page, limit: limit);
+    return QsSdk.featuredPlaylistsPaged(page: page, limit: limit);
   }
 
   static Future<List<PlaylistSummary>> _featuredMg(

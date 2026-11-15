@@ -51,8 +51,9 @@ class _DiscoverySourcePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Soda exposes no leaderboard or featured-playlist catalog yet, so it only
-    // takes part in search. Say so instead of showing an empty page.
+    // Only platforms with neither a leaderboard nor a playlist catalogue are
+    // search-only. 汽水音乐 has no static leaderboard table but does publish a
+    // playlist shelf, so it renders the normal page.
     if (leaderboardCatalogFor(source).isEmpty &&
         playlistCatalogCategoriesFor(source).isEmpty) {
       return _DiscoveryUnsupported(source: source);

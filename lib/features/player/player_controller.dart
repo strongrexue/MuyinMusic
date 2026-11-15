@@ -18,7 +18,6 @@ import '../../core/music_sources/music_url_resolver.dart';
 import '../../core/services/app_logger.dart';
 import '../../core/services/local_audio_source.dart';
 import '../../core/services/tagger.dart';
-import '../../core/sdk/qishui_sdk.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import '../downloads/download_history_store.dart';
@@ -1684,7 +1683,6 @@ class PlayerController extends StateNotifier<PlayerState>
   Future<void> _playQueueEntry(DownloadHistoryEntry entry) {
     _pendingRestoredSession = null;
     _recordRecentPlay(entry);
-    _prefetchNextQueueEntry();
     final path = entry.savedPath?.trim();
     if (path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path)) {
       if (state.track?.localPath == path) {
@@ -1707,20 +1705,6 @@ class PlayerController extends StateNotifier<PlayerState>
     }
     state = state.copyWith(error: '歌曲不可播放');
     return Future<void>.value();
-  }
-
-  /// Warms the resolver for the upcoming track so 汽水 (whose play URL comes from
-  /// a remote relay) starts as fast as the other platforms.
-  void _prefetchNextQueueEntry() {
-    try {
-      final index = _nextQueueIndex(automatic: true);
-      if (index == null || index < 0 || index >= _queue.length) return;
-      final music = _queue[index].musicInfo;
-      if (music == null || music.source != MusicSource.qishui) return;
-      unawaited(QishuiSdk.prefetch(music));
-    } catch (error) {
-      AppLogger.write('player-control', 'prefetch_next_failed error=$error');
-    }
   }
 
   Future<void> _restartCurrentTrack() async {
