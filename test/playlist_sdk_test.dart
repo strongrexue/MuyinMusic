@@ -208,6 +208,34 @@ void main() {
       expect(redirectedPlaylistId?.id, '8726296628');
     });
 
+    test('accepts share links pasted without a scheme', () {
+      // Share sheets hand out bare hosts, e.g. "qishui.douyin.com/s/abc/";
+      // the resolver must still find a URL so the redirect path can run.
+      final bare = PlaylistSdk.parseTarget(
+        'music.douyin.com/playlist/8726296628?from=singlemessage',
+      );
+      final bareQuery = PlaylistSdk.parseTarget(
+        'qishui.com/foo?playlist_id=8726296628',
+        source: MusicSource.qishui,
+      );
+      final bareShare = PlaylistSdk.parseTarget(
+        'qishui.douyin.com/s/iXnJ82Qv/',
+        source: MusicSource.qishui,
+      );
+      final bareWy = PlaylistSdk.parseTarget(
+        'music.163.com/playlist?id=3778678',
+      );
+
+      expect(bare?.source, MusicSource.qishui);
+      expect(bare?.id, '8726296628');
+      expect(bareQuery?.source, MusicSource.qishui);
+      expect(bareQuery?.id, '8726296628');
+      // Still an opaque code: no numeric id, so the network redirect decides.
+      expect(bareShare, isNull);
+      expect(bareWy?.source, MusicSource.wy);
+      expect(bareWy?.id, '3778678');
+    });
+
     test('does not recognize cross-domain lookalikes', () {
       expect(
         PlaylistSdk.parseTarget(

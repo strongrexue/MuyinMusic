@@ -190,7 +190,24 @@ class PlaylistSdk {
       final uri = _tryParseWebUri(_stripTrailingUrlPunctuation(raw));
       if (uri != null && seen.add(uri.toString())) yield uri;
     }
+
+    if (seen.isEmpty) {
+      // Share sheets often strip the scheme, e.g. "qishui.douyin.com/s/abc/".
+      for (final match in _bareHostPattern.allMatches(input)) {
+        final raw = match.group(0);
+        if (raw == null) continue;
+        final uri =
+            _tryParseWebUri('https://${_stripTrailingUrlPunctuation(raw)}');
+        if (uri != null && seen.add(uri.toString())) yield uri;
+      }
+    }
   }
+
+  /// A scheme-less host with an optional path, used only as a fallback when the
+  /// input carries no explicit http(s) URL.
+  static final RegExp _bareHostPattern = RegExp(
+    r'''(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?::\d+)?(?:/[^\s<>"',;()\[\]{}，。；：！？、（）【】《》「」『』]*)?''',
+  );
 
   static String _stripTrailingUrlPunctuation(String input) {
     var value = input.trim();
