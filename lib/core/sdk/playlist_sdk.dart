@@ -119,7 +119,8 @@ class PlaylistSdk {
   static ParsedPlaylistTarget? _parseUriTarget(Uri uri, MusicSource source) {
     if ((source == MusicSource.qishui || source == MusicSource.all) &&
         (_isHost(uri.host, 'qishui.com') ||
-            _isHost(uri.host, 'music.douyin.com'))) {
+            _isHost(uri.host, 'music.douyin.com') ||
+            _isHost(uri.host, 'qishui.douyin.com'))) {
       final id =
           _playlistPathId(uri.path) ??
           _numeric(uri.queryParameters['playlist_id']) ??
