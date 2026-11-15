@@ -36,8 +36,16 @@ Future<Map> catalogJson(
   return body;
 }
 
-String catalogDate(Object? value) {
-  final millis = catalogInt(value);
+/// Decodes a raw response body, returning null when it is not JSON.
+Object? catalogJsonDecode(String text) {
+  try {
+    return jsonDecode(text);
+  } catch (_) {
+    return null;
+  }
+}
+
+String catalogDate(Object? value) {  final millis = catalogInt(value);
   if (millis <= 0) return '';
   final date = DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
   return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';

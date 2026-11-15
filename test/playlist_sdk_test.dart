@@ -157,6 +157,37 @@ void main() {
           source,
         );
       }
+      expect(
+        PlaylistSdk.parseTarget('1207922987',
+                source: MusicSource.qishui)?.source,
+        MusicSource.qishui,
+      );
+    });
+
+    test('chart: prefix requires an explicit source', () async {
+      // A bare chart: ID without a source must not guess a platform.
+      expect(
+        () => PlaylistSdk.parse(input: 'chart:2896000473017385'),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('recognizes Qishui playlist links', () {
+      final path = PlaylistSdk.parseTarget(
+        'https://www.qishui.com/playlist/8726296628',
+      );
+      final douyin = PlaylistSdk.parseTarget(
+        'https://music.douyin.com/playlist/8726296628?from=singlemessage',
+      );
+      final query =
+          PlaylistSdk.parseTarget('https://www.qishui.com/foo?playlist_id=8726296628');
+
+      expect(path?.source, MusicSource.qishui);
+      expect(path?.id, '8726296628');
+      expect(douyin?.source, MusicSource.qishui);
+      expect(douyin?.id, '8726296628');
+      expect(query?.source, MusicSource.qishui);
+      expect(query?.id, '8726296628');
     });
 
     test('does not recognize cross-domain lookalikes', () {

@@ -10,6 +10,7 @@ import 'internal/tx_quality.dart';
 import 'playlist_adapters/kg_playlist_adapter.dart';
 import 'playlist_adapters/kw_playlist_adapter.dart';
 import 'playlist_adapters/mg_playlist_adapter.dart';
+import 'leaderboard_sdk.dart';
 import 'qishui_sdk.dart';
 
 class PlaylistSdk {
@@ -20,6 +21,15 @@ class PlaylistSdk {
     MusicSource source = MusicSource.all,
     int? maxTracks,
   }) async {
+    // A `chart:` prefix imports a leaderboard as a playlist (upstream convention).
+    final trimmed = input.trim();
+    if (trimmed.startsWith('chart:') && source != MusicSource.all) {
+      return LeaderboardSdk.get(
+        source: source,
+        boardId: trimmed.substring('chart:'.length).trim(),
+        maxTracks: maxTracks,
+      );
+    }
     final directTarget = parseTarget(input, source: source);
     if (directTarget == null &&
         source == MusicSource.all &&
@@ -107,6 +117,20 @@ class PlaylistSdk {
   }
 
   static ParsedPlaylistTarget? _parseUriTarget(Uri uri, MusicSource source) {
+    if ((source == MusicSource.qishui || source == MusicSource.all) &&
+        (_isHost(uri.host, 'qishui.com') ||
+            _isHost(uri.host, 'music.douyin.com'))) {
+      final id =
+          _playlistPathId(uri.path) ??
+          _numeric(uri.queryParameters['playlist_id']) ??
+          (_hasPlaylistPath(uri.path)
+              ? _numeric(uri.queryParameters['id'])
+              : null);
+      if (id != null) {
+        return ParsedPlaylistTarget(id: id, source: MusicSource.qishui);
+      }
+    }
+
     if ((source == MusicSource.wy || source == MusicSource.all) &&
         _isHost(uri.host, 'music.163.com')) {
       final id = _parseWyId(uri);

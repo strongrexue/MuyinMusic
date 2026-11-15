@@ -1,15 +1,51 @@
+import 'package:dio/dio.dart';
+
 import '../../models/catalog_result.dart';
 import '../../models/enums.dart';
+import '../../models/music_info.dart';
 import '../../models/playlist_info.dart';
 import '../../models/playlist_summary.dart';
 import '../../models/search_category.dart';
-import '../../models/music_info.dart';
 import '../internal/sdk_http.dart';
 import '../playlist_sdk.dart';
 import 'catalog_helpers.dart';
 
 class WyCatalog {
-  static const headers = {'Referer': 'https://music.163.com/'};
+  static const headers = {
+    'Referer': 'https://music.163.com/',
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Cookie': 'appver=2.0.2; os=pc',
+  };
+
+  /// The legacy `/api/search/get/web` endpoint answers `405` for artists now,
+  /// so every category goes through the cloud search API.
+  static Future<Map> _cloudSearch(
+    String keyword,
+    int type,
+    int page,
+    int limit,
+  ) async {
+    final response = await SdkHttp.fetch<dynamic>(
+      'https://music.163.com/api/cloudsearch/pc',
+      method: 'POST',
+      headers: headers,
+      form: {
+        's': keyword,
+        'type': '$type',
+        'limit': '$limit',
+        'offset': '${(page - 1) * limit}',
+      },
+      responseType: ResponseType.plain,
+    );
+    final body = response.body;
+    final decoded = body is String ? catalogJsonDecode(body) : body;
+    if (decoded is! Map) {
+      throw const FormatException('网易云返回了无法识别的数据，请稍后重试');
+    }
+    return decoded;
+  }
 
   static Future<CatalogResult> search(
     String keyword,
@@ -24,12 +60,10 @@ class WyCatalog {
       SearchCategory.playlists => (1000, 'playlists', 'playlistCount'),
       _ => throw ArgumentError.value(category),
     };
-    final body = await catalogJson(
-      'https://music.163.com/api/search/get/web?s=${Uri.encodeComponent(keyword)}&type=$type&offset=${(page - 1) * limit}&limit=$limit',
-      loader: loader,
-      headers: headers,
-    );
-    if (body['code'] != 200) throw Exception('网易云搜索暂时不可用');
+    final body = await _cloudSearch(keyword, type, page, limit);
+    if (catalogInt(body['code']) != 200) {
+      throw Exception('网易云搜索暂时不可用');
+    }
     final result = catalogMap(body['result']);
     final items = catalogMaps(result[field]).where((i) => i['id'] != null).map((
       i,
@@ -44,7 +78,9 @@ class WyCatalog {
           id: '${i['id']}',
           name: name,
           source: MusicSource.wy,
-          coverUrl: catalogImage(i['picUrl'] ?? i['coverImgUrl']),
+          coverUrl: catalogImage(
+            i['picUrl'] ?? i['coverImgUrl'] ?? i['blurPicUrl'],
+          ),
           creator: category == SearchCategory.albums
               ? catalogText(artist['name'])
               : creator,
@@ -79,14 +115,16 @@ class WyCatalog {
     int? maxTracks,
     SdkJsonLoader? loader,
   }) async {
-    final body = await catalogJson(
-      'https://music.163.com/api/${artist ? 'artist' : 'album'}/${Uri.encodeComponent(id)}',
-      loader: loader,
-      headers: headers,
-    );
-    if (body['code'] != 200) {
+    // `/api/album/{id}` is behind a login gate now; `?ext=true` still answers
+    // and keeps the legacy song shape that the shared parser understands.
+    final url = artist
+        ? 'https://music.163.com/api/artist/${Uri.encodeComponent(id)}'
+        : 'https://music.163.com/api/album/${Uri.encodeComponent(id)}?ext=true';
+    final body = await catalogJson(url, loader: loader, headers: headers);
+    if (catalogInt(body['code']) != 200) {
+      final code = catalogInt(body['code']);
       throw Exception(
-        body['code'] == -462 || body['code'] == -460
+        code == -462 || code == -460
             ? '网易云暂时限制了此内容的访问，请稍后重试或切换音乐平台'
             : '网易云详情暂时不可用',
       );

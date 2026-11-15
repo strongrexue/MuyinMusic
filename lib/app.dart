@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
@@ -100,6 +102,13 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
 
   Future<void> _initializeLocalLibrary() async {
     final cache = ref.read(localSongScanCacheProvider);
+    // iOS 沙盒环境没有 Android 的 `/storage/emulated/0/...` 路径。全新安装时
+    // `downloadDir`/`localMusicDirs` 默认是 Android 路径，必须迁移到应用沙盒的
+    // `Documents/MuyinMusic`，否则首扫会抛「文件夹不存在」。下载侧 download_service
+    // 已有同样的 iOS 兜底（_resolveDestinationDir），这里让两者保持一致。
+    if (Platform.isIOS) {
+      await _migrateIosDefaultDirectories();
+    }
     final selected = ref.read(settingsProvider).localMusicDirs;
     final directories = <String>[];
     for (final directory in selected) {
@@ -130,6 +139,41 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
         for (final track in playlist.tracks)
           if (track.localPath != null) track.localPath!,
     ]);
+  }
+
+  /// iOS：把默认（Android）下载/扫描目录迁移到沙盒 `Documents/MuyinMusic`。
+  /// 只当当前值还是默认 Android 路径时才迁移，用户手动改过的不动。
+  Future<void> _migrateIosDefaultDirectories() async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final sandboxDir = p.join(docs.path, 'MuyinMusic');
+      final dir = Directory(sandboxDir);
+      final notifier = ref.read(settingsProvider.notifier);
+      final settings = ref.read(settingsProvider);
+
+      // 目录不存在时创建，确保扫描与下载可写。
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+
+      final downloadDir = settings.downloadDir;
+      if (normalizeStorageLocation(downloadDir) ==
+          normalizeStorageLocation(kDefaultDownloadDir)) {
+        await notifier.setDownloadDir(sandboxDir);
+      }
+      final localDirs = settings.localMusicDirs;
+      if (localDirs.isNotEmpty &&
+          localDirs.every(
+            (d) =>
+                normalizeStorageLocation(d) ==
+                normalizeStorageLocation(kDefaultDownloadDir),
+          )) {
+        await notifier.setLocalMusicDirs([sandboxDir]);
+      }
+    } catch (error) {
+      await AppLogger.write(
+        'local-library',
+        'iOS default dir migrate failed: $error',
+      );
+    }
   }
 
   @override

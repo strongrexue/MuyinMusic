@@ -298,12 +298,25 @@ class MusicSourceController extends AsyncNotifier<MusicSourceState> {
     }
   }
 
+  Future<String?> _readScriptBestEffort(String id) async {
+    try {
+      return await _store.readScript(id);
+    } catch (_) {
+      // A record whose script file is missing (e.g. iOS sandbox hiccup) must not
+      // abort the whole WebDAV sync. Skip it, matching applyFromSync's guard.
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> exportForSync() => _change(() async {
     final current = await future;
     final scripts = <String, String>{};
     final records = <Map<String, dynamic>>[];
     for (final record in current.records) {
-      scripts[record.id] = await _store.readScript(record.id);
+      if (record.id.isEmpty) continue;
+      final script = await _readScriptBestEffort(record.id);
+      if (script == null) continue;
+      scripts[record.id] = script;
       final json = record.toJson()..remove('lastError');
       json['origin'] = _portableOrigin(record.origin);
       records.add(json);
