@@ -1,129 +1,68 @@
 # Changelog
 
-All notable changes to MuyinMusic (沐音) are documented here.
+沐音的版本变更记录。
 
-This project is a second-development (二开) fork of
-[CyShineMusic (栖弦)](https://github.com/KevinllBin/CyShineMusic),
-baseline release **v1.1.2** (commit `24a87ce`). The upstream changelog /
-release notes are not reproduced here; see the upstream repository for those.
+本项目是 [CyShineMusic（栖弦）](https://github.com/KevinllBin/CyShineMusic)
+的二开分支，基线版本 **v1.1.2**（commit `24a87ce`）。上游的变更记录不在本文件
+重复，请参考上游仓库。
 
 ## [1.1.8] — 2026-11-16
 
 ### Fixed
-- Playing a Soda (`qs`) track no longer fails with “已启用的音源均不支持汽水”.
-  Runtime capabilities are persisted with a version stamp
-  (`kMusicSourceCapabilitiesVersion`); records written before `qs` joined the
-  preload whitelist carry no Soda entry, so the controller re-validates them
-  once on startup instead of trusting the stale declaration.
-- The search paging capsule (“第 N 页”) no longer leaks onto the discovery
-  page. It is now mounted only on the search surface, and
-  `OnlineSearchBody` resets `searchToolbarStateProvider` when it is disposed,
-  so a stale page state cannot outlive the search page.
+- 修复汽水音源播放时提示「已启用的音源均不支持汽水」。
+- 发现页不再残留搜索页的「第 N 页」胶囊。
 
 ## [1.1.7] — 2026-11-16
 
-Soda music (汽水音乐) is now a catalogue-only source. Playback is resolved by
-imported JS music sources, exactly like every other platform.
-
 ### Changed
-- `MusicSource.qishui` -> `MusicSource.qs`, matching the upstream source code
-  so imported scripts resolve it; stored `qishui` codes are still accepted via
-  a legacy alias, and `qishui_featured_pool_v1` / existing settings keys keep
-  working. Icon renamed to `assets/platform_icons/qs.png`, brand color is now
-  the platform green `#2BFF6A`.
-- `lib/core/sdk/qishui_sdk.dart` rewritten as `lib/core/sdk/qs_sdk.dart` and
-  re-pointed at the Windows client API (`https://api.qishui.com/luna/pc`) with
-  its public parameters. The old Android endpoint family stopped returning
-  results.
-- Reads now register a throw-away desktop device on first use and are
-  serialized 600 ms apart, because the gateway answers an empty 200 to
-  unthrottled or unidentified clients. Empty answers are retried three times
-  with backoff.
-- Artist and album details use the official `/luna/pc/artists/{id}` and
-  `/luna/pc/albums/{id}` endpoints instead of falling back to name search.
-- The leaderboard directory is read from the discover blocks at runtime, so
-  each board keeps its real title, description, cover and preview tracks.
-  `chart:<id>` still imports a board as a playlist.
+- 汽水音乐改为只提供曲库和歌词，播放交给导入的音源。
+- 音源代码 `qishui` 改为 `qs`，与音源脚本中的写法一致。
+- 汽水搜索、歌手、专辑、歌单、歌词改用桌面端接口。
+- 歌手和专辑详情改用官方接口，不再靠名字搜索兜底。
+- 汽水榜单目录改为运行时读取，保留榜单简介、封面和前三首预览。
 
 ### Removed
-- Native playback resolution for Soda: `resolveUrl`, `prefetch`, the relay
-  fallback, the gorgon request signing, the URL cache and the per-track quality
-  ladder are gone, together with their crypto test. `kNativeSourceQualities` is
-  now empty and the player no longer prefetches Soda tracks.
-- The `qishui_session_id` setting and its startup wiring, superseded by device
-  registration.
+- 移除汽水的原生播放解析，音质档位不再由本应用声明。
+- 移除汽水会话设置项。
 
 ### Fixed
-- Users upgrading from a build without Soda no longer stay without Soda search
-  results: a one-time `qs_search_added_v1` migration adds the source to
-  `enabledSearchSources`.
-- Featured playlists could take ~31 s on first load because a stale pool kept
-  re-fetching for 24 rounds; it now refreshes for a single round (~1.4 s).
+- 老版本升级后不再缺少汽水搜索结果。
+- 精选歌单首次加载不再需要等待约半分钟。
 
 ## [1.1.6] — 2026-11-16
 
 ### Added
-- Pausable, resumable and cancellable downloads. The queue sheet was replaced
-  by per-task chips showing progress, and paused tasks can be resumed from the
-  downloads page. `DownloadPausedException` and `pauseTask` / `resumeTask` /
-  `discardTask` were added to the download service.
+- 下载支持暂停、恢复和取消。
+- 下载队列改为任务卡片，可查看进度，已暂停的任务可在下载页继续。
 
 ## [1.1.5] — 2026-11-16
 
 ### Fixed
-- Soda playlist sharing links now import correctly: `qishui.douyin.com`,
-  `music.douyin.com` and bare `qishui.com` hosts are accepted, `chart:` ids
-  import a leaderboard, short links are followed, and links pasted without an
-  `http` scheme are recognised.
+- 汽水歌单分享链接可以正常导入，包括短链、无 `http` 前缀的链接和 `chart:` 榜单 ID。
 
 ## [Unreleased] — 沐音 re-brand / 二开初始版本
 
-Forked from CyShineMusic v1.1.2 for personal use and small-scale sharing among
-friends. Source is published publicly at
-<https://github.com/strongrexue/MuyinMusic>.
+基于 CyShineMusic v1.1.2 的二开版本，源码地址
+<https://github.com/strongrexue/MuyinMusic>。
 
 ### Changed
-- Re-branded application identity: name 栖弦 -> 沐音, package
-  `com.cyshine.music` -> `com.muyin.muyinmusic` (dev channel `...dev`),
-  plus all user-visible labels (startup, shell header, home widget, vivo
-  empty-queue hint) and the default download / WebDAV directories.
-- Re-pointed the in-app online update checker and dialog to this repository's
-  GitHub Releases (`strongrexue/MuyinMusic/releases/latest`) instead of
-  upstream. Release APKs are signed with a self-owned keystore that is kept
-  local and never committed.
-- Re-branded internal log / cache / probe / temp-file / equalizer /
-  notification-channel identifiers from `cyshine` / `CyShineMusic` to
-  `muyin` / `MuyinMusic`.
+- 应用更名为沐音，包名改为 `com.muyin.muyinmusic`（开发通道 `...dev`），
+  用户可见文案与默认下载 / WebDAV 目录一并改名。
+- 应用内更新检查指向本仓库的 GitHub Releases，发布包使用自有签名。
+- 内部日志 / 缓存 / 探针 / 临时文件 / 均衡器 / 通知渠道标识改名。
 
 ### Added
-- `NOTICE` — provenance, change list, and mixed-license disclosures
-  (prism_ui is GPL-3.0-only).
-- `CHANGELOG.md` (this file).
-- `packages/prism_ui/LICENSE` (GPLv3 full text) and
-  `packages/heroine/LICENSE` (MIT full text), which upstream vendored without
-  bundling the license texts.
+- `NOTICE` — 来源、改动清单与混合许可声明（prism_ui 为 GPL-3.0-only）。
+- `CHANGELOG.md`（本文件）。
+- `packages/prism_ui/LICENSE` 与 `packages/heroine/LICENSE` 许可全文。
 
-### Compliance / removed
-- Root `LICENSE` retains upstream's MIT text and `Copyright (c) 2026
-  KevinllBin` verbatim (MIT requirement).
-- Removed the upstream QQ group number / QR image and GitHub links from
-  README; kept the "no bundled music, user-configured legal sources"
-  disclaimer and the closing disclaimer.
-- `.gitignore` now ignores `android/signing/*.jks` and `*.properties` so the
-  signing keystore is never committed.
+### Removed
+- README 中的上游交流群号 / 二维码与 GitHub 链接。
+- `.gitignore` 忽略 `android/signing/*.jks` 与 `*.properties`，签名不再入库。
 
-### Theme & glass (second batch, 2026-11-13)
-- Collapsed the four "配色风格" variants into one fixed `fidelity` scheme and
-  made every surface permanently neutral, so seed colors only affect accents;
-  removed the "配色风格" setting row and the `AppColorStyle` enum (R1/R2).
-- Removed dynamic color (Material You wallpaper seed) entirely: its switch,
-  the "跟随系统" swatch, and the `dynamic_color` / `material_color_utilities`
-  dependencies are gone (R4).
-- Removed the iOS system-gray preset and the unused seed-picker / color-picker
-  / color-style widgets (R3/R5).
-- Reworked the "材质" card into a single 玻璃特效 switch plus a "玻璃设置"
-  sheet with three tabs (磨砂 / 透明 / 色调), per-tab sliders, live draft
-  preview and 重置 / 保存. Glass quality is fixed to the `ultra` tier (R6).
-- Added a `styleTransform` injection hook to the vendored prism_ui glass
-  renderer so one place overrides every pane's style; see NOTICE section 6
-  for the GPLv3 section 5(a) modification notice.
+### Theme & glass
+- 「配色风格」四套方案合并为固定配色，移除该设置行。
+- 移除动态取色，以及相关依赖。
+- 移除 iOS 系统灰预设与未使用的取色控件。
+- 「材质」卡片改为单个玻璃特效开关加「玻璃设置」面板（磨砂 / 透明 / 色调）。
+- 玻璃渲染器新增统一注入点，改动声明见 NOTICE 第 6 节。
