@@ -181,6 +181,21 @@ void main() {
       );
       final query =
           PlaylistSdk.parseTarget('https://www.qishui.com/foo?playlist_id=8726296628');
+      // A qishui.douyin.com share short link carries only an opaque code
+      // (`/s/iXnJ82Qv`), no numeric id, so parseTarget cannot resolve it
+      // locally and must fall through to the network redirect path. Assert
+      // that (a) the host is not mis-routed and (b) once the share link is
+      // redirected to a music.douyin.com playlist_id URL, that redirected
+      // form IS recognized with a numeric id.
+      final shareHost = PlaylistSdk.parseTarget(
+        'https://qishui.douyin.com/s/iXnJ82Qv/',
+        source: MusicSource.qishui,
+      );
+      final redirectedPlaylistId = PlaylistSdk.parseTarget(
+        'https://music.douyin.com/qishui/share/playlist'
+        '?playlist_id=8726296628&hybrid_sdk_version=bullet',
+        source: MusicSource.qishui,
+      );
 
       expect(path?.source, MusicSource.qishui);
       expect(path?.id, '8726296628');
@@ -188,6 +203,9 @@ void main() {
       expect(douyin?.id, '8726296628');
       expect(query?.source, MusicSource.qishui);
       expect(query?.id, '8726296628');
+      expect(shareHost, isNull); // no numeric id -> offline path cannot resolve
+      expect(redirectedPlaylistId?.source, MusicSource.qishui);
+      expect(redirectedPlaylistId?.id, '8726296628');
     });
 
     test('does not recognize cross-domain lookalikes', () {
