@@ -1,0 +1,45 @@
+name: iOS Build
+
+# Builds the iOS app on a hosted macOS runner, so a Mac is not needed locally.
+# The unsigned .ipa it produces can be signed on Windows with Sideloadly/AltStore
+# (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'ios-*'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Install pods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build unsigned app
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned ipa
+        run: |
+          set -e
+          mkdir -p build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qry MuyinMusic-unsigned.ipa Payload
+          ls -lh MuyinMusic-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MuyinMusic-unsigned-ipa
+          path: build/ios/ipa/MuyinMusic-unsigned.ipa
+          retention-days: 14
