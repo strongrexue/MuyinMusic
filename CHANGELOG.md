@@ -7,6 +7,19 @@ This project is a second-development (二开) fork of
 baseline release **v1.1.2** (commit `24a87ce`). The upstream changelog /
 release notes are not reproduced here; see the upstream repository for those.
 
+## [1.1.8] — 2026-11-16
+
+### Fixed
+- Playing a Soda (`qs`) track no longer fails with “已启用的音源均不支持汽水”.
+  Runtime capabilities are persisted with a version stamp
+  (`kMusicSourceCapabilitiesVersion`); records written before `qs` joined the
+  preload whitelist carry no Soda entry, so the controller re-validates them
+  once on startup instead of trusting the stale declaration.
+- The search paging capsule (“第 N 页”) no longer leaks onto the discovery
+  page. It is now mounted only on the search surface, and
+  `OnlineSearchBody` resets `searchToolbarStateProvider` when it is disposed,
+  so a stale page state cannot outlive the search page.
+
 ## [1.1.7] — 2026-11-16
 
 Soda music (汽水音乐) is now a catalogue-only source. Playback is resolved by

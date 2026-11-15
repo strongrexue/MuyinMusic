@@ -732,16 +732,19 @@ class _AppShellState extends ConsumerState<AppShell>
                         ),
                       ),
                     ),
-                    if (contentLocation == '/' ||
-                        isHomeSearchLocation(contentLocation))
+                    if (contentLocation == '/')
                       const Positioned.fill(
-                        key: ValueKey('shell-fab'),
-                        child: Stack(
-                          children: [
-                            DiscoveryCategoryFabLayer(),
-                            SearchPagingFabLayer(),
-                          ],
-                        ),
+                        key: ValueKey('shell-discovery-fab'),
+                        child: DiscoveryCategoryFabLayer(),
+                      ),
+                    // The paging FAB belongs to the search surface only: its
+                    // state is written by OnlineSearchBody and is never cleared
+                    // when that page goes away, so mounting it on the discovery
+                    // route leaked a stale "第 1 页" capsule there.
+                    if (isHomeSearchLocation(contentLocation))
+                      const Positioned.fill(
+                        key: ValueKey('shell-search-fab'),
+                        child: SearchPagingFabLayer(),
                       ),
                     _buildPlayerLayer(isPlayer),
                     Positioned(

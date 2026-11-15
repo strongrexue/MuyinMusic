@@ -53,6 +53,7 @@ class _OnlineSearchBodyState extends ConsumerState<OnlineSearchBody> {
   Object? _tipRequest;
   Iterable<Widget> _lastSuggestionWidgets = const <Widget>[];
   AppToastHandle? _searchErrorToast;
+  StateController<SearchToolbarState>? _toolbarState;
 
   @override
   void initState() {
@@ -71,6 +72,20 @@ class _OnlineSearchBodyState extends ConsumerState<OnlineSearchBody> {
   void dispose() {
     _tipRequest = null;
     _dismissSearchErrorToast();
+    // The paging capsule is driven by this page, so it must not outlive it:
+    // leaving the search surface with visible still true used to keep a stale
+    // "第 N 页" pill (and hid the discovery category FAB) on the next route.
+    final toolbarState = _toolbarState;
+    _toolbarState = null;
+    if (toolbarState != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          toolbarState.state = const SearchToolbarState();
+        } catch (_) {
+          // The provider container is already gone during app teardown.
+        }
+      });
+    }
     _controller.dispose();
     _resultsScrollController.dispose();
     super.dispose();
@@ -303,6 +318,7 @@ class _OnlineSearchBodyState extends ConsumerState<OnlineSearchBody> {
     if (!_pageVisible) {
       return;
     }
+    _toolbarState = ref.read(searchToolbarStateProvider.notifier);
     final response = state.response;
     final hasResults =
         state.category != SearchCategory.all &&
