@@ -58,3 +58,5 @@ flutter:
       android:
         package: com.ryanheise.audioservice
         pluginClass: AudioServicePlugin
+      ios:
+        pluginClass: AudioServicePlugin
