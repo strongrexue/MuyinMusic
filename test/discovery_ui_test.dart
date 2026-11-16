@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:heroine/heroine.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 import 'package:prism_ui/prism_ui.dart' show LiquidGlassHost;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -16,8 +17,10 @@ import 'package:cy_shine_music/core/models/enums.dart';
 import 'package:cy_shine_music/core/models/leaderboard_info.dart';
 import 'package:cy_shine_music/core/models/music_info.dart';
 import 'package:cy_shine_music/core/models/online_collection_kind.dart';
+import 'package:cy_shine_music/core/models/playlist_category.dart';
 import 'package:cy_shine_music/core/models/playlist_info.dart';
 import 'package:cy_shine_music/core/models/playlist_summary.dart';
+import 'package:cy_shine_music/core/models/playlist_tag.dart';
 import 'package:cy_shine_music/core/models/search_response.dart';
 import 'package:cy_shine_music/core/models/search_category.dart';
 import 'package:cy_shine_music/core/music_sources/music_source_controller.dart';
@@ -31,6 +34,7 @@ import 'package:cy_shine_music/features/discovery/discovery_content.dart';
 import 'package:cy_shine_music/features/discovery/discovery_controller.dart';
 import 'package:cy_shine_music/features/discovery/leaderboards_page.dart';
 import 'package:cy_shine_music/features/discovery/online_playlist_detail_page.dart';
+import 'package:cy_shine_music/features/discovery/widgets/discovery_filter_bar.dart';
 import 'package:cy_shine_music/features/discovery/widgets/leaderboard_artwork.dart';
 import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
 import 'package:cy_shine_music/features/player/player_audio_handler.dart';
@@ -40,8 +44,6 @@ import 'package:cy_shine_music/features/playlists/widgets/immersive_playlist_chr
 import 'package:cy_shine_music/features/search/online_search_body.dart';
 import 'package:cy_shine_music/features/search/search_controller.dart';
 import 'package:cy_shine_music/features/search/search_page.dart';
-import 'package:cy_shine_music/features/search/search_toolbar_state.dart';
-import 'package:cy_shine_music/features/shell/widgets/discovery_category_fab.dart';
 import 'package:cy_shine_music/features/shell/widgets/shell_header.dart';
 import 'package:cy_shine_music/router.dart';
 
@@ -742,92 +744,198 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'discovery category FAB reloads sorting and hides when singular',
-    (tester) async {
-      await _useViewport(tester, const Size(390, 844));
-      final prefs = await _freshPreferences();
-      final fake = _FakeDiscoveryApi();
-      final container = ProviderContainer(
-        overrides: [
-          discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
-          sharedPreferencesProvider.overrideWithValue(prefs),
-          musicApiProvider.overrideWithValue(fake),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      await tester.pumpWidget(
-        _appWithContainer(
-          container,
-          const Stack(
-            children: [
-              DiscoveryContent(),
-              Positioned.fill(child: DiscoveryCategoryFabLayer()),
-            ],
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('discovery-category-fab')),
-        findsOneWidget,
-      );
-      expect(fake.featuredCategories.last, 'new');
-      final spotlightBefore = tester.element(
-        find.byKey(const ValueKey('leaderboard-preview-kw:1')),
-      );
-
-      await tester.tap(find.byKey(const ValueKey('discovery-category-fab')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('discovery-category-hot')));
-      // 分类切换只让「精选歌单」区块变化，官方排行榜卡片原地不动。
-      await tester.pump();
-      expect(
-        tester.element(find.byKey(const ValueKey('leaderboard-preview-kw:1'))),
-        same(spotlightBefore),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.element(find.byKey(const ValueKey('leaderboard-preview-kw:1'))),
-        same(spotlightBefore),
-      );
-      expect(find.byKey(const ValueKey('discovery-card-kw:1')), findsOneWidget);
-
-      expect(
-        container.read(selectedDiscoveryCategoryProvider(MusicSource.kw)),
-        'hot',
-      );
-      expect(fake.featuredCategories.last, 'hot');
-
-      container.read(selectedDiscoverySourceProvider.notifier).state =
-          MusicSource.mg;
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('discovery-category-fab')),
-        findsNothing,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('discovery category FAB yields to search paging', (tester) async {
+  testWidgets('discovery filter pills line up with the glass bar edges', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(390, 844));
     final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
     final container = ProviderContainer(
       overrides: [
         discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
         sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
       ],
     );
     addTearDown(container.dispose);
-    container.read(searchToolbarStateProvider.notifier).state =
-        const SearchToolbarState(visible: true);
 
-    await tester.pumpWidget(
-      _appWithContainer(container, const DiscoveryCategoryFabLayer()),
+    await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
+    await tester.pumpAndSettle();
+
+    final bar = tester.getRect(
+      find.byKey(const ValueKey('discovery-source-tabs')),
+    );
+    final sortPill = tester.getRect(
+      find.byKey(const ValueKey('discovery-sort-pill')),
+    );
+    final tagPill = tester.getRect(
+      find.byKey(const ValueKey('discovery-tag-pill')),
     );
 
-    expect(find.byKey(const ValueKey('discovery-category-fab')), findsNothing);
+    expect(sortPill.left, moreOrLessEquals(bar.left, epsilon: 0.5));
+    expect(tagPill.right, moreOrLessEquals(bar.right, epsilon: 0.5));
+    expect(sortPill.top, greaterThan(bar.bottom));
+
+    for (final (key, rect) in [
+      (const ValueKey('discovery-sort-pill'), sortPill),
+      (const ValueKey('discovery-tag-pill'), tagPill),
+    ]) {
+      final label = tester.getSize(
+        find.descendant(of: find.byKey(key), matching: find.byType(Text)),
+      );
+      expect(rect.height, DiscoveryFilterBar.height);
+      // 胶囊宽度就是文字加上左右各 16 的呼吸（外加两侧各 0.8 的描边），
+      // 跟着标签长短走。
+      expect(rect.width, moreOrLessEquals(label.width + 33.6, epsilon: 0.5));
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('discovery sort menu stays narrow and marks selection in accent '
+      'text only', (tester) async {
+    await _useViewport(tester, const Size(390, 844));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
+    await tester.pumpAndSettle();
+
+    final pill = find.byKey(const ValueKey('discovery-sort-pill'));
+    final selectedLabel = tester
+        .widget<Text>(find.descendant(of: pill, matching: find.byType(Text)))
+        .data!;
+    expect(
+      selectedLabel,
+      playlistSortOptionsFor(MusicSource.kw)
+          .firstWhere(
+            (sort) =>
+                sort.id ==
+                container.read(
+                  selectedDiscoveryCategoryProvider(MusicSource.kw),
+                ),
+            orElse: () => playlistSortOptionsFor(MusicSource.kw).first,
+          )
+          .label,
+    );
+
+    await tester.tap(pill);
+    await tester.pumpAndSettle();
+
+    final menu = find.byType(prism.PopupMenu);
+    expect(menu, findsOneWidget);
+    expect(tester.getSize(menu).width, lessThanOrEqualTo(168));
+
+    final scheme = Theme.of(tester.element(menu)).colorScheme;
+    Color? rowColor(String label) => tester
+        .widget<Text>(
+          find.descendant(of: menu, matching: find.text(label)).first,
+        )
+        .style
+        ?.color;
+    expect(rowColor(selectedLabel), scheme.primary);
+    for (final sort in playlistSortOptionsFor(MusicSource.kw)) {
+      if (sort.label == selectedLabel) continue;
+      expect(rowColor(sort.label), scheme.onSurface, reason: sort.label);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('QQ keeps every platform sort in the menu', (tester) async {
+    await _useViewport(tester, const Size(390, 844));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
+    await tester.pumpAndSettle();
+    container.read(selectedDiscoverySourceProvider.notifier).state =
+        MusicSource.tx;
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('discovery-sort-pill')));
+    await tester.pumpAndSettle();
+
+    final menu = find.byType(prism.PopupMenu);
+    expect(menu, findsOneWidget);
+    for (final sort in playlistSortOptionsFor(MusicSource.tx)) {
+      expect(
+        find.descendant(of: menu, matching: find.text(sort.label)),
+        findsOneWidget,
+        reason: sort.label,
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('picking a sort drops the tag where the two cannot stack', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(390, 844));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWithContainer(container, const SearchPage()));
+    await tester.pumpAndSettle();
+    container.read(selectedDiscoverySourceProvider.notifier).state =
+        MusicSource.tx;
+    await tester.pumpAndSettle();
+
+    final tag = playlistTagGroupsFor(MusicSource.tx).first.tags.first;
+    await container
+        .read(selectedDiscoveryTagProvider(MusicSource.tx).notifier)
+        .select(tag.id);
+    await tester.pumpAndSettle();
+    expect(
+      container.read(selectedDiscoveryTagProvider(MusicSource.tx)),
+      tag.id,
+    );
+
+    final sorts = playlistSortOptionsFor(MusicSource.tx);
+    final target = sorts.last;
+    await tester.tap(find.byKey(const ValueKey('discovery-sort-pill')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(prism.PopupMenu),
+        matching: find.text(target.label),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      container.read(selectedDiscoveryCategoryProvider(MusicSource.tx)),
+      target.id,
+    );
+    expect(
+      container.read(selectedDiscoveryTagProvider(MusicSource.tx)),
+      isNull,
+    );
+    expect(fake.featuredCategories.last, target.id);
+    expect(fake.featuredTags.last, isNull);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('discovery source tabs switch the displayed platform only', (
@@ -1432,6 +1540,7 @@ class _FakeDiscoveryApi extends MusicApi {
   bool? lastCoverRequestPreferredCached;
   final List<int> featuredPages = <int>[];
   final List<String?> featuredCategories = <String?>[];
+  final List<String?> featuredTags = <String?>[];
   final List<int?> detailTrackLimits = <int?>[];
   final List<SearchQuery> searchRequests = <SearchQuery>[];
 
@@ -1451,9 +1560,11 @@ class _FakeDiscoveryApi extends MusicApi {
     int page = 1,
     int limit = 20,
     String? categoryId,
+    String? tagId,
   }) async {
     featuredPages.add(page);
     featuredCategories.add(categoryId);
+    featuredTags.add(tagId);
     final start = paginateFeatured ? (page - 1) * limit + 1 : 1;
     final count = paginateFeatured ? (page == 1 ? limit : 5) : 9;
     return [

@@ -250,12 +250,14 @@ class MusicApi {
     int page = 1,
     int limit = 20,
     String? categoryId,
+    String? tagId,
   }) {
     return PlaylistCatalogSdk.featured(
       source,
       page: page,
       limit: limit,
       categoryId: categoryId,
+      tagId: tagId,
     );
   }
 

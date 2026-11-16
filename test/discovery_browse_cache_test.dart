@@ -22,10 +22,12 @@ void main() {
     List<PlaylistSummary> items, {
     MusicSource source = MusicSource.tx,
     String category = 'hot',
+    String? tag,
     double offset = 2500,
   }) => cache.save(
     source: source,
     categoryId: category,
+    tagId: tag,
     firstPage: firstPage,
     items: items,
     nextPage: 4,
@@ -47,6 +49,7 @@ void main() {
       final restored = cache.restore(
         source: entry.key,
         categoryId: 'hot',
+        tagId: null,
         firstPage: entry.value,
       )!;
       expect(restored.items, hasLength(90));
@@ -66,6 +69,7 @@ void main() {
         cache.restore(
           source: MusicSource.tx,
           categoryId: 'hot',
+          tagId: null,
           firstPage: [...firstPage],
         ),
         isNull,
@@ -80,6 +84,7 @@ void main() {
       cache.restore(
         source: MusicSource.tx,
         categoryId: 'folk',
+        tagId: null,
         firstPage: firstPage,
       ),
       isNull,
@@ -88,6 +93,7 @@ void main() {
       cache.restore(
         source: MusicSource.tx,
         categoryId: 'hot',
+        tagId: null,
         firstPage: firstPage,
       ),
       isNull,
@@ -102,6 +108,7 @@ void main() {
       final retained = cache.restore(
         source: MusicSource.tx,
         categoryId: 'hot',
+        tagId: null,
         firstPage: firstPage,
       );
       expect(
@@ -115,6 +122,7 @@ void main() {
         cache.restore(
           source: MusicSource.tx,
           categoryId: 'hot',
+          tagId: null,
           firstPage: firstPage,
         ),
         isNull,
@@ -123,6 +131,7 @@ void main() {
         cache.restore(
           source: MusicSource.kg,
           categoryId: 'hot',
+          tagId: null,
           firstPage: otherPage,
         ),
         isNotNull,
@@ -136,6 +145,7 @@ void main() {
     cache.save(
       source: MusicSource.tx,
       categoryId: 'hot',
+      tagId: null,
       firstPage: null,
       items: [],
       nextPage: 2,
@@ -146,6 +156,7 @@ void main() {
       cache.restore(
         source: MusicSource.tx,
         categoryId: 'hot',
+        tagId: null,
         firstPage: firstPage,
       ),
       isNull,
@@ -160,6 +171,7 @@ void main() {
     final restored = cache.restore(
       source: MusicSource.tx,
       categoryId: 'hot',
+      tagId: null,
       firstPage: firstPage,
     )!;
     expect(restored.items, hasLength(90));

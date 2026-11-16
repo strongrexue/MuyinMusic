@@ -59,10 +59,12 @@ class _DiscoverySourcePage extends ConsumerWidget {
       return _DiscoveryUnsupported(source: source);
     }
     final categoryId = ref.watch(selectedDiscoveryCategoryProvider(source));
+    final tagId = ref.watch(selectedDiscoveryTagProvider(source));
     // 分类切换只更新精选歌单，排行榜所在的页面骨架保持挂载。
     return _DiscoveryList(
       source: source,
       categoryId: categoryId,
+      tagId: tagId,
       topPadding: topPadding,
       browseCache: ref.watch(discoveryBrowseCacheProvider),
       featured: ref.watch(featuredPlaylistsProvider(source)),
@@ -82,6 +84,7 @@ class _DiscoverySourcePage extends ConsumerWidget {
             page: page,
             limit: discoveryPlaylistPageSize,
             categoryId: categoryId,
+            tagId: tagId,
           ),
     );
   }
@@ -134,6 +137,7 @@ class _DiscoveryList extends StatefulWidget {
   const _DiscoveryList({
     required this.source,
     required this.categoryId,
+    required this.tagId,
     required this.topPadding,
     required this.browseCache,
     required this.featured,
@@ -144,6 +148,7 @@ class _DiscoveryList extends StatefulWidget {
 
   final MusicSource source;
   final String categoryId;
+  final String? tagId;
   final double topPadding;
   final DiscoveryBrowseCache browseCache;
 
@@ -172,6 +177,10 @@ class _DiscoveryListState extends State<_DiscoveryList> {
   List<PlaylistSummary>? get _loadedItems =>
       widget.featured.isLoading ? null : widget.featured.asData?.value;
 
+  /// 网格的标识同时带上标签，换标签时整块重建而不是复用旧滚动位置。
+  String get _gridKey =>
+      'featured-grid-${widget.categoryId}-${widget.tagId ?? 'all'}';
+
   @override
   void initState() {
     super.initState();
@@ -179,6 +188,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
     final saved = widget.browseCache.restore(
       source: widget.source,
       categoryId: widget.categoryId,
+      tagId: widget.tagId,
       firstPage: _loadedItems,
     );
     if (saved != null) {
@@ -210,6 +220,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
         : oldWidget.featured.asData?.value;
     if (oldWidget.source != widget.source ||
         oldWidget.categoryId != widget.categoryId ||
+        oldWidget.tagId != widget.tagId ||
         !identical(oldItems, _loadedItems)) {
       _reset(_loadedItems);
       _scrollResetPending = true;
@@ -230,6 +241,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
     widget.browseCache.save(
       source: widget.source,
       categoryId: widget.categoryId,
+      tagId: widget.tagId,
       firstPage: _loadedItems,
       items: _items,
       nextPage: _nextPage,
@@ -325,7 +337,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
       key = const ValueKey('featured-empty');
       status = const DiscoverySectionEmpty();
     } else {
-      key = ValueKey('featured-grid-${widget.categoryId}');
+      key = ValueKey(_gridKey);
       status = const SizedBox.shrink();
     }
     return [
@@ -358,7 +370,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
       ),
       if (loaded != null && _items.isNotEmpty) ...[
         SliverMasonryPlaylistGrid(
-          key: ValueKey('featured-grid-${widget.categoryId}'),
+          key: ValueKey(_gridKey),
           items: _items,
           animateInitialItems: false,
           maxWidth: maxWidth,
