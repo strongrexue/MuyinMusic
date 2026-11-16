@@ -344,7 +344,7 @@ final class CyShineLiveActivityBridge: NSObject {
   ///   走的是同一份数据源（`start`/`update` 的 args），两侧不会打架。
   private func publishNowPlayingInfo(_ args: [String: Any], artworkPath: String?) {
     guard let title = args["title"] as? String, !title.isEmpty else { return }
-    var info: [String: Any] = [:]
+    var info: [String: Any] = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
     info[MPMediaItemPropertyTitle] = title
     info[MPMediaItemPropertyArtist] = (args["artist"] as? String) ?? ""
 
@@ -428,11 +428,27 @@ final class CyShineLiveActivityBridge: NSObject {
     let payload = Self.payload(from: args)
     let attributes = CyShineActivityAttributes(trackId: trackId)
     do {
-      activity = try Activity.request(
+      let started = try Activity.request(
         attributes: attributes,
         content: ActivityContent(state: payload, staleDate: nil),
         pushType: nil
       )
+      activity = started
+      // 监听被系统/用户结束：划掉卡片或 8 小时回收后把 activity 置空，
+      // 让后续 update 因 guard 失败而重建（与 applyUpdate 的前台门控配合）。
+      // endActivity(policy:) 同样会触发 dismissed，重复置 nil 无害。
+      Task { @MainActor [weak self] in
+        for await state in started.activityStateUpdates {
+          guard let self else { return }
+          if case .dismissed = state {
+            // 只清掉自己这条，避免把期间新发起的活动误置空。
+            if self.activity?.id == started.id {
+              self.activity = nil
+            }
+            return
+          }
+        }
+      }
     } catch {
       NSLog("[live-activity] 启动失败: \(error.localizedDescription)")
       CyShineNativeLog.write("live-activity", "发起失败: \(Self.describe(error)) | \(Self.diagnostics())")
@@ -461,14 +477,27 @@ final class CyShineLiveActivityBridge: NSObject {
 
     guard let activity else {
       // 活动已经不在（用户划掉了 / 系统回收了）—— 当作一次新的发起。
-      _ = performStart(args)
+      // Activity.request 要求前台，后台只暂存，由 observeForeground() 补发。
+      if UIApplication.shared.applicationState == .active {
+        _ = performStart(args)
+      } else {
+        pendingStart = args
+        CyShineNativeLog.write("live-activity",
+                               "App 不在前台，已暂存重建，回到前台再补")
+      }
       return
     }
     // 换歌了就走 start 的路径（会重建活动）
     if let trackId = args["trackId"] as? String,
        !trackId.isEmpty,
        trackId != activity.attributes.trackId {
-      _ = performStart(args)
+      if UIApplication.shared.applicationState == .active {
+        _ = performStart(args)
+      } else {
+        pendingStart = args
+        CyShineNativeLog.write("live-activity",
+                               "App 不在前台，已暂存重建，回到前台再补")
+      }
       return
     }
     let payload = Self.payload(from: args)

@@ -146,9 +146,32 @@ jobs:
       # 扩展不进 Runner.xcodeproj，用 xcrun swiftc 独立编译成 .appex 再塞进 PlugIns/。
       # 失败最多只是没有小组件，主 App 照常出包。
       - name: Build WidgetKit extension
+        env:
+          IOS_BUILD_NAME: ${{ steps.version.outputs.name }}
+          IOS_BUILD_NUMBER: ${{ steps.version.outputs.number }}
         run: |
           APP_PATH=build/ios/iphoneos/Runner.app
           bash tool/build_widget_extension.sh "$APP_PATH"
+
+      - name: Verify WidgetKit extension
+        run: |
+          set -euo pipefail
+          APP_PATH=build/ios/iphoneos/Runner.app
+          APPEX="$APP_PATH/PlugIns/CyShineMusicWidget.appex"
+          test -d "$APPEX" || { echo "::error::$APPEX 不存在，灵动岛扩展没打进去"; exit 1; }
+          APP_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
+          APPEX_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APPEX/Info.plist")
+          case "$APPEX_ID" in
+            "$APP_ID".*) ;;
+            *) echo "::error::扩展 bundle id ($APPEX_ID) 未以主 App ($APP_ID) 为前缀，iOS 会拒绝加载"; exit 1 ;;
+          esac
+          APP_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
+          APPEX_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APPEX/Info.plist")
+          test "$APP_VER" = "$APPEX_VER" || { echo "::error::版本不一致：App $APP_VER / 扩展 $APPEX_VER"; exit 1; }
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist")
+          APPEX_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APPEX/Info.plist")
+          test "$APP_BUILD" = "$APPEX_BUILD" || { echo "::error::构建号不一致：App $APP_BUILD / 扩展 $APPEX_BUILD"; exit 1; }
+          echo "[ok] 扩展校验通过：$APPEX_ID / $APPEX_VER ($APPEX_BUILD)，前缀与版本均与主 App 对齐"
 
       - name: Package unsigned IPA
         run: |
