@@ -71,57 +71,33 @@ class QsSdk {
   /// first read registers a throw-away desktop device and every later read
   /// carries its identity.
   static Future<Map<String, String>>? _device;
-  static Future<void> _requestTail = Future<void>.value();
-  static DateTime? _lastRead;
 
-  /// Reads are queued behind the previous one and spaced 600 ms apart: the
-  /// gateway answers an empty 200 to concurrent calls, and an empty answer is
-  /// retried because it is throttling noise rather than a real result.
-  static Future<Map> _get(String path, {Map<String, String> query = const {}}) {
-    final result = _requestTail.then((_) async {
-      final device = await (_device ??= _registerDevice());
-      final elapsed = _lastRead == null
-          ? 600
-          : DateTime.now().difference(_lastRead!).inMilliseconds;
-      if (elapsed < 600) {
-        await Future<void>.delayed(Duration(milliseconds: 600 - elapsed));
-      }
+  /// Reads share one device registration and run independently: the web
+  /// gateway serves concurrent reads without throttling (verified up to 20 in
+  /// parallel with no empty replies). An empty answer is still retried as a
+  /// cheap safety net rather than a standing delay on every call.
+  static Future<Map> _get(
+    String path, {
+    Map<String, String> query = const {},
+  }) async {
+    final device = await (_device ??= _registerDevice());
+    for (var attempt = 0; ; attempt++) {
       try {
-        for (var attempt = 0; ; attempt++) {
-          try {
-            return await _request(path, query: {...device, ...query});
-          } on QsEmptyResponseException {
-            if (attempt >= 2) rethrow;
-            await Future<void>.delayed(
-              Duration(milliseconds: 600 * (attempt + 1)),
-            );
-          }
-        }
-      } finally {
-        _lastRead = DateTime.now();
+        return await _request(path, query: {...device, ...query});
+      } on QsEmptyResponseException {
+        if (attempt >= 2) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 600 * (attempt + 1)));
       }
-    });
-    _requestTail = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
+    }
   }
 
-  /// The homepage and playlist replies are POSTs; they share the read queue so
-  /// they cannot trip the same throttle.
+  /// The homepage and playlist replies are POSTs. They use the same common
+  /// identity as reads but need no device registration or queue.
   static Future<Map> _post(
     String path, {
     Map<String, Object?>? body = const {},
   }) {
-    final result = _requestTail.then(
-      (_) => _request(path, body: body ?? const {}),
-    );
-    _requestTail = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
+    return _request(path, body: body ?? const {});
   }
 
   static Future<Map> _request(
@@ -869,6 +845,39 @@ class QsSdk {
   /// blurb and cover, which the local directory cannot know.
   static Future<PlaylistInfo> leaderboard(String id, {int? maxTracks}) async {
     final nativeId = id.startsWith('chart:') ? id.substring(6) : id;
+
+    // The homepage reply embeds each chart's full 50-track list, so a cached
+    // discover read covers every leaderboard without a dedicated charts call.
+    try {
+      final home = await _discover();
+      for (final block in _maps(home['blocks'])) {
+        if (block['type'] != 'discover_top_song_list') continue;
+        for (final inner in _maps(block['inner_block'])) {
+          if (inner['type'] != 'discover_track_top_list') continue;
+          final innerId = _textOrNull(inner['inner_block_id']);
+          if (innerId == null || innerId != nativeId) continue;
+          final tracks = _rankedTracks(inner['resources']);
+          if (tracks.isEmpty) continue;
+          return PlaylistInfo(
+            id: 'chart:$innerId',
+            name: decodeName(inner['title']).trim().isEmpty
+                ? '汽水排行榜'
+                : decodeName(inner['title']),
+            source: MusicSource.qs,
+            tracks: maxTracks == null || maxTracks <= 0
+                ? tracks
+                : tracks.take(maxTracks).toList(growable: false),
+            coverUrl: tracks.first.meta.picUrl,
+            creator: '汽水音乐',
+            description: _textOrNull(decodeName(inner['desc'])),
+            trackCount: tracks.length,
+          );
+        }
+      }
+    } catch (_) {
+      // Fall through to the dedicated charts endpoint.
+    }
+
     final body = await _get('/luna/pc/charts/$nativeId');
     final chart = body['chart'];
     final ranks = chart is Map ? chart['track_ranks'] : null;
@@ -1110,29 +1119,34 @@ class QsSdk {
         DateTime.now().difference(_featuredFetchedAt) >
         const Duration(hours: 6);
     var attempts = 0;
-    // A stale pool only needs one fresh round; asking for every round while the
-    // pool is already deep enough turned the first load into ~30 s of throttled
-    // reads.
+    // The web gateway serves parallel reads without throttling, so a whole
+    // round of keyword queries goes out together instead of one at a time.
     while ((_featuredCache.length < wanted || (stale && attempts == 0)) &&
         attempts < 24) {
-      final keyword = _discoverKeywords[attempts % _discoverKeywords.length];
-      final cursor = (attempts ~/ _discoverKeywords.length) * 20;
-      attempts++;
-      List<PlaylistSummary> batch;
-      try {
-        batch = (await searchPlaylistPage(keyword, cursor: cursor)).items;
-      } catch (_) {
-        batch = await featuredPlaylists(limit: 20);
+      final shortfall = wanted - _featuredCache.length;
+      final slots = (shortfall / 20).ceil().clamp(stale ? 6 : 2, 8);
+      final round = <int>[];
+      for (var i = 0; i < slots && attempts < 24; i++, attempts++) {
+        round.add(attempts);
       }
-      var added = 0;
-      for (final item in batch) {
-        if (_featuredCache.any((saved) => saved.id == item.id)) continue;
-        _featuredCache.add(item);
-        added++;
-        if (_featuredCache.length >= _featuredCacheLimit) break;
+      final batches = await Future.wait(
+        round.map((n) async {
+          final keyword = _discoverKeywords[n % _discoverKeywords.length];
+          final cursor = (n ~/ _discoverKeywords.length) * 20;
+          try {
+            return (await searchPlaylistPage(keyword, cursor: cursor)).items;
+          } catch (_) {
+            return featuredPlaylists(limit: 20);
+          }
+        }),
+      );
+      for (final batch in batches) {
+        for (final item in batch) {
+          if (_featuredCache.length >= _featuredCacheLimit) break;
+          if (_featuredCache.any((saved) => saved.id == item.id)) continue;
+          _featuredCache.add(item);
+        }
       }
-      if (added == 0) continue;
-      await Future<void>.delayed(const Duration(milliseconds: 150));
     }
     _featuredFetchedAt = DateTime.now();
     await _saveFeaturedCache();
