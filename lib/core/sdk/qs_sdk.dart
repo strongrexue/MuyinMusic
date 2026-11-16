@@ -52,7 +52,9 @@ class QsSdk {
     'build_mode': 'master',
     'ac': 'wifi',
     'tz_name': 'Asia/Shanghai',
-    'device_platform': 'windows',
+    // The gateway answers `empty_search` to every read that says `windows`;
+    // only the web identity still serves search and the catalogue.
+    'device_platform': 'web',
     'device_type': 'Windows',
     'os_version': 'Windows 10 Pro',
   };
@@ -75,10 +77,7 @@ class QsSdk {
   /// Reads are queued behind the previous one and spaced 600 ms apart: the
   /// gateway answers an empty 200 to concurrent calls, and an empty answer is
   /// retried because it is throttling noise rather than a real result.
-  static Future<Map> _get(
-    String path, {
-    Map<String, String> query = const {},
-  }) {
+  static Future<Map> _get(String path, {Map<String, String> query = const {}}) {
     final result = _requestTail.then((_) async {
       final device = await (_device ??= _registerDevice());
       final elapsed = _lastRead == null
@@ -245,17 +244,22 @@ class QsSdk {
     final cached = _searchCache[key];
     if (cached != null && cached.expires.isAfter(now)) return cached.value;
     if (_searchCache.length >= 24) _searchCache.remove(_searchCache.keys.first);
-    final result = _get(
-      '/luna/search/$type',
-      query: {
-        'q': keyword,
-        'cursor': '${((page < 1 ? 1 : page) - 1) * _pageSize}',
-        'search_id': _uuid(),
-        // `track` is the documented value; `search` answers an empty 200 once
-        // the request carries a registered device identity.
-        'search_method': 'track',
-      },
-    );
+    // `/luna/search/track` answers an empty 200 for every client; tracks are
+    // only reachable through the aggregate endpoint, whose group is capped.
+    final result = type == 'track'
+        ? _get(
+            '/luna/search/all',
+            query: {'q': keyword, 'cursor': '0', 'count': '$_pageSize'},
+          )
+        : _get(
+            '/luna/search/$type',
+            query: {
+              'q': keyword,
+              'cursor': '${((page < 1 ? 1 : page) - 1) * _pageSize}',
+              'search_id': _uuid(),
+              'search_method': 'track',
+            },
+          );
     _searchCache[key] = (
       expires: now.add(const Duration(minutes: 1)),
       value: result,
@@ -275,7 +279,10 @@ class QsSdk {
 
   /// The gateway answers one `result_groups` entry per entity type; the group
   /// id is the plural of the requested type.
-  static ({List<Map> items, bool hasMore}) _searchGroup(Object? body, String type) {
+  static ({List<Map> items, bool hasMore}) _searchGroup(
+    Object? body,
+    String type,
+  ) {
     final groups = body is Map ? body['result_groups'] : null;
     if (groups is! List) return (items: const <Map>[], hasMore: false);
     for (final group in groups) {
@@ -297,6 +304,9 @@ class QsSdk {
   }) async {
     final word = keyword.trim();
     if (word.isEmpty) return const <MusicInfo>[];
+    // The aggregate endpoint's track group is not paginable: every cursor
+    // returns the same rows, so a second page would only repeat the first.
+    if (page > 1) return const <MusicInfo>[];
     final body = await _searchData(word, 'track', page);
     final tracks = <MusicInfo>[];
     for (final row in _searchGroup(body, 'track').items) {
@@ -304,9 +314,9 @@ class QsSdk {
       final info = track == null ? null : _toMusicInfo(track);
       if (info != null) tracks.add(info);
     }
-    return dedupeMusic(tracks)
-        .take(limit.clamp(1, _pageSize))
-        .toList(growable: false);
+    return dedupeMusic(
+      tracks,
+    ).take(limit.clamp(1, _pageSize)).toList(growable: false);
   }
 
   static Future<List<String>> tip(String keyword) async {
@@ -347,7 +357,9 @@ class QsSdk {
             id: id,
             name: name,
             source: MusicSource.qs,
-            coverUrl: avatar is Map ? _imageUrl(avatar.cast<String, Object?>()) : null,
+            coverUrl: avatar is Map
+                ? _imageUrl(avatar.cast<String, Object?>())
+                : null,
             trackCount: count,
           ),
           subtitle: [if (count != null) '$count 首歌曲'].join(' · '),
@@ -385,7 +397,9 @@ class QsSdk {
             id: id,
             name: name,
             source: MusicSource.qs,
-            coverUrl: cover is Map ? _imageUrl(cover.cast<String, Object?>()) : null,
+            coverUrl: cover is Map
+                ? _imageUrl(cover.cast<String, Object?>())
+                : null,
             creator: creator.isEmpty ? null : creator,
             trackCount: count,
           ),
@@ -461,12 +475,12 @@ class QsSdk {
       source: MusicSource.qs,
       tracks: tracks.take(limit).toList(growable: false),
       trackCount: exhausted ? tracks.length : expected,
-      coverUrl: avatar is Map ? _imageUrl(avatar.cast<String, Object?>()) : null,
+      coverUrl: avatar is Map
+          ? _imageUrl(avatar.cast<String, Object?>())
+          : null,
       creator: '热门歌曲',
       description: profile is Map
-          ? _textOrNull(
-              decodeName(profile['intro'] ?? profile['description']),
-            )
+          ? _textOrNull(decodeName(profile['intro'] ?? profile['description']))
           : null,
     );
   }
@@ -758,10 +772,7 @@ class QsSdk {
       for (final word in _krcWord.allMatches(match.group(3)!)) {
         final offset = int.parse(word.group(1)!);
         final wordDuration = int.parse(word.group(2)!);
-        final text = word
-            .group(3)!
-            .replaceAll('(', '（')
-            .replaceAll(')', '）');
+        final text = word.group(3)!.replaceAll('(', '（').replaceAll(')', '）');
         if (text.isEmpty) continue;
         words.add('$text(${start + offset},$wordDuration)');
       }
@@ -880,7 +891,8 @@ class QsSdk {
       tracks: maxTracks == null || maxTracks <= 0
           ? tracks
           : tracks.take(maxTracks).toList(growable: false),
-      coverUrl: (cover is Map ? _imageUrl(cover) : _textOrNull(cover)) ??
+      coverUrl:
+          (cover is Map ? _imageUrl(cover) : _textOrNull(cover)) ??
           (tracks.isEmpty ? null : tracks.first.meta.picUrl),
       creator: '汽水音乐',
       description: style is Map ? _textOrNull(decodeName(style['desc'])) : null,
@@ -1000,7 +1012,9 @@ class QsSdk {
             id: id,
             name: name,
             source: MusicSource.qs,
-            coverUrl: entry['cover'] is String ? entry['cover'] as String : null,
+            coverUrl: entry['cover'] is String
+                ? entry['cover'] as String
+                : null,
             creator: entry['creator'] is String
                 ? entry['creator'] as String
                 : null,
@@ -1093,7 +1107,8 @@ class QsSdk {
     await _loadFeaturedCache();
     final wanted = (page * limit).clamp(limit, _featuredCacheLimit).toInt();
     final stale =
-        DateTime.now().difference(_featuredFetchedAt) > const Duration(hours: 6);
+        DateTime.now().difference(_featuredFetchedAt) >
+        const Duration(hours: 6);
     var attempts = 0;
     // A stale pool only needs one fresh round; asking for every round while the
     // pool is already deep enough turned the first load into ~30 s of throttled
