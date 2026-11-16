@@ -30,6 +30,74 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
+    'a left-folded capsule leaves no cover behind on the open player page',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'discovery_source_order': ['kw', 'kg', 'tx', 'wy', 'mg'],
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final audioHandler = PlayerAudioHandler();
+      addTearDown(() => unawaited(audioHandler.disposeHandler()));
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          playerAudioHandlerProvider.overrideWithValue(audioHandler),
+          playerControllerProvider.overrideWith(
+            (ref) => _PlayerController(ref, _playing),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            builder: (context, child) =>
+                buildPrismTestEnvironment(context, child!),
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomCenter,
+                child: FloatingCapsuleBottomNavigation(
+                  location: '/settings',
+                  routeLocation: '/settings',
+                  showPlayer: true,
+                  visible: true,
+                  reveal: const AlwaysStoppedAnimation<double>(1),
+                  fold: const AlwaysStoppedAnimation<double>(1),
+                  isPlayer: true,
+                  onFoldedPlayerTap: () {},
+                  onFoldedAnchorTap: () {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // The round cover the folded player capsule collapses into has to fade
+      // with the rest of the chrome, or it lingers in the bottom-left corner
+      // of the open player page.
+      final anchor = find.byKey(const ValueKey('folded-player-anchor'));
+      expect(anchor, findsOneWidget);
+      expect(
+        tester
+            .widget<FadeTransition>(
+              find
+                  .ancestor(of: anchor, matching: find.byType(FadeTransition))
+                  .first,
+            )
+            .opacity
+            .value,
+        0,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'floating capsule is the only navigation and settings drop the mode card',
     (tester) async {
       final harness = await _pumpApp(

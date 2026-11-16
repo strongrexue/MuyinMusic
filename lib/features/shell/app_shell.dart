@@ -26,7 +26,6 @@ import 'shell_bottom_area.dart';
 import 'shell_route_utils.dart';
 import 'shell_toolbar_visibility.dart';
 import 'tab_location_memory.dart';
-import 'widgets/discovery_category_fab.dart';
 import 'widgets/dual_capsule_bottom_navigation.dart';
 import 'widgets/player_surface_clipper.dart';
 import 'widgets/search_paging_fab.dart';
@@ -732,11 +731,6 @@ class _AppShellState extends ConsumerState<AppShell>
                         ),
                       ),
                     ),
-                    if (contentLocation == '/')
-                      const Positioned.fill(
-                        key: ValueKey('shell-discovery-fab'),
-                        child: DiscoveryCategoryFabLayer(),
-                      ),
                     // The paging FAB belongs to the search surface only: its
                     // state is written by OnlineSearchBody and is never cleared
                     // when that page goes away, so mounting it on the discovery
