@@ -18,7 +18,6 @@ import '../../core/music_sources/music_url_resolver.dart';
 import '../../core/services/app_logger.dart';
 import '../../core/services/local_audio_source.dart';
 import '../../core/services/tagger.dart';
-import '../../core/sdk/qishui_sdk.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import '../downloads/download_history_store.dart';
@@ -525,15 +524,19 @@ class PlayerController extends StateNotifier<PlayerState>
     _invalidateGrooveShift();
     _requestToken = token;
     _transportSuppressionToken = token;
-    final selectedQuality =
+    final playbackPreference = _ref
+        .read(settingsProvider)
+        .onlinePlaybackQuality;
+    var selectedQuality =
         quality ??
-        music.playbackQualityFor(
-          _ref.read(settingsProvider).onlinePlaybackQuality,
-        );
+        (music.meta.qualitys.isEmpty
+            ? playbackPreference.preferredQuality
+            : null) ??
+        music.playbackQualityFor(playbackPreference);
     _currentMusic = music;
     _logPlayback(
       'load_start kind=remote music=${music.source.code}:${music.id} '
-      'requestedQuality=${selectedQuality.code} '
+      'requestedQuality=${quality?.code ?? playbackPreference.code} '
       'initialPositionMs=${initialPosition.inMilliseconds} '
       'autoPlay=$autoPlay excludedSources=${excludedSourceIds.length}',
     );
@@ -587,6 +590,15 @@ class PlayerController extends StateNotifier<PlayerState>
     }
 
     try {
+      final resolver = _ref.read(musicUrlResolverProvider);
+      if (quality == null &&
+          playbackPreference == OnlinePlaybackQuality.highest) {
+        // Catalogue quality lists can be absent (Soda) or incomplete. Start
+        // with the enabled sources' highest quality; the resolver downgrades
+        // only after those sources fail to supply it.
+        selectedQuality = await resolver.highestQualityFor(music);
+        if (!identical(_requestToken, token)) return false;
+      }
       final api = _ref.read(musicApiProvider);
       Future<String?> fetchCover() async {
         final String? coverUrl;
@@ -1684,7 +1696,6 @@ class PlayerController extends StateNotifier<PlayerState>
   Future<void> _playQueueEntry(DownloadHistoryEntry entry) {
     _pendingRestoredSession = null;
     _recordRecentPlay(entry);
-    _prefetchNextQueueEntry();
     final path = entry.savedPath?.trim();
     if (path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path)) {
       if (state.track?.localPath == path) {
@@ -1707,20 +1718,6 @@ class PlayerController extends StateNotifier<PlayerState>
     }
     state = state.copyWith(error: '歌曲不可播放');
     return Future<void>.value();
-  }
-
-  /// Warms the resolver for the upcoming track so 汽水 (whose play URL comes from
-  /// a remote relay) starts as fast as the other platforms.
-  void _prefetchNextQueueEntry() {
-    try {
-      final index = _nextQueueIndex(automatic: true);
-      if (index == null || index < 0 || index >= _queue.length) return;
-      final music = _queue[index].musicInfo;
-      if (music == null || music.source != MusicSource.qishui) return;
-      unawaited(QishuiSdk.prefetch(music));
-    } catch (error) {
-      AppLogger.write('player-control', 'prefetch_next_failed error=$error');
-    }
   }
 
   Future<void> _restartCurrentTrack() async {

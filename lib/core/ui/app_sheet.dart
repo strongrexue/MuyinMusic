@@ -22,12 +22,17 @@ Future<T?> showAppSheet<T>({
   /// 需要在调用处显式传入 `floating: true`，保留层叠留白。
   bool floating = false,
   bool neutralSurface = false,
+
+  /// 让 Sheet 底板变成一层玻璃：底下的页面透上来并糊化，文字仍按主题取色。
+  /// 玻璃关闭时自动退回普通表面，不留下半透明的空壳。
+  bool glass = false,
 }) {
   assert(heightFraction > 0 && heightFraction <= 1);
   final navigator = useRootNavigator
       ? Navigator.of(context, rootNavigator: true)
       : prism.sheetNavigatorOf(context);
   final host = navigator.context;
+  final useGlass = glass && prism.LiquidGlassScope.of(host);
   final available =
       MediaQuery.sizeOf(host).height - MediaQuery.viewPaddingOf(host).top;
   final fraction = detents != null && detents.isNotEmpty
@@ -59,18 +64,39 @@ Future<T?> showAppSheet<T>({
       data: theme.copyWith(colorScheme: colors),
       child: prism.SurfaceScope(
         level: prism.SurfaceLevel.page,
-        child: Material(
-          color: backgroundColor ?? prism.SurfaceLevel.page.colorOf(colors),
-          child: Column(
-            mainAxisSize: fitsContent ? MainAxisSize.min : MainAxisSize.max,
-            children: [
-              if (showDragHandle) const prism.SheetDragHandle(),
-              Flexible(
-                fit: fitsContent ? FlexFit.loose : FlexFit.tight,
-                child: builder(sheetContext),
+        child: Builder(
+          builder: (sheetContext) {
+            final Material surface = Material(
+              // 玻璃自己就是底板，Material 再铺满一层就把后面的页面挡死了；
+              // 留一层跟着主题走的半透明表面，糊化后的背景才不至于糊掉文字。
+              color:
+                  backgroundColor ??
+                  (useGlass
+                      ? prism.SurfaceLevel.page
+                            .colorOf(colors)
+                            .withValues(alpha: 0.62)
+                      : prism.SurfaceLevel.page.colorOf(colors)),
+              child: Column(
+                mainAxisSize: fitsContent ? MainAxisSize.min : MainAxisSize.max,
+                children: [
+                  if (showDragHandle) const prism.SheetDragHandle(),
+                  Flexible(
+                    fit: fitsContent ? FlexFit.loose : FlexFit.tight,
+                    child: builder(sheetContext),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+            if (!useGlass) return surface;
+            // 与播放页列表弹窗同一层材料：菜单级玻璃 + 主题表面色，底下页面
+            // 糊上来但不被盖死。
+            return prism.LiquidGlass(
+              style: prism.LiquidGlassStyle.menu(colors),
+              borderRadius: prism.bottomSheetRadiusOf(sheetContext),
+              steadyFrost: true,
+              child: surface,
+            );
+          },
         ),
       ),
     );
@@ -82,9 +108,12 @@ Future<T?> showAppSheet<T>({
         detents: detents ?? [detent],
         fitsContent: fitsContent,
         floating: floating,
+        // 玻璃态必须让 Sheet 自己的底板透出背景，否则后面的页面透不上来。
         backgroundColor:
             backgroundColor ??
-            (neutralSurface
+            (useGlass
+                ? Colors.transparent
+                : neutralSurface
                 ? AppTheme.neutralSurfaces(
                     Theme.of(host).colorScheme,
                   ).surfaceContainer
@@ -101,7 +130,9 @@ Future<T?> showAppSheet<T>({
   }
   return prism.showSheet<T>(
     context: host,
-    props: prism.SheetProps(backgroundColor: backgroundColor),
+    props: prism.SheetProps(
+      backgroundColor: useGlass ? Colors.transparent : backgroundColor,
+    ),
     builder: (context) => SizedBox(
       height: math.min(maxHeight, available * fraction),
       child: content(context),

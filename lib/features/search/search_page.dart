@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../discovery/discovery_content.dart';
+import '../discovery/widgets/discovery_filter_bar.dart';
 import '../discovery/widgets/discovery_source_tabs.dart';
 import '../shell/widgets/shell_header.dart';
 
-/// 发现页：顶部平台胶囊 tab + 公共内容（榜单 / 精选歌单）。
+/// 发现页：顶部平台胶囊 tab + 排序/分类筛选行 + 公共内容（榜单 / 精选歌单）。
 /// 在线搜索整体在首页（`/home/search`），这里不持有任何搜索状态。
 ///
 /// 平台胶囊浮在内容之上（与底部 dock 同一种层），列表从它下面开始，
-/// 往下滚动时内容从玻璃后面穿过。
+/// 往下滚动时内容从玻璃后面穿过。筛选行常驻在平台胶囊下方。
 class SearchPage extends StatelessWidget {
   const SearchPage({super.key});
 
   /// 胶囊 56 + 上边距 6 + 与首行内容的间距 8。
   static const double _tabsSlot = prism.kGlassPillBarHeight + 14;
+
+  /// 筛选行 40 + 间距 4。
+  static const double _filterSlot = DiscoveryFilterBar.height + 4;
 
   @override
   Widget build(BuildContext context) {
@@ -28,13 +32,21 @@ class SearchPage extends StatelessWidget {
               child: Stack(
                 children: [
                   const Positioned.fill(
-                    child: DiscoveryContent(topPadding: _tabsSlot),
+                    child: DiscoveryContent(
+                      topPadding: _tabsSlot + _filterSlot,
+                    ),
                   ),
                   const Positioned(
                     top: 6,
                     left: 14,
                     right: 14,
                     child: DiscoverySourceTabs(),
+                  ),
+                  const Positioned(
+                    top: _tabsSlot - 2,
+                    left: 14,
+                    right: 14,
+                    child: DiscoveryFilterBar(),
                   ),
                 ],
               ),

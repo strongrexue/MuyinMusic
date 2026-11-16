@@ -435,7 +435,7 @@ void main() {
         MusicSource.kg,
         MusicSource.tx,
         MusicSource.wy,
-        MusicSource.qishui,
+        MusicSource.qs,
       ]) {
         expect(await notifier.setSearchSourceEnabled(source, false), isTrue);
       }

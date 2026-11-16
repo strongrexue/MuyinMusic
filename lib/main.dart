@@ -10,7 +10,6 @@ import 'app.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/native_log_bridge.dart';
 import 'core/debug/debug_paint_guard.dart';
-import 'core/sdk/qishui_sdk.dart';
 import 'core/storage/settings_store.dart';
 import 'features/player/player_audio_handler.dart';
 import 'features/player/live_activity_service.dart';
@@ -51,7 +50,6 @@ Future<void> _startApp() async {
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   }
   hydrateNetworkAdapterPreference(prefs);
-  QishuiSdk.configureSession(ensureQishuiSessionPreference(prefs));
   final audioHandler = await initializePlayerAudioHandler(
     allowMixWithOthers: readAllowMixWithOthersPreference(prefs),
   );

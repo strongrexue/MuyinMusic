@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +8,6 @@ import '../services/storage_location.dart';
 import '../services/saf_storage.dart';
 import '../api/dio_factory.dart';
 import '../models/enums.dart';
-import '../sdk/qishui_sdk.dart';
 import '../../theme/glass_settings.dart';
 import '../../theme/liquid_glass_mode.dart';
 import '../../theme/seed_palette.dart';
@@ -43,6 +41,10 @@ const String _kSkipStartupScreenKey = 'skip_startup_screen';
 const String _kCheckForUpdatesOnStartupKey = 'check_for_updates_on_startup';
 const String _kNetworkAdapterModeKey = 'network_adapter_mode';
 const String _kEnabledSearchSourcesKey = 'enabled_search_source_codes';
+// 汽水音乐 was added as a search source after release, so installs that already
+// saved an enabled-source list never learn about it. This flag makes the
+// one-time opt-in run exactly once.
+const String _kQsSearchAddedKey = 'qs_search_added_v1';
 const String _kDefaultSearchSourceKey = 'default_search_source';
 const String _kReplaceQueueOnSearchPlayKey = 'replace_queue_on_search_play';
 const String _kDiscoverySourceOrderKey = 'discovery_source_order';
@@ -54,7 +56,6 @@ const String _kShowMiniLyricsKey = 'show_mini_lyrics';
 const String _kGrooveShiftEnabledKey = 'groove_shift_enabled';
 const String _kAllowMixWithOthersKey = 'allow_mix_with_others';
 const String _kPlayerVolumeKey = 'player_volume';
-const String _kQishuiSessionIdKey = 'qishui_session_id';
 const String _kBluetoothLyricEnabledKey = 'bluetooth_lyric_enabled';
 const String _kBluetoothFullLyricEnabledKey = 'bluetooth_full_lyric_enabled';
 const String _kBluetoothLyricNoticeSeenKey = 'bluetooth_lyric_notice_seen';
@@ -113,7 +114,6 @@ class AppSettings {
     this.grooveShiftEnabled = false,
     required this.allowMixWithOthers,
     this.playerVolume = 1.0,
-    this.qishuiSessionId = '',
     required this.bluetoothLyricEnabled,
     required this.bluetoothFullLyricEnabled,
     required this.bluetoothLyricNoticeSeen,
@@ -176,9 +176,6 @@ class AppSettings {
   /// dialled in for a quiet Bluetooth path survives restarts.
   final double playerVolume;
 
-  /// Optional Soda login cookie. The bundled one works until Soda throttles it;
-  /// a user-supplied value is used instead when present.
-  final String qishuiSessionId;
   final bool bluetoothLyricEnabled;
   final bool bluetoothFullLyricEnabled;
   final bool bluetoothLyricNoticeSeen;
@@ -220,7 +217,6 @@ class AppSettings {
     bool? grooveShiftEnabled,
     bool? allowMixWithOthers,
     double? playerVolume,
-    String? qishuiSessionId,
     bool? bluetoothLyricEnabled,
     bool? bluetoothFullLyricEnabled,
     bool? bluetoothLyricNoticeSeen,
@@ -268,7 +264,6 @@ class AppSettings {
     grooveShiftEnabled: grooveShiftEnabled ?? this.grooveShiftEnabled,
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
     playerVolume: playerVolume ?? this.playerVolume,
-    qishuiSessionId: qishuiSessionId ?? this.qishuiSessionId,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
     bluetoothFullLyricEnabled:
         bluetoothFullLyricEnabled ?? this.bluetoothFullLyricEnabled,
@@ -318,8 +313,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     }
     final downloadDir =
         _prefs.getString(_kDownloadDirKey) ?? kDefaultDownloadDir;
-    final enabledSearchSources = decodeEnabledSearchSources(
-      _prefs.getStringList(_kEnabledSearchSourcesKey),
+    final enabledSearchSources = _migrateQsSearchSource(
+      _prefs,
+      decodeEnabledSearchSources(_prefs.getStringList(_kEnabledSearchSourcesKey)),
     );
     final defaultSearchSource = MusicSource.fromCode(
       _prefs.getString(_kDefaultSearchSourceKey) ?? 'all',
@@ -408,7 +404,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
         0.0,
         1.0,
       ),
-      qishuiSessionId: readQishuiSessionPreference(_prefs),
       bluetoothLyricEnabled:
           _prefs.getBool(_kBluetoothLyricEnabledKey) ?? false,
       bluetoothFullLyricEnabled:
@@ -913,13 +908,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(playerVolume: volume);
   }
 
-  Future<void> setQishuiSessionId(String value) async {
-    final trimmed = value.trim();
-    await _prefs.setString(_kQishuiSessionIdKey, trimmed);
-    QishuiSdk.configureSession(trimmed);
-    state = state.copyWith(qishuiSessionId: trimmed);
-  }
-
   Future<void> setBluetoothLyricEnabled(bool value) async {
     await _prefs.setBool(_kBluetoothLyricEnabledKey, value);
     state = state.copyWith(bluetoothLyricEnabled: value);
@@ -948,25 +936,6 @@ final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(
 
 bool readAllowMixWithOthersPreference(SharedPreferences preferences) =>
     preferences.getBool(_kAllowMixWithOthersKey) ?? false;
-
-String readQishuiSessionPreference(SharedPreferences preferences) =>
-    (preferences.getString(_kQishuiSessionIdKey) ?? '').trim();
-
-/// Soda wants a session cookie on every signed call. A fresh random one per
-/// install works, while the hardcoded one shared by third-party plugins starts
-/// getting empty replies once it is used from many places, so generate and keep
-/// one when the user has not supplied their own.
-String ensureQishuiSessionPreference(SharedPreferences preferences) {
-  final stored = readQishuiSessionPreference(preferences);
-  if (stored.isNotEmpty) return stored;
-  final random = Random.secure();
-  final generated = List<String>.generate(
-    32,
-    (_) => '0123456789abcdef'[random.nextInt(16)],
-  ).join();
-  unawaited(preferences.setString(_kQishuiSessionIdKey, generated));
-  return generated;
-}
 
 String _encodeThemeMode(ThemeMode mode) {
   switch (mode) {
@@ -1012,13 +981,33 @@ Set<MusicSource> decodeEnabledSearchSources(List<String>? codes) {
   });
 }
 
+/// A saved list only ever contains the sources that existed when the user last
+/// touched the setting, so a newly added platform has to be merged in once.
+/// Without this an upgrade keeps 汽水音乐 out of search with no way to tell why.
+Set<MusicSource> _migrateQsSearchSource(
+  SharedPreferences prefs,
+  Set<MusicSource> current,
+) {
+  if (prefs.getBool(_kQsSearchAddedKey) == true) return current;
+  final merged = Set<MusicSource>.unmodifiable({
+    for (final source in kManageableSearchSources)
+      if (current.contains(source) || source == MusicSource.qs) source,
+  });
+  unawaited(prefs.setStringList(
+    _kEnabledSearchSourcesKey,
+    merged.map((source) => source.code).toList(growable: false),
+  ));
+  unawaited(prefs.setBool(_kQsSearchAddedKey, true));
+  return merged;
+}
+
 const List<MusicSource> kDefaultDiscoverySourceOrder = <MusicSource>[
   MusicSource.wy,
   MusicSource.tx,
   MusicSource.kw,
   MusicSource.kg,
   MusicSource.mg,
-  MusicSource.qishui,
+  MusicSource.qs,
 ];
 
 List<MusicSource> decodeDiscoverySourceOrder(List<String>? codes) {

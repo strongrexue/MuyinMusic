@@ -62,21 +62,6 @@ void main() {
     expect(capabilities[MusicSource.kw], [Quality.k128, Quality.k320]);
   });
 
-  test('maps upstream qs capability to the qishui enum', () {
-    final capabilities = MusicSourceRecord.parseRuntimeCapabilities({
-      'sources': {
-        'qs': {
-          'actions': ['musicUrl'],
-          'qualitys': ['320k', 'flac'],
-        },
-      },
-    });
-
-    expect(capabilities.keys, [MusicSource.qishui]);
-    expect(capabilities[MusicSource.qishui], [Quality.k320, Quality.flac]);
-    expect(MusicSource.tryFromCode('qs'), MusicSource.qishui);
-  });
-
   test('quality selection falls back downward within the intersection', () {
     expect(
       chooseMusicSourceQuality(

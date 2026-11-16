@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/enums.dart';
 import '../models/music_info.dart';
 import '../models/music_url.dart';
-import '../models/native_source_capabilities.dart';
-import '../sdk/qishui_sdk.dart';
 import '../services/app_logger.dart';
 import 'music_source_controller.dart';
 import 'music_source_models.dart';
@@ -42,9 +40,6 @@ class LocalMusicUrlResolver implements MusicUrlResolver {
     required MusicInfo music,
     required Quality quality,
   }) async {
-    if (music.source == MusicSource.qishui) {
-      return QishuiSdk.resolveUrl(music, quality);
-    }
     final result = await useFirstAvailable<MusicUrl>(
       music: music,
       quality: quality,
@@ -55,12 +50,6 @@ class LocalMusicUrlResolver implements MusicUrlResolver {
 
   @override
   Future<Quality> highestQualityFor(MusicInfo music) async {
-    if (music.source == MusicSource.qishui) {
-      return highestMusicSourceQuality(
-        sourceQualities: kQishuiQualities,
-        trackQualities: music.sortedQualities.map((item) => item.type),
-      );
-    }
     final sourceState = await _ref.read(musicSourceControllerProvider.future);
     final enabled = sourceState.enabledRecords;
     if (enabled.isEmpty) {
@@ -87,16 +76,6 @@ class LocalMusicUrlResolver implements MusicUrlResolver {
     bool Function()? isCancelled,
     bool Function(Object error)? shouldFallbackOnConsumerError,
   }) async {
-    if (music.source == MusicSource.qishui) {
-      final url = await QishuiSdk.resolveUrl(music, quality);
-      final source = kQishuiNativeSource;
-      final value = await use(source, url);
-      return MusicSourceFallbackResult(
-        source: source,
-        value: value,
-        attemptedSourceIds: [source.id],
-      );
-    }
     final sourceState = await _ref.read(musicSourceControllerProvider.future);
     if (sourceState.enabledRecords.isEmpty) {
       throw const MusicSourceRuntimeException('请先在设置中导入并启用音源');
@@ -238,25 +217,6 @@ class MusicSourceFallbackException implements Exception {
 class MusicSourceFallbackCancelledException implements Exception {
   const MusicSourceFallbackCancelledException();
 }
-
-/// Qualities the Soda API hands out. There is no 24-bit flac tier.
-List<Quality> get kQishuiQualities =>
-    kNativeSourceQualities[MusicSource.qishui] ?? const <Quality>[];
-
-/// Soda resolves playback in-app (its signed `track_v2` request) instead of
-/// through an imported script, so it still needs a record for the UI to show.
-final MusicSourceRecord kQishuiNativeSource = MusicSourceRecord(
-  id: 'native:qishui',
-  name: '汽水音乐',
-  description: '内置汽水音乐解析',
-  author: '沐音',
-  homepage: 'https://music.douyin.com/qishui',
-  version: '1.0',
-  origin: 'native',
-  importedAt: DateTime.utc(2024),
-  updatedAt: DateTime.utc(2024),
-  capabilities: {MusicSource.qishui: kQishuiQualities},
-);
 
 Quality chooseMusicSourceQuality({
   required Quality requested,

@@ -128,10 +128,17 @@ class FloatingCapsuleBottomNavigation extends ConsumerWidget {
                     leftInset: 4,
                     collapsedTop: 4,
                     foldShift: _foldedLeftShift,
-                    collapsedChild: _FoldedPlayerAnchor(
-                      key: const ValueKey('folded-player-anchor'),
-                      size: playerHeight - 8,
-                      onTap: onFoldedPlayerTap,
+                    // The capsule itself fades with the player transition
+                    // inside ToolbarCapsule; this round cover is drawn beside
+                    // it, so it needs the same fade or it stays pinned to the
+                    // bottom-left corner of the open player page.
+                    collapsedChild: FadeTransition(
+                      opacity: navOpacity,
+                      child: _FoldedPlayerAnchor(
+                        key: const ValueKey('folded-player-anchor'),
+                        size: playerHeight - 8,
+                        onTap: onFoldedPlayerTap,
+                      ),
                     ),
                     child: FloatingPlayerBar(
                       routeLocation: routeLocation,

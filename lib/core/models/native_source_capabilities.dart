@@ -2,17 +2,10 @@ import 'enums.dart';
 
 /// Sources the app can resolve itself, without an imported JS music source.
 /// Their qualities are fixed because the platform decides what it hands out.
-const Map<MusicSource, List<Quality>> kNativeSourceQualities = {
-  MusicSource.qishui: <Quality>[
-    Quality.k128,
-    Quality.k192,
-    Quality.k320,
-    Quality.flac,
-    Quality.hires,
-    Quality.atmos,
-    Quality.atmosPlus,
-  ],
-};
+///
+/// Soda (汽水) is not listed: its playback is delegated to imported sources
+/// just like the other platforms, so it needs a script like any of them.
+const Map<MusicSource, List<Quality>> kNativeSourceQualities = {};
 
 bool isNativeMusicSource(MusicSource source) =>
     kNativeSourceQualities.containsKey(source);

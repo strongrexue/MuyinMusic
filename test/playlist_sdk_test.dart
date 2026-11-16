@@ -159,8 +159,8 @@ void main() {
       }
       expect(
         PlaylistSdk.parseTarget('1207922987',
-                source: MusicSource.qishui)?.source,
-        MusicSource.qishui,
+                source: MusicSource.qs)?.source,
+        MusicSource.qs,
       );
     });
 
@@ -189,22 +189,22 @@ void main() {
       // form IS recognized with a numeric id.
       final shareHost = PlaylistSdk.parseTarget(
         'https://qishui.douyin.com/s/iXnJ82Qv/',
-        source: MusicSource.qishui,
+        source: MusicSource.qs,
       );
       final redirectedPlaylistId = PlaylistSdk.parseTarget(
         'https://music.douyin.com/qishui/share/playlist'
         '?playlist_id=8726296628&hybrid_sdk_version=bullet',
-        source: MusicSource.qishui,
+        source: MusicSource.qs,
       );
 
-      expect(path?.source, MusicSource.qishui);
+      expect(path?.source, MusicSource.qs);
       expect(path?.id, '8726296628');
-      expect(douyin?.source, MusicSource.qishui);
+      expect(douyin?.source, MusicSource.qs);
       expect(douyin?.id, '8726296628');
-      expect(query?.source, MusicSource.qishui);
+      expect(query?.source, MusicSource.qs);
       expect(query?.id, '8726296628');
       expect(shareHost, isNull); // no numeric id -> offline path cannot resolve
-      expect(redirectedPlaylistId?.source, MusicSource.qishui);
+      expect(redirectedPlaylistId?.source, MusicSource.qs);
       expect(redirectedPlaylistId?.id, '8726296628');
     });
 
@@ -216,19 +216,19 @@ void main() {
       );
       final bareQuery = PlaylistSdk.parseTarget(
         'qishui.com/foo?playlist_id=8726296628',
-        source: MusicSource.qishui,
+        source: MusicSource.qs,
       );
       final bareShare = PlaylistSdk.parseTarget(
         'qishui.douyin.com/s/iXnJ82Qv/',
-        source: MusicSource.qishui,
+        source: MusicSource.qs,
       );
       final bareWy = PlaylistSdk.parseTarget(
         'music.163.com/playlist?id=3778678',
       );
 
-      expect(bare?.source, MusicSource.qishui);
+      expect(bare?.source, MusicSource.qs);
       expect(bare?.id, '8726296628');
-      expect(bareQuery?.source, MusicSource.qishui);
+      expect(bareQuery?.source, MusicSource.qs);
       expect(bareQuery?.id, '8726296628');
       // Still an opaque code: no numeric id, so the network redirect decides.
       expect(bareShare, isNull);

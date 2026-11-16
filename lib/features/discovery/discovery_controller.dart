@@ -10,6 +10,7 @@ import '../../core/models/online_collection_kind.dart';
 import '../../core/models/playlist_category.dart';
 import '../../core/models/playlist_info.dart';
 import '../../core/models/playlist_summary.dart';
+import '../../core/models/playlist_tag.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import 'discovery_browse_cache.dart';
@@ -78,31 +79,89 @@ class SelectedDiscoveryCategoryNotifier
 
   String get _storageKey => 'discovery_category_${arg.code}_v1';
 
+  List<PlaylistCatalogCategory> get _options => playlistSortOptionsFor(arg);
+
   @override
   String build(MusicSource source) {
+    final options = _options;
+    if (options.isEmpty) return '';
     final savedId = _prefs.getString(_storageKey);
-    return playlistCatalogCategoriesFor(
-          source,
-        ).any((category) => category.id == savedId)
+    return options.any((category) => category.id == savedId)
         ? savedId!
-        : defaultPlaylistCatalogCategoryFor(source).id;
+        : options.first.id;
   }
 
   Future<void> select(String categoryId) async {
     if (state == categoryId ||
-        !playlistCatalogCategoriesFor(
-          arg,
-        ).any((category) => category.id == categoryId)) {
+        !_options.any((category) => category.id == categoryId)) {
       return;
     }
     state = categoryId;
     await _prefs.setString(_storageKey, categoryId);
+    // 这个平台的接口接不下「排序 + 标签」两个参数，挑排序就把标签让回「全部」。
+    if (!playlistSortsStackWithTags(arg)) {
+      await ref.read(selectedDiscoveryTagProvider(arg).notifier).select(null);
+    }
+  }
+
+  /// 换标签后把回落到的排序写回，避免下次启动又读回已失效的值。
+  Future<void> ensureValid() async {
+    if (state.isEmpty || _prefs.getString(_storageKey) == state) return;
+    await _prefs.setString(_storageKey, state);
+  }
+}
+
+/// 标签轴（主题/风格/语种…）。`null` 即「全部」，此时不向平台传分类参数。
+final selectedDiscoveryTagProvider =
+    NotifierProvider.family<SelectedDiscoveryTagNotifier, String?, MusicSource>(
+      SelectedDiscoveryTagNotifier.new,
+    );
+
+class SelectedDiscoveryTagNotifier
+    extends FamilyNotifier<String?, MusicSource> {
+  late final _prefs = ref.read(sharedPreferencesProvider);
+
+  String get _storageKey => 'discovery_tag_${arg.code}_v1';
+
+  @override
+  String? build(MusicSource source) {
+    final savedId = _prefs.getString(_storageKey);
+    if (savedId == null || savedId.isEmpty) return null;
+    return playlistTagFor(source, savedId) == null ? null : savedId;
+  }
+
+  Future<void> select(String? tagId) async {
+    final normalized = tagId == null || playlistTagFor(arg, tagId) == null
+        ? null
+        : tagId;
+    if (state == normalized) return;
+    // 这个平台的接口接不下「标签 + 排序」两个参数，挑标签就把排序让回第一项。
+    // 回落在写 state 之前做：让排序那边把标签清成「全部」时，标签还没被写进
+    // 来，两个方向不会互相把对方刚选的值冲掉。
+    if (normalized != null && !playlistSortsStackWithTags(arg)) {
+      final first = playlistSortOptionsFor(arg).firstOrNull;
+      if (first != null) {
+        await ref
+            .read(selectedDiscoveryCategoryProvider(arg).notifier)
+            .select(first.id);
+      }
+    }
+    if (state == normalized) return;
+    state = normalized;
+    final sort = ref.read(selectedDiscoveryCategoryProvider(arg).notifier);
+    await sort.ensureValid();
+    if (normalized == null) {
+      await _prefs.remove(_storageKey);
+    } else {
+      await _prefs.setString(_storageKey, normalized);
+    }
   }
 }
 
 final featuredPlaylistsProvider =
     FutureProvider.family<List<PlaylistSummary>, MusicSource>((ref, source) {
       final categoryId = ref.watch(selectedDiscoveryCategoryProvider(source));
+      final tagId = ref.watch(selectedDiscoveryTagProvider(source));
       return ref
           .watch(musicApiProvider)
           .featuredPlaylists(
@@ -110,6 +169,7 @@ final featuredPlaylistsProvider =
             page: 1,
             limit: discoveryPlaylistPageSize,
             categoryId: categoryId,
+            tagId: tagId,
           );
     });
 

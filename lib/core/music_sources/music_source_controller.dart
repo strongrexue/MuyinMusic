@@ -42,9 +42,28 @@ class MusicSourceController extends AsyncNotifier<MusicSourceState> {
 
   @override
   Future<MusicSourceState> build() async {
-    // Imported scripts were validated before they were enabled. Loading them
-    // lazily avoids initializing up to five QuickJS contexts during startup.
-    return _store.load();
+    final stored = await _store.load();
+    var records = stored.records;
+    var changed = false;
+    // Older runtimes dropped qs before persisting the capabilities. Refresh
+    // enabled legacy records once; current records retain lazy initialization.
+    for (final record in stored.enabledRecords) {
+      if (record.capabilitiesVersion >= kMusicSourceCapabilitiesVersion) {
+        continue;
+      }
+      try {
+        final ready = await _validate(record, await _store.readScript(record.id));
+        records = _replace(records, ready);
+        changed = true;
+      } catch (_) {
+        // Keep working capabilities and priority, and retry at the next launch.
+        await AppLogger.write('music-source', 'capability refresh failed');
+      }
+    }
+    if (!changed) return stored;
+    final refreshed = stored.copyWith(records: records);
+    await _store.save(refreshed);
+    return refreshed;
   }
 
   Future<void> checkAllForUpdates() async {
@@ -475,7 +494,11 @@ class MusicSourceController extends AsyncNotifier<MusicSourceState> {
     if (capabilities.isEmpty) {
       throw const MusicSourceRuntimeException('音源没有声明可用的 musicUrl 能力');
     }
-    return record.copyWith(capabilities: capabilities, clearLastError: true);
+    return record.copyWith(
+      capabilities: capabilities,
+      capabilitiesVersion: kMusicSourceCapabilitiesVersion,
+      clearLastError: true,
+    );
   }
 
   Future<void> deactivate(String id) => _change(() async {

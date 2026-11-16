@@ -37,6 +37,7 @@ enum PopupPlacement {
   overAnchorEnd,
   overAnchorStart,
   belowPoint,
+
   /// Fill the screen width and occupy the lower two thirds, so the card's top
   /// edge sits one third of the screen height from the top.
   screenLowerTwoThirds,
@@ -1851,6 +1852,7 @@ class PopupMenuItem {
     this.onPressed,
     this.danger = false,
     this.checked,
+    this.selectedEmphasis = false,
     this.keepsOpen = false,
     this.executeImmediately = false,
     this.section,
@@ -1866,6 +1868,11 @@ class PopupMenuItem {
   final VoidCallback? onPressed;
   final bool danger;
   final bool? checked;
+
+  /// Render this item's checked state as accent text instead of a trailing
+  /// check. Keeps the row's width tight and makes the selection read at a
+  /// glance. Ignored when [subItems] is non-empty.
+  final bool selectedEmphasis;
 
   /// iOS's keepsMenuPresented, for one of several choices.
   final bool keepsOpen;
@@ -1890,13 +1897,26 @@ const _menuMaxWidth = 280.0;
 const _defaultMaxVisibleItems = 7;
 
 class PopupMenu extends StatefulWidget {
-  const PopupMenu({super.key, required this.items, this.maxVisibleItems});
+  const PopupMenu({
+    super.key,
+    required this.items,
+    this.maxVisibleItems,
+    this.minWidth,
+    this.maxWidth,
+  });
 
   final List<PopupMenuItem> items;
 
   /// Half of the next row shows past these, so the cut tells the menu scrolls.
   /// Setting them builds only the rows in view, which needs rows of one height.
   final int? maxVisibleItems;
+
+  /// Narrower than [_menuMinWidth] for menus of short labels, where the
+  /// default would leave the card much wider than what it lists.
+  final double? minWidth;
+
+  /// Wider than [_menuMaxWidth] for menus of long labels.
+  final double? maxWidth;
 
   @override
   State<PopupMenu> createState() => _PopupMenuState();
@@ -2079,7 +2099,7 @@ class _PopupMenuState extends State<PopupMenu>
     final root = DefaultTextStyle.of(context).style.merge(style);
     final textScaler = MediaQuery.textScalerOf(context);
     final boldText = MediaQuery.boldTextOf(context);
-    const limit = _menuMaxWidth - 2 * _cardInset;
+    final limit = (widget.maxWidth ?? _menuMaxWidth) - 2 * _cardInset;
     var width = 0.0;
     for (final item in items) {
       if (_labelWidths.length >= 1024) {
@@ -2088,13 +2108,15 @@ class _PopupMenuState extends State<PopupMenu>
       final label = _labelWidths[(item.label, root, textScaler, boldText)] ??=
           EmojiText.widthOf(context, item.label, root);
       final checked = item.checked == true;
+      final hasArrow =
+          item.subItems.isNotEmpty || (checked && !item.selectedEmphasis);
       final row =
-          (checked ? _itemArrowPadding : _itemPadding).horizontal +
+          (hasArrow ? _itemArrowPadding : _itemPadding).horizontal +
           (item.leading != null || item.glyph != null
               ? _itemIconSize + 12
               : 0) +
           label +
-          (checked ? 8 + _submenuArrowSize : 0);
+          (hasArrow ? 8 + _submenuArrowSize : 0);
       width = math.max(width, row);
       if (width >= limit) {
         break;
@@ -2134,13 +2156,15 @@ class _PopupMenuState extends State<PopupMenu>
   }
 
   List<_MenuLevel> _resolveLevels() {
+    final minWidth = widget.minWidth ?? _menuMinWidth;
+    final maxWidth = math.max(minWidth, widget.maxWidth ?? _menuMaxWidth);
     final levels = [
       _MenuLevel(
         items: widget.items,
         top: 0,
-        fromWidth: _menuMinWidth,
-        minWidth: _menuMinWidth,
-        maxWidth: _menuMaxWidth,
+        fromWidth: minWidth,
+        minWidth: minWidth,
+        maxWidth: maxWidth,
       ),
     ];
     for (final step in _path) {
@@ -2162,7 +2186,7 @@ class _PopupMenuState extends State<PopupMenu>
           top: math.max(0, step.itemTop - _cardInset),
           fromWidth: fromWidth,
           minWidth: minWidth,
-          maxWidth: math.max(minWidth, _menuMaxWidth),
+          maxWidth: math.max(minWidth, maxWidth),
         ),
       );
     }
@@ -2412,6 +2436,7 @@ class _PopupMenuState extends State<PopupMenu>
     final enabled = onTap != null;
     final color = item.danger ? colorScheme.error : colorScheme.onSurface;
     final foregroundColor = enabled ? color : color.opacity30;
+    final emphasis = item.selectedEmphasis && _isChecked(item);
     Widget? arrow;
     if (item.subItems.isNotEmpty) {
       arrow = GlyphIcon(
@@ -2422,7 +2447,7 @@ class _PopupMenuState extends State<PopupMenu>
       if (arrowTurns != null) {
         arrow = RotationTransition(turns: arrowTurns, child: arrow);
       }
-    } else if (_isChecked(item)) {
+    } else if (_isChecked(item) && !emphasis) {
       arrow = GlyphIcon(
         Glyphs.check,
         size: _submenuArrowSize,
@@ -2486,9 +2511,10 @@ class _PopupMenuState extends State<PopupMenu>
                       item.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: _menuLabelStyleOf(
-                        context,
-                      ).copyWith(color: foregroundColor),
+                      style: _menuLabelStyleOf(context).copyWith(
+                        color: emphasis ? colorScheme.primary : foregroundColor,
+                        fontWeight: emphasis ? FontWeight.w600 : null,
+                      ),
                     ),
                     if (item.subtitle case final subtitle?)
                       EmojiText(

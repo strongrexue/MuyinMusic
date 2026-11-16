@@ -358,9 +358,9 @@ class _ImportForm extends StatelessWidget {
                     label: Text('咪咕'),
                   ),
                   ButtonSegment(
-                    value: MusicSource.qishui,
+                    value: MusicSource.qs,
                     icon: Image(
-                      image: AssetImage('assets/platform_icons/qishui.png'),
+                      image: AssetImage('assets/platform_icons/qs.png'),
                       width: 18,
                       height: 18,
                     ),
@@ -394,7 +394,7 @@ class _ImportForm extends StatelessWidget {
             minLines: 1,
             decoration: InputDecoration(
               labelText: '歌单链接或 ID',
-              hintText: source == MusicSource.qishui
+              hintText: source == MusicSource.qs
                   ? '粘贴汽水歌单分享文字、链接或 ID'
                   : 'https://music.163.com/playlist?id=...',
               prefixIcon: const Icon(Icons.link_rounded),

@@ -91,6 +91,7 @@ class _SwipeMusicApi extends MusicApi {
     int page = 1,
     int limit = 20,
     String? categoryId,
+    String? tagId,
   }) async {
     return [PlaylistSummary(id: '1', name: '测试歌单', source: source)];
   }
