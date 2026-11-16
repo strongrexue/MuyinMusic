@@ -524,15 +524,19 @@ class PlayerController extends StateNotifier<PlayerState>
     _invalidateGrooveShift();
     _requestToken = token;
     _transportSuppressionToken = token;
-    final selectedQuality =
+    final playbackPreference = _ref
+        .read(settingsProvider)
+        .onlinePlaybackQuality;
+    var selectedQuality =
         quality ??
-        music.playbackQualityFor(
-          _ref.read(settingsProvider).onlinePlaybackQuality,
-        );
+        (music.meta.qualitys.isEmpty
+            ? playbackPreference.preferredQuality
+            : null) ??
+        music.playbackQualityFor(playbackPreference);
     _currentMusic = music;
     _logPlayback(
       'load_start kind=remote music=${music.source.code}:${music.id} '
-      'requestedQuality=${selectedQuality.code} '
+      'requestedQuality=${quality?.code ?? playbackPreference.code} '
       'initialPositionMs=${initialPosition.inMilliseconds} '
       'autoPlay=$autoPlay excludedSources=${excludedSourceIds.length}',
     );
@@ -586,6 +590,15 @@ class PlayerController extends StateNotifier<PlayerState>
     }
 
     try {
+      final resolver = _ref.read(musicUrlResolverProvider);
+      if (quality == null &&
+          playbackPreference == OnlinePlaybackQuality.highest) {
+        // Catalogue quality lists can be absent (Soda) or incomplete. Start
+        // with the enabled sources' highest quality; the resolver downgrades
+        // only after those sources fail to supply it.
+        selectedQuality = await resolver.highestQualityFor(music);
+        if (!identical(_requestToken, token)) return false;
+      }
       final api = _ref.read(musicApiProvider);
       Future<String?> fetchCover() async {
         final String? coverUrl;
