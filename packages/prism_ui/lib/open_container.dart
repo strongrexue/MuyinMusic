@@ -482,9 +482,6 @@ class _OpenContainerRoute<T> extends ModalRoute<T>
       : null;
 
   @override
-  bool get dragBackDownward => true;
-
-  @override
   double dragBackSlopOf(
     PointerDeviceKind kind,
     DeviceGestureSettings? settings,

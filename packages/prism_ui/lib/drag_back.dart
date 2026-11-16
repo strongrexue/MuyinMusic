@@ -72,10 +72,6 @@ mixin DragBackRouteMixin<T> on ModalRoute<T> {
   @protected
   AnimationController get dragBackController => controller!;
 
-  /// Whether a drag down dismisses too, locking to the axis it sets off on.
-  @protected
-  bool get dragBackDownward => false;
-
   @protected
   double dragBackSlopOf(
     PointerDeviceKind kind,
@@ -358,18 +354,12 @@ class _DragBackDetectorState extends State<_DragBackDetector> {
   @override
   void initState() {
     super.initState();
-    final route = widget.route;
-    final DragGestureRecognizer recognizer;
-    if (route.dragBackDownward) {
-      final dismiss = _DismissGestureRecognizer(route: route, debugOwner: this);
-      _directed = dismiss;
-      recognizer = dismiss;
-    } else {
-      final back = _DragBackGestureRecognizer(route: route, debugOwner: this);
-      _directed = back;
-      recognizer = back;
-    }
-    _recognizer = recognizer
+    final back = _DragBackGestureRecognizer(
+      route: widget.route,
+      debugOwner: this,
+    );
+    _directed = back;
+    _recognizer = back
       ..onStart = _handleDragStart
       ..onUpdate = _handleDragUpdate
       ..onEnd = _handleDragEnd
@@ -404,7 +394,7 @@ class _DragBackDetectorState extends State<_DragBackDetector> {
     widget.route._startDragBack(
       details.localPosition,
       context.size!,
-      _directed.axis!,
+      _directed.axis,
     );
   }
 
@@ -444,7 +434,7 @@ class _DragBackDetectorState extends State<_DragBackDetector> {
 mixin _DragBackRecognizer on GestureRecognizer {
   double towardEnd = 1;
 
-  Axis? get axis;
+  Axis get axis;
 }
 
 // Desktop text fields select with a pan, which accepts past the pan slop.
@@ -468,66 +458,6 @@ class _DragBackGestureRecognizer extends HorizontalDragGestureRecognizer
     return globalDistanceMoved * towardEnd >
         route.dragBackSlopOf(pointerDeviceKind, gestureSettings);
   }
-}
-
-/// iOS's zoom dismisses on a drag toward the reading end or down that keeps
-/// within about 22° of its axis, and never on one with any upward part.
-class _DismissGestureRecognizer extends PanGestureRecognizer
-    with _DragBackRecognizer {
-  _DismissGestureRecognizer({required this.route, super.debugOwner}) {
-    onlyAcceptDragOnThreshold = true;
-  }
-
-  static const _lockSlope = 0.4;
-
-  final DragBackRouteMixin<dynamic> route;
-  @override
-  Axis? axis;
-  Offset? _down;
-
-  @override
-  void addAllowedPointer(PointerDownEvent event) {
-    _down = event.position;
-    axis = null;
-    super.addAllowedPointer(event);
-  }
-
-  Axis? _lockOf(Offset moved) {
-    final along = moved.dx * towardEnd;
-    if (moved.dy < 0) {
-      return null;
-    }
-    if (along > 0 && moved.dy <= along * _lockSlope) {
-      return Axis.horizontal;
-    }
-    if (moved.dy > 0 && moved.dx.abs() <= moved.dy * _lockSlope) {
-      return Axis.vertical;
-    }
-    return null;
-  }
-
-  @override
-  void handleEvent(PointerEvent event) {
-    final down = _down;
-    if (event is PointerMoveEvent && axis == null && down != null) {
-      final moved = event.position - down;
-      if (moved.distance > route.dragBackSlopOf(event.kind, gestureSettings)) {
-        axis = _lockOf(moved);
-        if (axis == null) {
-          _down = null;
-          resolve(GestureDisposition.rejected);
-          return;
-        }
-      }
-    }
-    super.handleEvent(event);
-  }
-
-  @override
-  bool hasSufficientGlobalDistanceToAccept(
-    PointerDeviceKind pointerDeviceKind,
-    double? deviceTouchSlop,
-  ) => axis != null;
 }
 
 /// Trails a target on springs, on a ticker that keeps running so that a
