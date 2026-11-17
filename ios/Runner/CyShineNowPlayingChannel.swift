@@ -19,14 +19,18 @@ final class CyShineNowPlayingChannel: NSObject {
         result(false)
         return
       }
-      var info: [String: Any] = [
-        MPMediaItemPropertyTitle: title,
-        MPMediaItemPropertyArtist: (a["artist"] as? String) ?? "",
-        MPNowPlayingInfoPropertyPlaybackRate:
-          ((a["playing"] as? Bool) ?? false) ? 1.0 : 0.0,
-        MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
-        MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-      ]
+      // 关键：在现有 nowPlayingInfo 上合并，而不是整字典覆盖。
+      // audio_service 也会写这个中心（artwork / duration / 播放速率等），
+      // 直接赋新字典会把它写的完整字段冲掉，导致锁屏/灵动岛卡片不出。
+      // 现有字典可能为 nil（首次播放），此时初始化为空字典。
+      let center = MPNowPlayingInfoCenter.default()
+      var info = center.nowPlayingInfo ?? [String: Any]()
+      info[MPMediaItemPropertyTitle] = title
+      info[MPMediaItemPropertyArtist] = (a["artist"] as? String) ?? ""
+      info[MPNowPlayingInfoPropertyPlaybackRate] =
+        ((a["playing"] as? Bool) ?? false) ? 1.0 : 0.0
+      info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+      info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
       let dur = (a["durationMs"] as? NSNumber)?.doubleValue ?? 0
       let pos = (a["positionMs"] as? NSNumber)?.doubleValue ?? 0
       if dur > 0 { info[MPMediaItemPropertyPlaybackDuration] = dur / 1000 }
@@ -38,7 +42,7 @@ final class CyShineNowPlayingChannel: NSObject {
         info[MPMediaItemPropertyArtwork] =
           MPMediaItemArtwork(boundsSize: image.size) { _ in image }
       }
-      MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+      center.nowPlayingInfo = info
       result(true)
     }
   }

@@ -45,7 +45,7 @@
 	     live_activities 插件）都要求两边都写 —— 只写主 App 时会出现
 	     「Activity.request 成功、灵动岛不渲染」这种没有报错的静默失败。 -->
 	<key>NSSupportsLiveActivities</key>
-	<true/>
+	<false/>
 
 	<!-- 与主 App 一致的深链 scheme 白名单（Link 打开 App 用） -->
 	<key>CFBundleURLTypes</key>

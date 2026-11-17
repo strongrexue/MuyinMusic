@@ -47,10 +47,7 @@ class LiveActivityService {
   bool _available = false;
   bool _checking = false;
   bool _subscriptionsReady = false;
-  String? _activeTrackId;
-  String? _lastSignature;
   StreamSubscription<PlaybackState>? _playbackSubscription;
-  StreamSubscription<Duration?>? _durationSubscription;
   Future<void> _queue = Future<void>.value();
 
   /// 点灵动岛 / 锁屏卡片时把播放器推到前台。
@@ -104,10 +101,8 @@ class LiveActivityService {
     final handler = _ref.read(playerAudioHandlerProvider);
     // 播放传输走 playbackState，曲目变化走 playerController。
     _playbackSubscription = handler.playbackState.listen(_onPlaybackState);
-    // 时长通常比播放状态晚一步解析出来，进度条要靠这次更新才会出现。
-    _durationSubscription = handler.durationStream.listen(
-      (_) => unawaited(_push(afterArtwork: false)),
-    );
+    // 时长/Live Activity 进度条的增量推送已随灵动岛一起停用：
+    // 纯媒体卡（nowPlayingInfo）由 _pushNowPlaying 无条件写入，不依赖时长回调。
   }
 
   // MARK: - 原生回调
@@ -131,12 +126,6 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
         // 立刻重新判定一次并把当前曲目推上去 —— 否则要等下一次播放状态变化
         // 才恢复，表现为「授权完了还是没反应，再播一次才有」。
         await _ensureAvailable(force: true);
-        final state = _ref.read(playerControllerProvider);
-        if (state.track != null) {
-          _activeStarted = false;
-          _lastSignature = null;
-          await _push(afterArtwork: true);
-        }
         return true;
     }
     throw MissingPluginException('未知的实时活动方法: ${call.method}');
@@ -176,9 +165,6 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       _end();
       return;
     }
-    final changed = track.id != _activeTrackId;
-    _activeTrackId = track.id;
-    unawaited(_push(afterArtwork: changed));
   }
 
   void _onPlaybackState(PlaybackState state) {
@@ -202,7 +188,6 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       _end();
       return;
     }
-    unawaited(_push(afterArtwork: false));
   }
 
   /// 计算要推给原生的载荷。
@@ -264,38 +249,6 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     };
   }
 
-  Future<void> _push({required bool afterArtwork}) async {
-    if (!_available) return;
-    final payload = _payload();
-    if (payload == null) return;
-
-    // 只有「换歌 / 播放状态变化 / 明显跳转」才值得推一次更新。
-    // 位置量化到 5 秒，避免连续微调把通道刷爆；seek 会直接改变量化后的值。
-    final signature = [
-      payload['trackId'],
-      payload['playing'],
-      (payload['positionMs'] as int) ~/ 5000,
-      payload['durationMs'],
-      payload['lyricText'],
-    ].join('|');
-    // 首帧（换歌）必须推一次，哪怕签名"看起来"没变。
-    if (!afterArtwork && _activeStarted && signature == _lastSignature) return;
-    _lastSignature = signature;
-
-    try {
-      final method = _activeStarted ? 'update' : 'start';
-      await _channel.invokeMethod<dynamic>(method, {
-        ...payload,
-        ...await _coverPayload(),
-      });
-      _activeStarted = true;
-    } on MissingPluginException {
-      _available = false;
-    } catch (error) {
-      await AppLogger.write('live-activity', '推送失败: $error');
-    }
-  }
-
   /// 无条件写系统媒体播放卡片（灵动岛/锁屏）。
   /// 与 Live Activity 可用性完全解耦：即使 ActivityKit 不可用（巨魔/低版本 iOS），
   /// 只要写了 nowPlayingInfo，系统就会画出标准播放卡片。
@@ -337,8 +290,6 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   void _end() {
     if (!_available || !_activeStarted) return;
     _activeStarted = false;
-    _activeTrackId = null;
-    _lastSignature = null;
     unawaited(
       _channel.invokeMethod<void>('end').catchError((Object error) async {
         await AppLogger.write('live-activity', '结束活动失败: $error');
@@ -350,7 +301,5 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     _end();
     unawaited(_playbackSubscription?.cancel());
     _playbackSubscription = null;
-    unawaited(_durationSubscription?.cancel());
-    _durationSubscription = null;
   }
 }
