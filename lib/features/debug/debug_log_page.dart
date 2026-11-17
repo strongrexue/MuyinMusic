@@ -9,6 +9,7 @@ import '../../core/services/app_logger.dart';
 import '../../core/ui/app_toast.dart';
 import '../../theme/app_motion.dart';
 import '../shell/widgets/scrolling_page_header.dart';
+import 'widgets/ios_media_diagnostics_card.dart';
 import 'widgets/log_recording_menu.dart';
 
 class DebugLogPage extends StatefulWidget {
@@ -148,6 +149,9 @@ class _DebugLogPageState extends State<DebugLogPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const LogRecordingMenu(menuId: 'debug-log-recording-menu'),
+            const SizedBox(height: 8),
+            const IosMediaDiagnosticsCard(),
+            const SizedBox(height: 8),
             _DebugToolbar(
               lineCount: _lines.length,
               followTail: _followTail,
