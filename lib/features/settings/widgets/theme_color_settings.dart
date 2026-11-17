@@ -25,6 +25,8 @@ class ThemeColorSettings extends ConsumerWidget {
     ModalRoute<dynamic>? route;
     final result = await showSettingsSheet<int>(
       context: context,
+      // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+      glass: true,
       showDragHandle: true,
       heightFraction: 0.9,
       maxHeight: 720,

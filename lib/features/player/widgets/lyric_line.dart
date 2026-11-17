@@ -217,7 +217,7 @@ class LyricLineTile extends ConsumerWidget {
           curve: _kLyricFocusCurve,
           style: mainStyle,
           textAlign: TextAlign.start,
-          child: RepaintBoundary(child: _mainText()),
+          child: RepaintBoundary(child: _mainText(context)),
         ),
         if (hasTranslationLine)
           TweenAnimationBuilder<double>(
@@ -358,7 +358,7 @@ class LyricLineTile extends ConsumerWidget {
     );
   }
 
-  Widget _mainText() {
+  Widget _mainText(BuildContext context) {
     if (!line.hasWordTiming) {
       // No explicit style: the text inherits the AnimatedDefaultTextStyle
       // above, so color can transition without changing layout metrics.
@@ -370,6 +370,8 @@ class LyricLineTile extends ConsumerWidget {
       playing: playing,
       buffering: buffering,
       active: active,
+      // 当前正在唱的字跟随系统强调色（动态色/自定义 accent/seed 都写进 primary）。
+      accent: Theme.of(context).colorScheme.primary,
     );
   }
 }

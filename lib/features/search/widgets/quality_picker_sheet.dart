@@ -30,6 +30,7 @@ Future<void> showQualityPickerSheet(
       neutralSurface: true,
       fitsContent: true,
       floating: true,
+      glass: true, // 玻璃底板，与正例弹窗保持一致（关闭时由入口降级）。
       builder: (_) => QualityPickerSheet(
         music: music,
         toastContext: context,
@@ -118,12 +119,9 @@ class _QualityPickerSheetState extends ConsumerState<QualityPickerSheet> {
       );
     }
 
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-      backgroundColor: scheme.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+    // 玻璃可用时用 Prism 玻璃面板承载内容，关闭时退回普通表面（视觉统一）。
+    final content = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
         child: Padding(
           padding: EdgeInsets.fromLTRB(
             20,
@@ -265,7 +263,23 @@ class _QualityPickerSheetState extends ConsumerState<QualityPickerSheet> {
             ),
           ),
         ),
-      ),
+      );
+    
+    // Prism 玻璃可用时用 LiquidGlass 承载内容，关闭时退回原圆角表面。
+    final glass = prism.LiquidGlassScope.of(context);
+    final glassColors = prism.Theme.of(context).colorScheme;
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+      backgroundColor: glass ? Colors.transparent : scheme.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+      child: glass
+          ? prism.LiquidGlass(
+              style: prism.LiquidGlassStyle.alert(glassColors),
+              borderRadius: BorderRadius.circular(30),
+              shadows: prism.menuShadows(glassColors),
+              child: content,
+            )
+          : content,
     );
   }
 

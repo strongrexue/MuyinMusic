@@ -113,16 +113,36 @@ class GlassSettings {
     final transmission = _clamp(this.transmission) / 100;
     final reflection = _clamp(this.reflection) / 100;
 
-    // 两档外观预设。用 switch 表达式返回 record，避免任何控制流歧义。
-    final (tintAlpha, blurScale, haze, brightnessBias) =
+    // 两档外观预设。相对 base 缩放，保留 lens 类控件(负折射=凸起)的语义。
+    //   磨砂 → 飞牛「高斯模糊」观感：模糊主导、折射减弱、去色散、底色略实。
+    //   透明 → 飞牛「液体玻璃」观感：厚折射 + 色差色散 + 边缘高光。
+    // 对应飞牛校准值 refractiveIndex≈1.59 / chromatic≈0.3 / thickness≈30，
+    // prism 用 dp 单位与不同饱和度量级，故按其预设量级换算后叠加。
+    final (
+      tintAlpha, blurScale, haze, brightnessBias,
+      refractionScale, bevelScale, saturationKeep, dispersionFloor,
+    ) =
         switch (appearance) {
-      GlassAppearance.frosted => (0.62, 1.4, 0.35, -0.1),
-      GlassAppearance.clear => (0.28, 0.7, 0.0, 0.15),
-    };
+          GlassAppearance.frosted => (
+            0.60, 1.55, 0.35, -0.1,
+            0.72, 0.85, 0.62, 0.0,
+          ),
+          GlassAppearance.clear => (
+            0.26, 0.55, 0.0, 0.12,
+            1.28, 1.22, 0.85, 4.0,
+          ),
+        };
 
     // 通透度越高，底色越淡、模糊越小。
     final alpha = (tintAlpha * (1.1 - 0.6 * clarity)).clamp(0.0, 1.0);
     final blur = base.blur * blurScale * (1.4 - 0.8 * clarity);
+    // 透明档确保至少飞牛级色散；已带色散的 lens 不被二次放大。
+    final dispersion =
+        appearance == GlassAppearance.clear && base.dispersion < dispersionFloor
+        ? dispersionFloor
+        : appearance == GlassAppearance.clear
+            ? base.dispersion
+            : 0.0;
 
     return prism.LiquidGlassStyle(
       tint: base.tint.withValues(alpha: alpha),
@@ -130,9 +150,9 @@ class GlassSettings {
       blur: blur,
       haze: haze,
       hazeBlur: base.hazeBlur > 0 ? base.hazeBlur : 15.6,
-      refraction: base.refraction,
-      bevel: base.bevel,
-      saturation: base.saturation,
+      refraction: base.refraction * refractionScale,
+      bevel: base.bevel * bevelScale,
+      saturation: 1 + (base.saturation - 1) * saturationKeep,
       brightness:
           base.brightness + brightnessBias + (transmission - 0.5) * 0.5,
       rim: (base.rim * (0.5 + reflection)).clamp(0.0, 2.0),
@@ -141,7 +161,7 @@ class GlassSettings {
       rimFocus: base.rimFocus,
       rimAdded: base.rimAdded,
       endShade: base.endShade,
-      dispersion: base.dispersion,
+      dispersion: dispersion,
       rimBlur: base.rimBlur,
       hairline: base.hairline,
       hairlineSide: base.hairlineSide,

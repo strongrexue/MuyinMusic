@@ -49,6 +49,12 @@ struct CyShineLiveActivityWidget: Widget {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        if !context.state.lyricText.isEmpty {
+                            Text(context.state.lyricText)
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                                .lineLimit(1)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -98,6 +104,12 @@ private struct CyShineLockScreenView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if !context.state.lyricText.isEmpty {
+                    Text(context.state.lyricText)
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                }
                 if context.state.durationMs > 0 {
                     HStack(spacing: 6) {
                         CyShineProgressBar(context: context)

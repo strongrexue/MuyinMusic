@@ -38,6 +38,8 @@ struct CyShineActivityAttributes: ActivityAttributes {
         var updatedAt: TimeInterval
         /// 封面在 App Group 容器里的相对路径；拿不到共享容器时为 nil。
         var artworkPath: String?
+        /// 当前歌词帧文本（灵动岛/锁屏显示用）；无歌词时为空串。
+        var lyricText: String
 
         /// 按给定时刻推算播放进度（0...1）。时长未知时返回 nil。
         func progress(at date: Date) -> Double? {

@@ -4,8 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../shell/shell_navigation.dart';
 import '../../songs/songs_toolbar_state.dart';
+import '../../stats/widgets/listening_stats_sheet.dart';
 
-/// The four round shortcuts that sit right under 继续播放.
+/// The five round shortcuts that sit right under 继续播放.
 class HomeQuickActions extends ConsumerWidget {
   const HomeQuickActions({super.key});
 
@@ -44,6 +45,14 @@ class HomeQuickActions extends ConsumerWidget {
             icon: Icons.download_rounded,
             label: '下载',
             onTap: () => context.push('/home/downloads'),
+          ),
+        ),
+        Expanded(
+          child: _QuickAction(
+            actionKey: 'home-quick-stats',
+            icon: Icons.bar_chart_rounded,
+            label: '听歌统计',
+            onTap: () => showListeningStatsSheet(context),
           ),
         ),
       ],

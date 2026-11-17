@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/services/app_logger.dart';
 import '../../core/ui/app_toast.dart';
@@ -79,22 +80,23 @@ class _DebugLogPageState extends State<DebugLogPage> {
       if (!mounted) return;
       await showSettingsDialog<void>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('日志已导出'),
-          content: SelectableText(path),
+        builder: (context) => prism.AlertDialog(
+          title: '日志已导出',
+          // 玻璃确认框：路径移入 child，按钮换成 prism。
           actions: [
-            TextButton(
+            prism.TextButton(
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: path));
                 if (context.mounted) Navigator.pop(context);
               },
               child: const Text('复制路径'),
             ),
-            TextButton(
+            prism.TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('完成'),
             ),
           ],
+          child: SelectableText(path),
         ),
       );
     } catch (error) {

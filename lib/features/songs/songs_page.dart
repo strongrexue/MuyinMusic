@@ -671,20 +671,20 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   Future<void> _unfavoritePlaylist(LocalPlaylist playlist) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.heart_broken_rounded),
-        title: const Text('取消收藏这个歌单？'),
-        content: Text('「${playlist.name}」将从我的歌单中移除，下载的歌曲不会被删除。'),
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '取消收藏这个歌单？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('取消收藏'),
           ),
         ],
+        child: Text('「${playlist.name}」将从我的歌单中移除，下载的歌曲不会被删除。'),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -896,20 +896,20 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     }
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.delete_outline_rounded),
-        title: const Text('移除已选歌单？'),
-        content: Text('将移除 ${selected.length} 个歌单，本地下载的歌曲不会被删除。'),
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '移除已选歌单？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('移除'),
           ),
         ],
+        child: Text('将移除 ${selected.length} 个歌单，本地下载的歌曲不会被删除。'),
       ),
     );
     if (confirmed != true || !mounted) return;

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/app_info.dart';
 import '../../core/api/dio_factory.dart';
@@ -760,19 +761,20 @@ class SettingsPage extends ConsumerWidget {
     await showSettingsDialog<void>(
       context: context,
       useRootNavigator: true,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.directions_car_filled_rounded),
-        title: const Text('蓝牙歌词提示'),
-        content: const Text(
-          '蓝牙歌词通过媒体信息兼容发送，不同车机或蓝牙设备的支持情况可能不同。'
-          '\n\n驾车时请勿操作手机，注意道路安全。',
-        ),
+      // 玻璃适配：prism.AlertDialog 内部自动玻璃 + 主题色 + 降级；图标改挂 trailing
+      builder: (dialogContext) => prism.AlertDialog(
+        trailing: const Icon(Icons.directions_car_filled_rounded),
+        title: '蓝牙歌词提示',
         actions: [
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('我知道了'),
           ),
         ],
+        child: const Text(
+          '蓝牙歌词通过媒体信息兼容发送，不同车机或蓝牙设备的支持情况可能不同。'
+          '\n\n驾车时请勿操作手机，注意道路安全。',
+        ),
       ),
     );
     await ref.read(settingsProvider.notifier).markBluetoothLyricNoticeSeen();

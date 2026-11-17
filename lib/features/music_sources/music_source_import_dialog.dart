@@ -2,6 +2,7 @@ import '../settings/widgets/settings_sheet.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 Future<String?> showMusicSourceUrlDialog(BuildContext context) async {
   final disposed = Completer<void>();
@@ -38,21 +39,10 @@ class _MusicSourceUrlDialogState extends State<_MusicSourceUrlDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      icon: const Icon(Icons.link_rounded),
-      title: const Text('从 URL 导入音源'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: TextInputType.url,
-        decoration: const InputDecoration(
-          labelText: '脚本地址',
-          hintText: 'https://example.com/music-source.js',
-        ),
-        onSubmitted: (value) {
-          if (_isHttpUrl(value)) Navigator.of(context).pop(value.trim());
-        },
-      ),
+    // 玻璃适配：prism.AlertDialog 内部自动玻璃 + 主题色 + 降级；图标改挂 trailing
+    return prism.AlertDialog(
+      trailing: const Icon(Icons.link_rounded),
+      title: '从 URL 导入音源',
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -68,6 +58,20 @@ class _MusicSourceUrlDialogState extends State<_MusicSourceUrlDialog> {
           ),
         ),
       ],
+      // 输入框需要 prism 的字段宽度与填充样式，对齐玻璃卡片
+      hasFields: true,
+      child: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.url,
+        decoration: const InputDecoration(
+          labelText: '脚本地址',
+          hintText: 'https://example.com/music-source.js',
+        ),
+        onSubmitted: (value) {
+          if (_isHttpUrl(value)) Navigator.of(context).pop(value.trim());
+        },
+      ),
     );
   }
 }
@@ -75,10 +79,10 @@ class _MusicSourceUrlDialogState extends State<_MusicSourceUrlDialog> {
 Future<bool> confirmThirdPartySourceRisk(BuildContext context) async {
   return await showSettingsDialog<bool>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.security_rounded),
-          title: const Text('运行第三方音源'),
-          content: const Text('音源脚本可以访问网络。请只导入来源可信、内容明确的脚本。'),
+        // 玻璃适配：prism.AlertDialog 内部自动玻璃 + 主题色 + 降级；图标改挂 trailing
+        builder: (dialogContext) => prism.AlertDialog(
+          trailing: const Icon(Icons.security_rounded),
+          title: '运行第三方音源',
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -89,6 +93,7 @@ Future<bool> confirmThirdPartySourceRisk(BuildContext context) async {
               child: const Text('继续导入'),
             ),
           ],
+          child: const Text('音源脚本可以访问网络。请只导入来源可信、内容明确的脚本。'),
         ),
       ) ??
       false;

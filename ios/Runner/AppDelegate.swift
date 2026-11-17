@@ -25,6 +25,12 @@ let cyShineURLScheme = "cyshinemusic"
       CyShineNativePlugin.register(with: registrar)
     }
 
+    // 系统媒体播放卡片（灵动岛/锁屏）：与 Live Activity 解耦，无条件注册。
+    if let registrar = engineBridge.pluginRegistry
+        .registrar(forPlugin: "CyShineNowPlayingChannel") {
+      CyShineNowPlayingChannel.register(with: registrar.messenger())
+    }
+
     // 实时活动（灵动岛）/ 桌面小组件的桥接。
     // Activity.request/update/end 与 ActivityContent 都是 iOS 16.2 起才有
     // （16.1 只有 Activity.activities 与 ActivityAuthorizationInfo）。

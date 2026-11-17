@@ -5,8 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
@@ -23,7 +22,6 @@ import 'features/music_sources/music_source_update_prompt.dart';
 import 'features/player/player_controller.dart';
 import 'features/playlists/playlist_store.dart';
 import 'features/player/music_home_widget_service.dart';
-import 'features/player/live_activity_service.dart';
 import 'features/songs/local_song_scan_cache.dart';
 import 'features/startup/startup_gate.dart';
 import 'features/update/app_update_prompt.dart';
@@ -51,7 +49,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   bool _openedExternalAudio = false;
   bool _sourceUpdatePromptsReady = false;
   MusicHomeWidgetService? _homeWidgetService;
-  LiveActivityService? _liveActivityService;
 
   @override
   void initState() {
@@ -67,13 +64,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
         await _openPendingExternalAudio();
       });
     }
-    // iOS 的灵动岛 / 锁屏实时活动。真正的推流由 liveActivitySyncProvider
-    // 在首帧之后激活（与桌面小组件同一套节奏）。
-    if (Platform.isIOS) {
-      final liveActivity = ref.read(liveActivityProvider);
-      liveActivity.onOpenPlayer = _openLiveActivityPlayer;
-      _liveActivityService = liveActivity;
-    }
     // Warm persisted library and player state after the first frame, even when
     // the startup screen is skipped.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,7 +76,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       ref.read(webDavSyncControllerProvider);
       ref.read(playerControllerProvider.notifier);
       if (Platform.isAndroid) ref.read(musicHomeWidgetSyncProvider);
-      if (Platform.isIOS) ref.read(liveActivitySyncProvider);
       unawaited(_initializeLocalLibrary());
     });
   }
@@ -94,7 +83,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   @override
   void dispose() {
     _homeWidgetService?.onOpenPlayer = null;
-    _liveActivityService?.onOpenPlayer = null;
     if (Platform.isAndroid) _audioIntentChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -102,13 +90,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
 
   Future<void> _initializeLocalLibrary() async {
     final cache = ref.read(localSongScanCacheProvider);
-    // iOS 沙盒环境没有 Android 的 `/storage/emulated/0/...` 路径。全新安装时
-    // `downloadDir`/`localMusicDirs` 默认是 Android 路径，必须迁移到应用沙盒的
-    // `Documents/MuyinMusic`，否则首扫会抛「文件夹不存在」。下载侧 download_service
-    // 已有同样的 iOS 兜底（_resolveDestinationDir），这里让两者保持一致。
-    if (Platform.isIOS) {
-      await _migrateIosDefaultDirectories();
-    }
     final selected = ref.read(settingsProvider).localMusicDirs;
     final directories = <String>[];
     for (final directory in selected) {
@@ -139,41 +120,6 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
         for (final track in playlist.tracks)
           if (track.localPath != null) track.localPath!,
     ]);
-  }
-
-  /// iOS：把默认（Android）下载/扫描目录迁移到沙盒 `Documents/MuyinMusic`。
-  /// 只当当前值还是默认 Android 路径时才迁移，用户手动改过的不动。
-  Future<void> _migrateIosDefaultDirectories() async {
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      final sandboxDir = p.join(docs.path, 'MuyinMusic');
-      final dir = Directory(sandboxDir);
-      final notifier = ref.read(settingsProvider.notifier);
-      final settings = ref.read(settingsProvider);
-
-      // 目录不存在时创建，确保扫描与下载可写。
-      if (!dir.existsSync()) dir.createSync(recursive: true);
-
-      final downloadDir = settings.downloadDir;
-      if (normalizeStorageLocation(downloadDir) ==
-          normalizeStorageLocation(kDefaultDownloadDir)) {
-        await notifier.setDownloadDir(sandboxDir);
-      }
-      final localDirs = settings.localMusicDirs;
-      if (localDirs.isNotEmpty &&
-          localDirs.every(
-            (d) =>
-                normalizeStorageLocation(d) ==
-                normalizeStorageLocation(kDefaultDownloadDir),
-          )) {
-        await notifier.setLocalMusicDirs([sandboxDir]);
-      }
-    } catch (error) {
-      await AppLogger.write(
-        'local-library',
-        'iOS default dir migrate failed: $error',
-      );
-    }
   }
 
   @override
@@ -215,20 +161,11 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     }
   }
 
-  /// 点灵动岛 / 锁屏实时活动卡片时把播放器推到前台。
-  Future<void> _openLiveActivityPlayer() async {
-    if (!mounted) return;
-    final location = appRouter.routeInformationProvider.value.uri;
-    if (location.path != '/player') {
-      unawaited(appRouter.push<void>('/player', extra: location.toString()));
-    }
-  }
-
   Future<void> _openPendingExternalAudio() async {
-    // iOS 的 audio_intent 通道实现了 takePendingAudio，会把
-    // 「文件 App → 用沐音打开」的文件复制进沙盒并返回真实路径，
-    // 与 Android 语义一致；缺失插件由 MissingPluginException 兜住。
-    if (!mounted || !_externalAudioReady || _handlingExternalAudio) {
+    if (!Platform.isAndroid ||
+        !mounted ||
+        !_externalAudioReady ||
+        _handlingExternalAudio) {
       return;
     }
     _handlingExternalAudio = true;
@@ -322,26 +259,28 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   }
 
   Future<bool> _showPermissionDialog(BuildContext context) async {
-    return await showDialog<bool>(
+    return await prism.showFloatingDialog<bool>(
           context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            icon: const Icon(Icons.library_music_outlined, size: 36),
-            title: const Text('读取本地音乐'),
-            content: const Text(
-              '允许读取设备上的音乐和音频，在选定文件夹中查找歌曲及封面。\n\n'
-              '暂不授权也可以继续使用，之后可在「设置→权限、下载与目录」中开启。',
+          dismissible: false,
+          // 玻璃遮罩由 showFloatingDialog 提供；child 换成 prism 确认框。
+          child: Builder(
+            builder: (dialogCtx) => prism.AlertDialog(
+              title: '读取本地音乐',
+              actions: [
+                prism.TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(false),
+                  child: const Text('稍后再说'),
+                ),
+                prism.FilledButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(true),
+                  child: const Text('去授权'),
+                ),
+              ],
+              child: const Text(
+                '允许读取设备上的音乐和音频，在选定文件夹中查找歌曲及封面。\n\n'
+                '暂不授权也可以继续使用，之后可在「设置→权限、下载与目录」中开启。',
+              ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('稍后再说'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('去授权'),
-              ),
-            ],
           ),
         ) ??
         false;

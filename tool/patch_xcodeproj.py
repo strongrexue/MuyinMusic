@@ -45,6 +45,9 @@ RUNNER_SOURCES = [
     # App 内的「日志」页，否则 Release 包上只能看到 NSLog（用户看不到）。
     ("CyShineNativeLog.swift", "CyShineNativeLog.swift"),
     ("CyShineLiveActivityBridge.swift", "CyShineLiveActivityBridge.swift"),
+    # 独立的系统媒体播放卡片通道（MPNowPlayingInfoCenter）：与 Live Activity
+    # 解耦、无 @available 限制，巨魔 / iOS 16.x 下也能画锁屏播放卡片。
+    ("CyShineNowPlayingChannel.swift", "CyShineNowPlayingChannel.swift"),
     # 与 Widget Extension 共享的属性定义：两边必须编译同一份源码，
     # 否则 ActivityAttributes 类型不匹配，系统匹配不到已启动的活动。
     ("CyShineActivityAttributes.swift",

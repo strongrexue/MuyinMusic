@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/app_logger.dart';
 import '../../core/ui/cover_image_source.dart';
+import 'lyric_frame.dart';
 import 'player_audio_handler.dart';
 import 'player_controller.dart';
 
@@ -39,6 +40,8 @@ class LiveActivityService {
   static const MethodChannel _channel = MethodChannel(
     'cy_shine_music/live_activity',
   );
+  static const MethodChannel _nowPlayingChannel =
+      MethodChannel('cy_shine_music/now_playing');
 
   final Ref _ref;
   bool _available = false;
@@ -162,6 +165,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
 
   /// 曲目变化（可能是换歌，也可能是首次播放）。
   void publish(PlayerState state) {
+    unawaited(_pushNowPlaying());
     if (!_available) {
       // 可能只是「实时活动开关后来才打开」，重试一次而不是永远放弃。
       unawaited(_ensureAvailable());
@@ -178,6 +182,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   }
 
   void _onPlaybackState(PlaybackState state) {
+    unawaited(_pushNowPlaying());
     if (!_available) {
       unawaited(_ensureAvailable());
       return;
@@ -236,6 +241,17 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     if (positionMs < 0) positionMs = 0;
     if (durationMs > 0 && positionMs > durationMs) positionMs = durationMs;
 
+    var lyricText = '';
+    final lyrics = state.lyrics;
+    if (!lyrics.isEmpty) {
+      final idx = lyrics.activeIndex(Duration(milliseconds: positionMs));
+      if (idx >= 0 && idx < lyrics.lines.length) {
+        lyricText = LyricFrameAlgorithms.frameForLine(
+          lyrics.lines[idx], positionMs,
+        ).text;
+      }
+    }
+
     return {
       'trackId': track.id,
       'title': track.title,
@@ -244,6 +260,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       'positionMs': positionMs,
       'playing': playing,
       'loading': loading,
+      'lyricText': lyricText,
     };
   }
 
@@ -259,6 +276,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       payload['playing'],
       (payload['positionMs'] as int) ~/ 5000,
       payload['durationMs'],
+      payload['lyricText'],
     ].join('|');
     // 首帧（换歌）必须推一次，哪怕签名"看起来"没变。
     if (!afterArtwork && _activeStarted && signature == _lastSignature) return;
@@ -275,6 +293,25 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       _available = false;
     } catch (error) {
       await AppLogger.write('live-activity', '推送失败: $error');
+    }
+  }
+
+  /// 无条件写系统媒体播放卡片（灵动岛/锁屏）。
+  /// 与 Live Activity 可用性完全解耦：即使 ActivityKit 不可用（巨魔/低版本 iOS），
+  /// 只要写了 nowPlayingInfo，系统就会画出标准播放卡片。
+  Future<void> _pushNowPlaying() async {
+    final payload = _payload();
+    if (payload == null) return;
+    final cover = await _coverPayload();
+    try {
+      await _nowPlayingChannel.invokeMethod<bool>('publish', {
+        ...payload,
+        ...cover,
+      });
+    } on MissingPluginException {
+      // 老版本原生没有该通道，忽略。
+    } catch (error) {
+      await AppLogger.write('live-activity', '写播放卡片失败: $error');
     }
   }
 

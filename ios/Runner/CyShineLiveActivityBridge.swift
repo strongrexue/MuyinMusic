@@ -632,7 +632,8 @@ final class CyShineLiveActivityBridge: NSObject {
 
   private static func emptyState() -> CyShineActivityAttributes.ContentState {
     .init(title: "", artist: "", positionMs: 0, durationMs: 0,
-          playing: false, updatedAt: Date().timeIntervalSince1970, artworkPath: nil)
+          playing: false, updatedAt: Date().timeIntervalSince1970, artworkPath: nil,
+          lyricText: "")
   }
 
   private static func payload(
@@ -641,6 +642,7 @@ final class CyShineLiveActivityBridge: NSObject {
     let durationMs = (args["durationMs"] as? NSNumber)?.intValue ?? 0
     let title = (args["title"] as? String) ?? ""
     let artist = (args["artist"] as? String) ?? ""
+    let lyricText = (args["lyricText"] as? String) ?? ""
     var state = CyShineActivityAttributes.ContentState(
       title: title,
       artist: artist,
@@ -649,7 +651,8 @@ final class CyShineLiveActivityBridge: NSObject {
       playing: (args["playing"] as? Bool) ?? false,
       updatedAt: Date().timeIntervalSince1970,
       // 同一首歌的后续更新沿用已经写好的封面路径
-      artworkPath: lastState?.artworkPath
+      artworkPath: lastState?.artworkPath,
+      lyricText: lyricText
     )
     // 换歌时把上一首的封面路径丢掉，避免新歌短暂显示旧封面
     if let previous = lastState, previous.title != title, !previous.title.isEmpty {

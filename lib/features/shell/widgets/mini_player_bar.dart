@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_motion.dart';
+import '../../player/lyric_parser.dart';
 import '../../player/player_controller.dart';
 import '../../player/widgets/spinning_cover_art.dart';
 import '../player_transition.dart';
@@ -29,19 +30,31 @@ class MiniPlayerBar extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final vm = ref.watch(
       playerControllerProvider.select(
-        (s) => (
-          track: s.track,
-          playing: s.playing,
-          loading: s.loading,
-          buffering: s.buffering,
-          ended: s.processingState == PlayerProcessingState.completed,
-          canPrev: s.canPlayPrevious,
-          canNext: s.canPlayNext,
-        ),
+        (s) {
+          final lyricIndex = s.lyricLoading || s.lyrics.isEmpty
+              ? -1
+              : s.lyrics.activeIndex(s.position);
+          return (
+            track: s.track,
+            playing: s.playing,
+            loading: s.loading,
+            buffering: s.buffering,
+            ended: s.processingState == PlayerProcessingState.completed,
+            canPrev: s.canPlayPrevious,
+            canNext: s.canPlayNext,
+            // 只投影当前行对象：同一行内 position 高频更新时行对象引用
+            // 不变，record 相等，迷你条不会重建；逐字染色由歌词 widget
+            // 自己 watch position，避免拖动整个迷你条。
+            lyricLine: lyricIndex >= 0 ? s.lyrics.lines[lyricIndex] : null,
+          );
+        },
       ),
     );
     final square = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
+    );
+    final showMiniLyrics = ref.watch(
+      settingsProvider.select((settings) => settings.showMiniLyrics),
     );
     final controller = ref.read(playerControllerProvider.notifier);
     final track = vm.track;
@@ -111,6 +124,7 @@ class MiniPlayerBar extends ConsumerWidget {
                       compact: compact,
                       scheme: scheme,
                       large: large,
+                      lyricLine: showMiniLyrics ? vm.lyricLine : null,
                     ),
                   ),
                 ],
@@ -183,12 +197,14 @@ class _TrackLabels extends StatelessWidget {
     required this.compact,
     required this.scheme,
     required this.large,
+    required this.lyricLine,
   });
 
   final PlayerTrack? track;
   final bool compact;
   final ColorScheme scheme;
   final bool large;
+  final KaraokeLyricLine? lyricLine;
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +222,12 @@ class _TrackLabels extends StatelessWidget {
       );
     }
     final artist = track.artist.trim();
+    // 副标题行优先显示当前歌词；无歌词（开关关闭 / lyricLoading /
+    // 无有效行）时回退到歌手。compact 下歌手本就隐藏，歌词独占该行，
+    // 整体始终最多两行，不增加迷你条高度。
+    final lyricLine = this.lyricLine;
+    final hasLyric = lyricLine != null && lyricLine.words.isNotEmpty;
+    final subtitle = hasLyric ? lyricLine.text : (compact ? '' : artist);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,21 +243,72 @@ class _TrackLabels extends StatelessWidget {
             height: 1.2,
           ),
         ),
-        if (!compact && artist.isNotEmpty) ...[
+        if (subtitle.isNotEmpty) ...[
           SizedBox(height: large ? 2 : 1),
-          Text(
-            artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
+          if (hasLyric)
+            _MiniKaraokeText(
+              line: lyricLine,
+              base: scheme.onSurfaceVariant,
+              accent: scheme.primary,
               fontSize: large ? 12 : 11.5,
-              fontWeight: FontWeight.w500,
-              height: 1.2,
+            )
+          else
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: large ? 12 : 11.5,
+                fontWeight: FontWeight.w500,
+                height: 1.2,
+              ),
             ),
-          ),
         ],
       ],
+    );
+  }
+}
+
+/// 迷你条逐字歌词：已唱字用系统强调色，未唱字保持原色。
+/// 自己 watch position，只重建这一行，不触发整个迷你条高频重建。
+class _MiniKaraokeText extends ConsumerWidget {
+  const _MiniKaraokeText({
+    required this.line,
+    required this.base,
+    required this.accent,
+    required this.fontSize,
+  });
+
+  final KaraokeLyricLine line;
+  final Color base;
+  final Color accent;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final positionMs = ref.watch(
+      playerControllerProvider.select((s) => s.position.inMilliseconds),
+    );
+    final style = TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.w500,
+      height: 1.2,
+    );
+    final spans = <TextSpan>[];
+    for (final word in line.words) {
+      final sung = positionMs >= word.endMs;
+      spans.add(
+        TextSpan(
+          text: word.text,
+          style: style.copyWith(color: sung ? accent : base),
+        ),
+      );
+    }
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(children: spans, style: style.copyWith(color: base)),
     );
   }
 }

@@ -16,6 +16,8 @@ Future<String?> showStorageFolderPickerSheet(
   return showSettingsSheet<String>(
     context: context,
     useRootNavigator: true,
+    // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+    glass: true,
 
     heightFraction: 0.76,
     maxHeight: 800,

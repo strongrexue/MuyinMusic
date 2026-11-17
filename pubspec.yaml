@@ -1,5 +1,5 @@
-name: cy_shine_music
-description: "沐音 - Android music client with custom source support."
+﻿name: cy_shine_music
+description: "娌愰煶 - Android music client with custom source support."
 publish_to: 'none'
 version: 1.1.9+20
 
@@ -20,6 +20,7 @@ dependencies:
   flutter_secure_storage: ^10.3.1
   path_provider: ^2.1.4
   path: ^1.9.0
+  sqflite: ^2.4.2
   permission_handler: ^11.3.1
   file_picker: ^8.1.2
   go_router: ^14.2.7

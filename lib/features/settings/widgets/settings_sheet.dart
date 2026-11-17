@@ -15,6 +15,7 @@ Future<T?> showSettingsSheet<T>({
   double heightFraction = 0.5,
   double maxHeight = 480,
   List<double>? detents,
+  bool glass = false, // 透传给入口，各设置弹窗按需开启玻璃底板。
 }) => showAppSheet<T>(
   context: context,
   builder: builder,
@@ -24,6 +25,7 @@ Future<T?> showSettingsSheet<T>({
   heightFraction: heightFraction,
   maxHeight: maxHeight,
   detents: detents,
+  glass: glass,
 );
 
 Future<T?> showSettingsDialog<T>({

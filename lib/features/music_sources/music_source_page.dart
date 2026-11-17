@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/api/api_client.dart';
 import '../../core/music_sources/music_source_controller.dart';
@@ -306,9 +307,9 @@ class _MusicSourcePageState extends ConsumerState<MusicSourcePage> {
   Future<void> _delete(MusicSourceRecord record) async {
     final confirmed = await showSettingsDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('删除音源'),
-        content: Text('确定删除「${record.name}」吗？'),
+      // 玻璃适配：prism.AlertDialog 内部自动玻璃 + 主题色 + 降级
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '删除音源',
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -319,6 +320,7 @@ class _MusicSourcePageState extends ConsumerState<MusicSourcePage> {
             child: const Text('删除'),
           ),
         ],
+        child: Text('确定删除「${record.name}」吗？'),
       ),
     );
     if (confirmed != true) return;
