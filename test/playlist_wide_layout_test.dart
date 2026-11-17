@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'package:cy_shine_music/core/api/music_api.dart';
 import 'package:cy_shine_music/core/models/enums.dart';
@@ -109,7 +110,7 @@ void main() {
     await tester.tap(find.byKey(_favoriteKey));
     await tester.pumpAndSettle();
     expect(find.text('取消收藏这个歌单？'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.tap(find.widgetWithText(prism.TextButton, '取消'));
     await tester.pumpAndSettle();
     expect(container.read(localPlaylistsProvider), hasLength(1));
     expect(router.routeInformationProvider.value.uri.path, '/playlists/fav');
@@ -119,8 +120,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.widgetWithText(FilledButton, '取消收藏'),
+        of: find.byType(prism.AlertDialog),
+        matching: find.widgetWithText(prism.FilledButton, '取消收藏'),
       ),
     );
     await tester.pumpAndSettle();

@@ -112,7 +112,7 @@ void main() {
     expect(find.text('添加歌曲到'), findsOneWidget);
     expect(find.text('我的歌单'), findsNothing);
     expect(find.text('歌单管理'), findsNothing);
-    expect(find.byIcon(Icons.add_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.add_rounded), findsNWidgets(2));
 
     await tester.tap(find.text('通勤'));
     await tester.pumpAndSettle();
@@ -471,7 +471,7 @@ void main() {
 
     await openRenameDialog();
     await tester.enterText(find.byType(TextField), '新的歌单名');
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.tap(find.widgetWithText(prism.FilledButton, '保存'));
     await tester.pumpAndSettle();
     expect(find.text('新的歌单名'), findsOneWidget);
     await tester.pump(const Duration(seconds: 3));
