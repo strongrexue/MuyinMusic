@@ -10,6 +10,8 @@ Future<AppIconVariant?> showAppIconSheet(
   AppIconVariant current,
 ) => showSettingsSheet<AppIconVariant>(
   context: context,
+  // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+  glass: true,
   heightFraction: 0.62,
   maxHeight: 400,
   builder: (_) => _AppIconSheet(current: current),

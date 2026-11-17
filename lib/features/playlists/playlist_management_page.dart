@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/car_display_layout.dart';
@@ -218,20 +219,20 @@ class _PlaylistManagementPageState
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.delete_outline_rounded),
-        title: const Text('删除这个歌单？'),
-        content: Text('“${playlist.name}”会被删除，本地音乐文件和下载记录不会受到影响。'),
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '删除这个歌单？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('删除'),
           ),
         ],
+        child: Text('“${playlist.name}”会被删除，本地音乐文件和下载记录不会受到影响。'),
       ),
     );
     if (confirmed != true || !context.mounted) return;

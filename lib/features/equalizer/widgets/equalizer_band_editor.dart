@@ -39,6 +39,8 @@ Future<EqualizerBandEditorResult?> showEqualizerBandEditor(
 
   return showSettingsSheet<EqualizerBandEditorResult>(
     context: context,
+    // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+    glass: true,
     heightFraction: 0.78,
     maxHeight: 680,
     builder: (sheetContext) => StatefulBuilder(

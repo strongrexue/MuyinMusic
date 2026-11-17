@@ -16,6 +16,7 @@ Future<void> showSongsSortSheet({
     heightFraction: 0.70,
     maxHeight: 600,
     fitsContent: true,
+    glass: true, // 玻璃底板，与正例弹窗保持一致（关闭时由入口降级）。
     builder: (_) => _SongsSortSheet(
       initialMode: initialMode,
       initialAscending: initialAscending,

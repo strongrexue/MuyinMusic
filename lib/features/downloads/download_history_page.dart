@@ -152,20 +152,20 @@ class _DownloadHistoryPageState extends ConsumerState<DownloadHistoryPage> {
   Future<void> _confirmClear() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.cleaning_services_outlined),
-        title: const Text('清空下载记录？'),
-        content: const Text('会清理已结束的队列项和应用内历史，不会删除已经保存的音乐文件。'),
+      builder: (ctx) => prism.AlertDialog(
+        title: '清空下载记录？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('清空'),
           ),
         ],
+        child: const Text('会清理已结束的队列项和应用内历史，不会删除已经保存的音乐文件。'),
       ),
     );
     if (ok != true) return;
@@ -184,23 +184,20 @@ class _DownloadHistoryPageState extends ConsumerState<DownloadHistoryPage> {
         isLocalAudioSourceAvailable(path);
     final choice = await showDialog<_RemoveChoice>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.delete_outline_rounded),
-        title: const Text('删除下载记录？'),
-        content: Text(
-          canDeleteFile ? '可以只删除应用内记录，也可以同时删除已保存的音乐文件。' : '只会删除应用内记录，不会影响本地文件。',
-        ),
+      builder: (ctx) => prism.AlertDialog(
+        title: '删除下载记录？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('取消'),
           ),
           if (canDeleteFile)
-            TextButton(
+            prism.TextButton(
               onPressed: () => Navigator.of(ctx).pop(_RemoveChoice.recordOnly),
               child: const Text('只删记录'),
             ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(ctx).pop(
               canDeleteFile
                   ? _RemoveChoice.recordAndFile
@@ -209,6 +206,9 @@ class _DownloadHistoryPageState extends ConsumerState<DownloadHistoryPage> {
             child: Text(canDeleteFile ? '记录和文件都删' : '删除记录'),
           ),
         ],
+        child: Text(
+          canDeleteFile ? '可以只删除应用内记录，也可以同时删除已保存的音乐文件。' : '只会删除应用内记录，不会影响本地文件。',
+        ),
       ),
     );
     if (choice == null) return;

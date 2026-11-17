@@ -12,6 +12,7 @@ Future<void> showBatchDownloadTasksSheet(BuildContext context) {
     context: context,
     detents: const [0.76, 0.92],
     maxHeight: 1000,
+    glass: true, // 玻璃底板，与正例弹窗保持一致（关闭时由入口降级）。
     builder: (_) => const _BatchDownloadTasksSheet(),
   );
 }
@@ -205,9 +206,9 @@ class _BatchTaskCard extends ConsumerWidget {
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除下载任务？'),
-        content: const Text('未完成的下载会取消，已下载的音乐和下载记录会保留。'),
+      builder: (context) => prism.AlertDialog(
+        // Material 弹窗改 Prism 玻璃弹窗（自动 scope 判定 + 关闭时降级）。
+        title: '删除下载任务？',
         actions: [
           prism.TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -218,6 +219,7 @@ class _BatchTaskCard extends ConsumerWidget {
             child: const Text('删除任务'),
           ),
         ],
+        child: const Text('未完成的下载会取消，已下载的音乐和下载记录会保留。'),
       ),
     );
     if (confirmed == true) controller.remove(task.id);

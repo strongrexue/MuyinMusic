@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/app_info.dart';
 import '../../core/services/app_logger.dart';
@@ -89,38 +90,39 @@ Future<void> _showUpdateDialog(
   required String currentVersion,
   required AppRelease release,
 }) async {
-  final action = await showDialog<_AppUpdateAction>(
+  final action = await prism.showFloatingDialog<_AppUpdateAction>(
     context: context,
-    useRootNavigator: true,
-    builder: (dialogContext) => AlertDialog(
-      key: const ValueKey('app-update-dialog'),
-      icon: const Icon(Icons.system_update_alt_rounded, size: 36),
-      title: const Text('发现新版本'),
-      content: Text(
-        '$currentVersion  →  ${release.version}\n\n'
-        '${release.title}\n'
-        '将打开沐音的更新页面，由你选择并下载更新包。\n\n'
-        '忽略更新后，启动时将不再自动检查，可在设置中手动检查更新。',
+    // 玻璃遮罩由 showFloatingDialog 提供；child 换成 prism 确认框。
+    child: Builder(
+      builder: (dialogContext) => prism.AlertDialog(
+        key: const ValueKey('app-update-dialog'),
+        title: '发现新版本',
+        actions: [
+          prism.TextButton(
+            key: const ValueKey('app-update-ignore'),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_AppUpdateAction.ignore),
+            child: const Text('忽略更新'),
+          ),
+          prism.TextButton(
+            key: const ValueKey('app-update-later'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('稍后再说'),
+          ),
+          prism.FilledButton(
+            key: const ValueKey('app-update-open-release'),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_AppUpdateAction.download),
+            child: const Text('前往下载'),
+          ),
+        ],
+        child: Text(
+          '$currentVersion  →  ${release.version}\n\n'
+          '${release.title}\n'
+          '将打开沐音的更新页面，由你选择并下载更新包。\n\n'
+          '忽略更新后，启动时将不再自动检查，可在设置中手动检查更新。',
+        ),
       ),
-      actions: [
-        TextButton(
-          key: const ValueKey('app-update-ignore'),
-          onPressed: () =>
-              Navigator.of(dialogContext).pop(_AppUpdateAction.ignore),
-          child: const Text('忽略更新'),
-        ),
-        TextButton(
-          key: const ValueKey('app-update-later'),
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('稍后再说'),
-        ),
-        FilledButton(
-          key: const ValueKey('app-update-open-release'),
-          onPressed: () =>
-              Navigator.of(dialogContext).pop(_AppUpdateAction.download),
-          child: const Text('前往下载'),
-        ),
-      ],
     ),
   );
   if (!context.mounted) return;

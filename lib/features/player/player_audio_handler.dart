@@ -14,6 +14,9 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../core/services/app_logger.dart';
 import '../../core/services/log_category.dart';
+import '../stats/models/stats_models.dart' as stats;
+import '../stats/services/listening_recorder_service.dart';
+import '../stats/services/stats_service.dart';
 import 'media_item_copy.dart';
 import 'player_models.dart' show PlayerPlaybackMode;
 import 'vivo_music_metadata.dart';
@@ -103,7 +106,12 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   }) : _player = player ?? BassPlayer(),
        _allowMixWithOthers = allowMixWithOthers,
        _remoteLoadTimeout = remoteLoadTimeout {
-    _playbackSubscription = _player.playbackEventStream.listen(_broadcastState);
+    _playbackSubscription = _player.playbackEventStream.listen((event) {
+      _broadcastState(event);
+      // 播放状态变化（播放/暂停/切歌/缓冲/完成）时立即喂一次统计快照，
+      // 保证切歌与暂停能及时 flush；高频时长累计交给 _statsTickTimer（250ms）。
+      _feedStatsSnapshot();
+    });
     _durationSubscription = _player.durationStream.listen(_updateDuration);
     _errorSubscription = _player.errorStream.listen((error) {
       _broadcastError(error, StackTrace.current);
@@ -119,6 +127,18 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     AppLogger.recordingCategories.addListener(_syncDiagnosticRecording);
     _syncDiagnosticRecording();
     _broadcastState(_player.snapshot);
+    // 移植飞牛音乐：以 250ms 定时快照驱动听歌统计（playbackEventStream 仅在
+    // 状态变化时发射，不足以累计时长）。两个服务单例内部已有 delta 上限与
+    // pending 阈值，重复喂同一快照不会重复计数。
+    _statsTickTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (!_disposed) _feedStatsSnapshot();
+    });
+    _statsFlushTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!_disposed) {
+        unawaited(StatsService.instance.flush());
+        ListeningRecorderService.instance.flush();
+      }
+    });
   }
 
   final BassPlayer _player;
@@ -136,6 +156,9 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<BassPlayerException>? _errorSubscription;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSubscription;
   StreamSubscription<void>? _becomingNoisySubscription;
+  Timer? _statsTickTimer;
+  Timer? _statsFlushTimer;
+  bool _disposed = false;
   bool _resumeAfterInterruption = false;
   bool _ducked = false;
   int _pauseGeneration = 0;
@@ -775,6 +798,12 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> disposeHandler() async {
+    _disposed = true;
+    _statsTickTimer?.cancel();
+    _statsFlushTimer?.cancel();
+    // 退出/释放时把尚未落库的播放时长刷盘，避免丢失。
+    await StatsService.instance.flush();
+    ListeningRecorderService.instance.onLifecyclePause();
     AppLogger.recordingCategories.removeListener(_syncDiagnosticRecording);
     await _playbackSubscription?.cancel();
     await _diagnosticSubscription?.cancel();
@@ -830,6 +859,31 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     playbackState.add(
       _trackTransitionActive ? _transitionState(event) : _transformEvent(event),
     );
+  }
+
+  /// 组装统计快照并喂给两个统计单例。
+  ///
+  /// 本项目播放器快照（BassPlaybackSnapshot）不含歌曲对象，故从当前 MediaItem
+  /// 取 id/title/artist/album/封面；isPlaying 用与播放状态一致的 [playing] getter
+  /// （已排除待重试的暂停态），避免暂停/缓冲期间误累计。
+  void _feedStatsSnapshot() {
+    final item = _currentMediaItem;
+    final statsSong = item == null
+        ? null
+        : stats.StatsSong(
+            id: item.id,
+            title: item.title,
+            artist: item.artist ?? '',
+            album: item.album ?? '',
+            coverUrl: item.artUri?.toString(),
+          );
+    final snapshot = stats.PlaybackSnapshot(
+      isPlaying: playing && _player.processingState == BassProcessingState.ready,
+      song: statsSong,
+      durationMs: item?.duration?.inMilliseconds ?? _player.duration?.inMilliseconds,
+    );
+    StatsService.instance.onSnapshot(snapshot);
+    ListeningRecorderService.instance.onSnapshot(snapshot);
   }
 
   PlaybackState _transitionState(BassPlaybackSnapshot event) {

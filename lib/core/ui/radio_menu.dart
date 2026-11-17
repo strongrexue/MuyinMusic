@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../theme/app_motion.dart';
 
@@ -508,6 +509,51 @@ class _RadioMenuPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 玻璃开启时用 prism 玻璃浮层，关闭时降级到 surfaceContainerHigh
+    final content = AnimatedBuilder(
+      animation: heightAnimation,
+      builder: (context, child) => Align(
+        key: ValueKey('$menuId-reveal'),
+        alignment: Alignment.topCenter,
+        widthFactor: 1,
+        heightFactor: heightAnimation.value,
+        child: child,
+      ),
+      child: SingleChildScrollView(
+        key: ValueKey('$menuId-scroll'),
+        primary: false,
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.all(6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var index = 0; index < options.length; index++)
+              FadeTransition(
+                key: ValueKey('$menuId-option-${options[index].id}-fade'),
+                opacity: optionOpacityAnimations[index],
+                alwaysIncludeSemantics: true,
+                child: _RadioMenuOptionTile(
+                  key: ValueKey('$menuId-option-${options[index].id}'),
+                  option: options[index],
+                  multiSelect: multiSelect,
+                  scheme: scheme,
+                  onTap: () => onOptionSelected(options[index]),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (prism.LiquidGlassScope.of(context)) {
+      return prism.LiquidGlass(
+        style: prism.LiquidGlassStyle.menu(
+          prism.Theme.of(context).colorScheme,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        child: content,
+      );
+    }
     return Material(
       color: scheme.surfaceContainerHigh,
       surfaceTintColor: Colors.transparent,
@@ -518,40 +564,7 @@ class _RadioMenuPanel extends StatelessWidget {
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.55)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: AnimatedBuilder(
-        animation: heightAnimation,
-        builder: (context, child) => Align(
-          key: ValueKey('$menuId-reveal'),
-          alignment: Alignment.topCenter,
-          widthFactor: 1,
-          heightFactor: heightAnimation.value,
-          child: child,
-        ),
-        child: SingleChildScrollView(
-          key: ValueKey('$menuId-scroll'),
-          primary: false,
-          physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.all(6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var index = 0; index < options.length; index++)
-                FadeTransition(
-                  key: ValueKey('$menuId-option-${options[index].id}-fade'),
-                  opacity: optionOpacityAnimations[index],
-                  alwaysIncludeSemantics: true,
-                  child: _RadioMenuOptionTile(
-                    key: ValueKey('$menuId-option-${options[index].id}'),
-                    option: options[index],
-                    multiSelect: multiSelect,
-                    scheme: scheme,
-                    onTap: () => onOptionSelected(options[index]),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+      child: content,
     );
   }
 }

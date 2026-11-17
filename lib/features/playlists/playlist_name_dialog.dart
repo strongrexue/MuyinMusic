@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 Future<String?> showPlaylistNameDialog(
   BuildContext context, {
@@ -57,10 +58,18 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      icon: const Icon(Icons.queue_music_rounded),
-      title: Text(widget.title),
-      content: TextField(
+    // 玻璃确认框：输入框交给 AlertDialog 的 hasFields 统一样式（去掉 Material icon）。
+    return prism.AlertDialog(
+      title: widget.title,
+      hasFields: true,
+      actions: [
+        prism.TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        prism.FilledButton(onPressed: _submit, child: Text(widget.actionLabel)),
+      ],
+      child: TextField(
         controller: _controller,
         autofocus: true,
         maxLength: 40,
@@ -71,13 +80,6 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
         ),
         onSubmitted: _submit,
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(onPressed: _submit, child: Text(widget.actionLabel)),
-      ],
     );
   }
 }

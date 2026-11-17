@@ -86,6 +86,50 @@ class MiniLyricsPanel extends ConsumerWidget {
   }
 }
 
+/// 迷你歌词页当前行的逐字 KTV 染色：起唱（startMs）即变强调色，
+/// 未唱到的字保持普通色。自己 watch position，只重建这一行。
+class _MiniKaraokeLine extends ConsumerWidget {
+  const _MiniKaraokeLine({
+    super.key,
+    required this.line,
+    required this.sungColor,
+    required this.pendingColor,
+    required this.fontSize,
+  });
+
+  final KaraokeLyricLine line;
+  final Color sungColor;
+  final Color pendingColor;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final positionMs = ref.watch(
+      playerControllerProvider.select((s) => s.position.inMilliseconds),
+    );
+    final style = TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.w400,
+      height: 1.15,
+    );
+    final spans = <TextSpan>[];
+    for (final word in line.words) {
+      final sung = positionMs >= word.startMs;
+      spans.add(
+        TextSpan(
+          text: word.text,
+          style: style.copyWith(color: sung ? sungColor : pendingColor),
+        ),
+      );
+    }
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(children: spans, style: style.copyWith(color: pendingColor)),
+    );
+  }
+}
+
 class _MiniLyricsScroller extends StatefulWidget {
   const _MiniLyricsScroller({required this.lyrics, required this.activeIndex});
 
@@ -187,20 +231,30 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
           curve: AppMotion.emphasized,
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Text(
-              lines[index].text,
-              key: ValueKey('player-mini-lyric-line-$index'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: active
-                    ? scheme.onSurface
-                    : scheme.onSurfaceVariant.withValues(alpha: 0.72),
-                fontSize: active ? 14 : 12.5,
-                fontWeight: FontWeight.w400,
-                height: 1.15,
-              ),
-            ),
+            // 当前行有逐字时间戳时逐字染色（KTV 式：起唱即强调色），
+            // 否则回退到整行高亮；非当前行保持原有模糊 + 变体色。
+            child: active && lines[index].hasWordTiming
+                ? _MiniKaraokeLine(
+                    key: ValueKey('player-mini-lyric-line-$index'),
+                    line: lines[index],
+                    sungColor: scheme.primary,
+                    pendingColor: scheme.onSurface,
+                    fontSize: 14,
+                  )
+                : Text(
+                    lines[index].text,
+                    key: ValueKey('player-mini-lyric-line-$index'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: active
+                          ? scheme.onSurface
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.72),
+                      fontSize: active ? 14 : 12.5,
+                      fontWeight: FontWeight.w400,
+                      height: 1.15,
+                    ),
+                  ),
           ),
           builder: (context, sigma, child) => ImageFiltered(
             key: ValueKey('player-mini-lyric-blur-$index'),

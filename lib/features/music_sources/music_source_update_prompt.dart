@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/music_sources/music_source_controller.dart';
 import '../../core/music_sources/music_source_models.dart';
@@ -95,11 +96,11 @@ class _MusicSourceUpdatePromptState
       }
       _showing = true;
       try {
-        final updated = await showDialog<bool>(
+        final updated = await prism.showFloatingDialog<bool>(
           context: context,
-          barrierDismissible: false,
-          builder: (_) =>
-              _MusicSourceUpdateDialog(record: record!, notice: notice),
+          dismissible: false,
+          // 玻璃遮罩由 showFloatingDialog 提供；child 换成 prism 确认框。
+          child: _MusicSourceUpdateDialog(record: record!, notice: notice),
         );
         if (mounted && context.mounted && updated != null) {
           showAppToast(
@@ -185,111 +186,106 @@ class _MusicSourceUpdateDialogState
     final theme = Theme.of(context);
     return PopScope(
       canPop: !_updating,
-      child: AlertDialog(
-        icon: const Icon(Icons.system_update_alt_rounded),
-        title: const Text('音源有更新'),
-        content: SizedBox(
-          width: 420,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * 0.5,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.record.name, style: theme.textTheme.titleMedium),
-                  if (widget.record.version.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '当前版本：${widget.record.version}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+      // 玻璃确认框：内容移入 child，去掉 Material icon；尺寸/内边距由 child 控制。
+      child: prism.AlertDialog(
+        title: '音源有更新',
+        contentWidth: 420,
+        padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.record.name, style: theme.textTheme.titleMedium),
+                    if (widget.record.version.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '当前版本：${widget.record.version}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  SelectableText(
-                    widget.notice.log.isEmpty ? '作者未提供更新说明' : widget.notice.log,
-                  ),
-                  if (_error != null) ...[
+                    ],
                     const SizedBox(height: 16),
-                    Text(
-                      _error!,
-                      style: TextStyle(color: theme.colorScheme.error),
+                    SelectableText(
+                      widget.notice.log.isEmpty ? '作者未提供更新说明' : widget.notice.log,
                     ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        _error!,
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-        actions: [
-          SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: prism.TextButton(
+                onPressed: _updating
+                    ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('稍后'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
               children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: _updating
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    child: const Text('稍后'),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: prism.OutlinedButton.icon(
+                      onPressed: _updating ? null : _copyUrl,
+                      style: prism.ButtonStyle.from(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      label: const Text('复制 URL', maxLines: 1),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 48,
-                        child: OutlinedButton.icon(
-                          onPressed: _updating ? null : _copyUrl,
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                          ),
-                          icon: const Icon(Icons.copy_rounded, size: 18),
-                          label: const Text('复制 URL', maxLines: 1),
-                        ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: prism.FilledButton(
+                      onPressed: _updating ? null : _update,
+                      style: prism.ButtonStyle.from(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
                       ),
+                      child: _updating
+                          ? const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Text('更新中…'),
+                              ],
+                            )
+                          : const Text('立即更新'),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: SizedBox(
-                        height: 48,
-                        child: FilledButton(
-                          onPressed: _updating ? null : _update,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                          ),
-                          child: _updating
-                              ? const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox.square(
-                                      dimension: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('更新中…'),
-                                  ],
-                                )
-                              : const Text('立即更新'),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

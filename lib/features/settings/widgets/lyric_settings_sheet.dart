@@ -17,6 +17,8 @@ Future<({double weight, double size})> showLyricSettingsSheet(
   await showSettingsSheet<void>(
     context: context,
     useRootNavigator: true,
+    // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+    glass: true,
     // Both type controls must be fully visible without scrolling; the default
     // half-height sheet cut the second one off.
     heightFraction: 0.72,

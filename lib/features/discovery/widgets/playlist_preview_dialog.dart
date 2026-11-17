@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/models/playlist_summary.dart';
 import '../../../core/ui/container_transform.dart';
@@ -36,11 +37,11 @@ class PlaylistPreviewDialog extends ConsumerWidget {
     if (creator != null) metadata.add(creator);
     if (trackCount != null) metadata.add('$trackCount 首');
     final scheme = Theme.of(context).colorScheme;
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 650),
-        child: Column(
+    // 玻璃弹窗外壳：开玻璃用 prism 玻璃，关玻璃降级到 surfaceContainerHigh
+    final glass = prism.LiquidGlassScope.of(context);
+    final glassContent = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460, maxHeight: 650),
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
@@ -200,7 +201,28 @@ class PlaylistPreviewDialog extends ConsumerWidget {
             ),
           ],
         ),
-      ),
+      );
+
+    // 把内容装进 prism 玻璃外壳；Dialog 仅保留定位/遮罩/语义
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      child: glass
+          ? prism.LiquidGlass(
+              style: prism.LiquidGlassStyle.alert(
+                prism.Theme.of(context).colorScheme,
+              ),
+              borderRadius: BorderRadius.circular(28),
+              child: glassContent,
+            )
+          : Material(
+              color: scheme.surfaceContainerHigh,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: BorderRadius.circular(28),
+              child: glassContent,
+            ),
     );
   }
 }

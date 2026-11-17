@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
@@ -258,26 +259,28 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   }
 
   Future<bool> _showPermissionDialog(BuildContext context) async {
-    return await showDialog<bool>(
+    return await prism.showFloatingDialog<bool>(
           context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            icon: const Icon(Icons.library_music_outlined, size: 36),
-            title: const Text('读取本地音乐'),
-            content: const Text(
-              '允许读取设备上的音乐和音频，在选定文件夹中查找歌曲及封面。\n\n'
-              '暂不授权也可以继续使用，之后可在「设置→权限、下载与目录」中开启。',
+          dismissible: false,
+          // 玻璃遮罩由 showFloatingDialog 提供；child 换成 prism 确认框。
+          child: Builder(
+            builder: (dialogCtx) => prism.AlertDialog(
+              title: '读取本地音乐',
+              actions: [
+                prism.TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(false),
+                  child: const Text('稍后再说'),
+                ),
+                prism.FilledButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(true),
+                  child: const Text('去授权'),
+                ),
+              ],
+              child: const Text(
+                '允许读取设备上的音乐和音频，在选定文件夹中查找歌曲及封面。\n\n'
+                '暂不授权也可以继续使用，之后可在「设置→权限、下载与目录」中开启。',
+              ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('稍后再说'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('去授权'),
-              ),
-            ],
           ),
         ) ??
         false;

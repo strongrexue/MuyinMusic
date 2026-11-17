@@ -25,6 +25,7 @@ class KaraokeLineText extends StatefulWidget {
     required this.playing,
     required this.buffering,
     required this.active,
+    this.accent,
   });
 
   final KaraokeLyricLine line;
@@ -32,6 +33,9 @@ class KaraokeLineText extends StatefulWidget {
   final ValueListenable<bool> playing;
   final ValueListenable<bool> buffering;
   final bool active;
+
+  /// 系统强调色，用于高亮当前正在唱的字；为 null 时不启用。
+  final Color? accent;
 
   @override
   KaraokeLineTextState createState() => KaraokeLineTextState();
@@ -247,6 +251,7 @@ class KaraokeLineTextState extends State<KaraokeLineText>
               tintMask: tintMask,
               active: widget.active,
               reduceMotion: _reduceMotion,
+              accent: widget.accent,
             ),
           );
         },
@@ -435,6 +440,27 @@ class _LyricParagraph {
     return end;
   }
 
+  /// KTV 式已唱字集合：按逐字时间戳判断，开始时间已到的字整字高亮。
+  /// 正在唱的字整字高亮、唱过的字保持高亮，未唱到的字不变色。
+  Set<_Glyph> sungGlyphsAt(double ms) {
+    final result = <_Glyph>{};
+    for (final sweep in sweeps) {
+      // 该字还没开始唱：跳过。
+      if (ms < sweep.word.startMs) continue;
+      // 已开始（含正在唱/已唱完）：整字高亮。glyph.center 与 sweep
+      // 的 start/end 同处累加坐标系，多行歌词也不会错位。
+      for (final row in visualLines) {
+        for (final glyph in row.glyphs) {
+          if (glyph.center >= sweep.start - 0.5 &&
+              glyph.center <= sweep.end + 0.5) {
+            result.add(glyph);
+          }
+        }
+      }
+    }
+    return result;
+  }
+
   double riseAt(double center, double front) {
     final halfRange = liftRange / 2;
     final phase = (center - front + halfRange) / liftRange;
@@ -580,6 +606,7 @@ class _KaraokePainter extends CustomPainter {
     required this.tintMask,
     required this.active,
     required this.reduceMotion,
+    this.accent,
   }) : super(repaint: repaint);
 
   final _LyricParagraph paragraph;
@@ -589,8 +616,17 @@ class _KaraokePainter extends CustomPainter {
   final bool tintMask;
   final bool active;
   final bool reduceMotion;
+
+  /// 系统强调色，用于高亮当前正在唱的字；为 null 时不启用。
+  final Color? accent;
   final _imagePaint = Paint()..filterQuality = FilterQuality.low;
   late final _inkFilter = ColorFilter.mode(ink, BlendMode.srcIn);
+  ColorFilter? get _accentFilter => accent == null
+      ? null
+      : ColorFilter.mode(accent!, BlendMode.srcIn);
+  late final Paint _accentPaint = Paint()
+    ..filterQuality = FilterQuality.low
+    ..colorFilter = _accentFilter;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -623,6 +659,11 @@ class _KaraokePainter extends CustomPainter {
       return;
     }
     final front = p.frontAt(ms);
+    // KTV 式强调色：所有已唱字（含正在唱的字）用系统强调色高亮。
+    // 原生彩色 emoji 行不是白色 mask，跳过以免破坏其原生颜色。
+    final sungGlyphs = accent == null || !tintMask
+        ? <_Glyph>{}
+        : p.sungGlyphsAt(ms);
     for (final row in p.visualLines) {
       final bounds = Rect.fromLTRB(
         0,
@@ -672,6 +713,52 @@ class _KaraokePainter extends CustomPainter {
               ]),
       );
       canvas.restore();
+
+      // KTV 式强调色：所有已唱字在 ink 层合成之后批量叠加，避免被行的
+      // ink 滤色覆盖。用白色字形 mask 经强调色滤色得到 primary 色。
+      if (sungGlyphs.isNotEmpty) {
+        final atlas = p.glyphAtlas;
+        final rects = row.atlasRects;
+        final transforms = row.atlasTransforms;
+        if (atlas != null &&
+            rects != null &&
+            transforms != null &&
+            !reduceMotion) {
+          // 收集本行已唱字的 atlas 槽位，一次 drawRawAtlas 画完。
+          final accentedTransforms = Float32List(sungGlyphs.length * 4);
+          final accentedRects = Float32List(sungGlyphs.length * 4);
+          var n = 0;
+          for (var index = 0; index < row.glyphs.length; index++) {
+            if (!sungGlyphs.contains(row.glyphs[index])) continue;
+            final slot = index * 4;
+            for (var k = 0; k < 4; k++) {
+              accentedTransforms[n * 4 + k] = transforms[slot + k];
+              accentedRects[n * 4 + k] = rects[slot + k];
+            }
+            n++;
+          }
+          if (n > 0) {
+            canvas.drawRawAtlas(
+              atlas,
+              accentedTransforms.sublist(0, n * 4),
+              accentedRects.sublist(0, n * 4),
+              null,
+              null,
+              null,
+              _accentPaint,
+            );
+          }
+        } else {
+          // 关闭动画时没有 atlas：逐字裁剪字形矩形染成强调色。
+          for (final glyph in row.glyphs) {
+            if (!sungGlyphs.contains(glyph)) continue;
+            canvas.saveLayer(bounds, Paint()..colorFilter = _accentFilter);
+            canvas.clipRect(glyph.rect);
+            p.text.paint(canvas, Offset.zero);
+            canvas.restore();
+          }
+        }
+      }
     }
   }
 
@@ -681,6 +768,7 @@ class _KaraokePainter extends CustomPainter {
       position != oldDelegate.position ||
       emphasis != oldDelegate.emphasis ||
       ink != oldDelegate.ink ||
+      accent != oldDelegate.accent ||
       tintMask != oldDelegate.tintMask ||
       active != oldDelegate.active ||
       reduceMotion != oldDelegate.reduceMotion;

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/models/enums.dart';
 import '../../core/services/embedded_artwork_cache.dart';
@@ -917,20 +918,20 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
     if (_removingFavorite) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.heart_broken_rounded),
-        title: const Text('取消收藏这个歌单？'),
-        content: Text('“${playlist.name}”会从我的歌单移除，本地音乐文件和下载记录不会受到影响。'),
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '取消收藏这个歌单？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('取消收藏'),
           ),
         ],
+        child: Text('“${playlist.name}”会从我的歌单移除，本地音乐文件和下载记录不会受到影响。'),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -992,20 +993,20 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
     }
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.playlist_remove_rounded),
-        title: const Text('移出已选歌曲？'),
-        content: Text('将从这个歌单移出 ${selected.length} 首歌曲，不会删除本地文件。'),
+      builder: (dialogContext) => prism.AlertDialog(
+        title: '移出已选歌曲？',
+        // 玻璃确认框：描述移入 child，去掉 Material icon，按钮换成 prism。
         actions: [
-          TextButton(
+          prism.TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          prism.FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('移出'),
           ),
         ],
+        child: Text('将从这个歌单移出 ${selected.length} 首歌曲，不会删除本地文件。'),
       ),
     );
     if (confirmed != true || !mounted) return;

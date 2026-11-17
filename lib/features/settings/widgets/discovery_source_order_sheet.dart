@@ -13,6 +13,8 @@ Future<void> showDiscoverySourceOrderSheet(
 }) {
   return showSettingsSheet<void>(
     context: context,
+    // 玻璃适配：透传给 showAppSheet，关闭玻璃时自动降级
+    glass: true,
     showDragHandle: true,
 
     builder: (context) =>

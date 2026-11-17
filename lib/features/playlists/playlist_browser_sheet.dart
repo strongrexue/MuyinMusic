@@ -4,7 +4,9 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_sheet.dart';
+import '../../core/ui/app_toast.dart';
 import '../../core/ui/widgets/app_navigation_button.dart';
+import 'playlist_name_dialog.dart';
 import 'playlist_models.dart';
 import 'playlist_store.dart';
 import 'widgets/playlist_artwork.dart';
@@ -20,6 +22,7 @@ Future<String?> showPlaylistBrowserSheet(
     detents: prism.snapSheetDetents,
     maxHeight: 1000,
     floating: false,
+    glass: true, // 玻璃底板，与正例弹窗保持一致（关闭时由入口降级）。
     builder: (_) => _PlaylistBrowserSheet(mode: mode),
   );
 }
@@ -41,6 +44,26 @@ class _PlaylistBrowserSheetState extends ConsumerState<_PlaylistBrowserSheet> {
   void dispose() {
     _desktopController.dispose();
     super.dispose();
+  }
+
+  Future<void> _createPlaylist(BuildContext context) async {
+    final name = await showPlaylistNameDialog(
+      context,
+      title: '新建歌单',
+      actionLabel: '创建',
+    );
+    if (name == null || !context.mounted) return;
+    try {
+      final playlist = await ref
+          .read(localPlaylistsProvider.notifier)
+          .create(name);
+      if (!context.mounted) return;
+      Navigator.of(context).pop('/playlists/${playlist.id}');
+    } on PlaylistStoreException catch (error) {
+      if (context.mounted) {
+        showAppToast(context, error.message, type: AppToastType.warning);
+      }
+    }
   }
 
   @override
@@ -106,14 +129,22 @@ class _PlaylistBrowserSheetState extends ConsumerState<_PlaylistBrowserSheet> {
                       ? _EmptyPlaylists(
                           controller: scrollController,
                           selecting: selecting,
+                          // 两种模式都提供新建入口
+                          onNewPlaylist: () => _createPlaylist(context),
                         )
                       : prism.PrismListView(
                           controller: scrollController,
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
-                          itemCount: playlists.length,
+                          // 两种模式都提供新建入口，列表顶部固定 +1
+                          itemCount: playlists.length + 1,
                           gap: 6,
                           itemBuilder: (context, index) {
-                            final playlist = playlists[index];
+                            if (index == 0) {
+                              return _NewPlaylistTile(
+                                onTap: () => _createPlaylist(context),
+                              );
+                            }
+                            final playlist = playlists[index - 1];
                             return _PlaylistSheetTile(
                               playlist: playlist,
                               selecting: selecting,
@@ -176,6 +207,45 @@ class _FixedManagementTile extends StatelessWidget {
   }
 }
 
+class _NewPlaylistTile extends StatelessWidget {
+  const _NewPlaylistTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = prism.Theme.of(context).colorScheme;
+    return prism.Card(
+      onPressed: onTap,
+      radius: 18,
+      child: prism.ListRow(
+        minHeight: 68,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: scheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.playlist_add_rounded,
+            color: scheme.onSecondaryContainer,
+            size: 23,
+          ),
+        ),
+        title: const Text(
+          '新建歌单',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: const Text('创建新歌单并添加歌曲'),
+        trailing: const Icon(Icons.add_rounded),
+      ),
+    );
+  }
+}
+
 class _PlaylistSheetTile extends StatelessWidget {
   const _PlaylistSheetTile({
     required this.playlist,
@@ -231,10 +301,12 @@ class _EmptyPlaylists extends StatelessWidget {
   const _EmptyPlaylists({
     required this.controller,
     required this.selecting,
+    this.onNewPlaylist,
   });
 
   final ScrollController controller;
   final bool selecting;
+  final VoidCallback? onNewPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -261,7 +333,7 @@ class _EmptyPlaylists extends StatelessWidget {
         ),
         const SizedBox(height: 5),
         Text(
-          selecting ? '请先在歌单管理中创建或导入歌单' : '进入歌单管理即可新建或导入在线歌单',
+          selecting ? '请先创建歌单或前往歌单管理导入' : '进入歌单管理即可新建或导入在线歌单',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: scheme.onSurfaceVariant,
@@ -269,6 +341,16 @@ class _EmptyPlaylists extends StatelessWidget {
             height: 1.4,
           ),
         ),
+        if (onNewPlaylist != null) ...[
+          const SizedBox(height: 20),
+          Center(
+            child: FilledButton.icon(
+              onPressed: onNewPlaylist,
+              icon: const Icon(Icons.playlist_add_rounded),
+              label: const Text('新建歌单'),
+            ),
+          ),
+        ],
       ],
     );
   }
