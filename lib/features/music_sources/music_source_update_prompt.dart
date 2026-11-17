@@ -100,7 +100,7 @@ class _MusicSourceUpdatePromptState
           context: context,
           dismissible: false,
           // 玻璃遮罩由 showFloatingDialog 提供；child 换成 prism 确认框。
-          child: _MusicSourceUpdateDialog(record: record!, notice: notice),
+          child: _MusicSourceUpdateDialog(record: record, notice: notice),
         );
         if (mounted && context.mounted && updated != null) {
           showAppToast(
