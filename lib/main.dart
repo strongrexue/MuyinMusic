@@ -65,6 +65,10 @@ Future<void> _startApp() async {
   // iOS 的灵动岛 / 锁屏实时活动：与桌面小组件同理，尽早建立通道监听，
   // 免得从锁屏直接点播放时错过第一次状态变化。
   await container.read(liveActivityProvider).initialize();
+  // 立刻接上播放状态跟随：巨魔 / 无 Live Activity 权限时，系统媒体卡片
+  // （灵动岛 / 锁屏）完全依赖 nowPlayingInfo 降级通道，而它靠这里的监听触发。
+  // 放在 runApp 之前可覆盖「锁屏直接点播放、App 还没渲染首帧」的场景。
+  container.read(liveActivitySyncProvider);
   runApp(
     UncontrolledProviderScope(
       container: container,

@@ -20,6 +20,8 @@ import 'features/downloads/download_history_store.dart';
 import 'core/music_sources/music_source_controller.dart';
 import 'features/music_sources/music_source_update_prompt.dart';
 import 'features/player/player_controller.dart';
+import 'features/player/live_activity_service.dart'
+    show liveActivitySyncProvider;
 import 'features/playlists/playlist_store.dart';
 import 'features/player/music_home_widget_service.dart';
 import 'features/songs/local_song_scan_cache.dart';
@@ -76,6 +78,10 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       ref.read(webDavSyncControllerProvider);
       ref.read(playerControllerProvider.notifier);
       if (Platform.isAndroid) ref.read(musicHomeWidgetSyncProvider);
+      // iOS（尤其巨魔/无 Live Activity 权限）：必须主动接上播放状态监听，
+      // 否则 nowPlayingInfo 降级通道不会随播放刷新，系统媒体卡片
+      // （灵动岛 / 锁屏）始终为空。与 Android 小组件监听对称。
+      if (Platform.isIOS) ref.read(liveActivitySyncProvider);
       unawaited(_initializeLocalLibrary());
     });
   }
