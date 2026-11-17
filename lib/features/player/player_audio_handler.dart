@@ -109,8 +109,11 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     _playbackSubscription = _player.playbackEventStream.listen((event) {
       _broadcastState(event);
       // 播放状态变化（播放/暂停/切歌/缓冲/完成）时立即喂一次统计快照，
-      // 保证切歌与暂停能及时 flush；高频时长累计交给 _statsTickTimer（250ms）。
+      // 保证切歌与暂停能及时 flush。
       _feedStatsSnapshot();
+      // 统计定时器只在真正播放时维护：测试环境从不播放，不创建 periodic
+      // Timer，避免 widget 树 dispose 后被 flutter_test 报 pending timer。
+      _syncStatsTimers();
     });
     _durationSubscription = _player.durationStream.listen(_updateDuration);
     _errorSubscription = _player.errorStream.listen((error) {
@@ -127,18 +130,32 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     AppLogger.recordingCategories.addListener(_syncDiagnosticRecording);
     _syncDiagnosticRecording();
     _broadcastState(_player.snapshot);
-    // 移植飞牛音乐：以 250ms 定时快照驱动听歌统计（playbackEventStream 仅在
-    // 状态变化时发射，不足以累计时长）。两个服务单例内部已有 delta 上限与
-    // pending 阈值，重复喂同一快照不会重复计数。
-    _statsTickTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (!_disposed) _feedStatsSnapshot();
-    });
-    _statsFlushTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (!_disposed) {
-        unawaited(StatsService.instance.flush());
-        ListeningRecorderService.instance.flush();
-      }
-    });
+  }
+
+  /// 统计定时器只在播放态维护，暂停/停止即取消：
+  /// - 空闲与测试环境不留 periodic Timer（flutter_test pending timer 检测）；
+  /// - 暂停时的落库由 [_feedStatsSnapshot] 传 isPlaying:false 触发服务 flush。
+  void _syncStatsTimers() {
+    if (_disposed) return;
+    if (playing) {
+      _statsTickTimer ??= Timer.periodic(
+        const Duration(milliseconds: 250),
+        (_) {
+          if (!_disposed) _feedStatsSnapshot();
+        },
+      );
+      _statsFlushTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
+        if (!_disposed) {
+          unawaited(StatsService.instance.flush());
+          ListeningRecorderService.instance.flush();
+        }
+      });
+    } else {
+      _statsTickTimer?.cancel();
+      _statsTickTimer = null;
+      _statsFlushTimer?.cancel();
+      _statsFlushTimer = null;
+    }
   }
 
   final BassPlayer _player;

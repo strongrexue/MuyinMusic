@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:cy_shine_music/core/app_info.dart';
 import 'package:cy_shine_music/core/services/app_update_service.dart';
 import 'package:cy_shine_music/core/ui/app_toast.dart';
+import 'package:cy_shine_music/core/ui/widgets/prism_environment.dart';
 import 'package:cy_shine_music/features/update/app_update_prompt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -216,6 +217,7 @@ Future<void> _pumpHarness(
         externalUriLauncherProvider.overrideWithValue(launcher),
       ],
       child: MaterialApp(
+        localizationsDelegates: const [PrismChineseStrings.delegate],
         theme: ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),

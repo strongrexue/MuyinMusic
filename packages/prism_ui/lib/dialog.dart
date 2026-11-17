@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/material.dart' as material;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:prism_ui/l10n.dart';
@@ -463,17 +464,21 @@ class AlertDialog extends StatelessWidget {
                       width: double.infinity,
                       child: SingleChildScrollView(
                         child: hasFields
-                            ? FilledInputTheme(
-                                fillColor: fill,
-                                borderRadius: AppRadius.all(_actionHeight / 2),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal:
-                                      _textInset -
-                                      _actionInset -
-                                      _fieldInputGap,
-                                  vertical: 12,
+                            ? material.Material(
+                                type: material.MaterialType.transparency,
+                                child: FilledInputTheme(
+                                  fillColor: fill,
+                                  borderRadius:
+                                      AppRadius.all(_actionHeight / 2),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal:
+                                        _textInset -
+                                        _actionInset -
+                                        _fieldInputGap,
+                                    vertical: 12,
+                                  ),
+                                  child: child ?? const SizedBox.shrink(),
                                 ),
-                                child: child ?? const SizedBox.shrink(),
                               )
                             : child,
                       ),
