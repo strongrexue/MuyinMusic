@@ -150,35 +150,10 @@ jobs:
       # 这里把 Xcode 已编译好的正规 appex 显式嵌入（不回退 swiftc 手工拼装）。
       - name: Verify WidgetKit extension
         run: |
-          set -euo pipefail
-          APP_PATH=build/ios/iphoneos/Runner.app
-          APPEX="$APP_PATH/PlugIns/CyShineMusicWidget.appex"
-          BUILT_APPEX=build/ios/iphoneos/CyShineMusicWidget.appex
-          if [ ! -d "$APPEX" ] && [ -d "$BUILT_APPEX" ]; then
-            echo "no-codesign 下 Embed App Extensions 未执行，手动嵌入 Xcode 编译的 appex"
-            mkdir -p "$APP_PATH/PlugIns"
-            cp -R "$BUILT_APPEX" "$APPEX"
-          fi
-          test -d "$APPEX" || { echo "::error::$APPEX 不存在，灵动岛扩展没打进去"; exit 1; }
-          # no-codesign 下 Xcode 生成的 appex Info.plist 可能不完整（实测缺
-          # CFBundleIdentifier 等关键键）。用仓库里权威的源 plist 覆盖，再用
-          # PlistBuddy 写入实际版本，绕开 Xcode 的 plist 变量展开。
-          cp ios/CyShineMusicWidget/Info.plist "$APPEX/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.name }}" "$APPEX/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.number }}" "$APPEX/Info.plist"
-          APP_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
-          APPEX_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APPEX/Info.plist")
-          case "$APPEX_ID" in
-            "$APP_ID".*) ;;
-            *) echo "::error::扩展 bundle id ($APPEX_ID) 未以主 App ($APP_ID) 为前缀，iOS 会拒绝加载"; exit 1 ;;
-          esac
-          APP_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
-          APPEX_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APPEX/Info.plist")
-          test "$APP_VER" = "$APPEX_VER" || { echo "::error::版本不一致：App $APP_VER / 扩展 $APPEX_VER"; exit 1; }
-          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist")
-          APPEX_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APPEX/Info.plist")
-          test "$APP_BUILD" = "$APPEX_BUILD" || { echo "::error::构建号不一致：App $APP_BUILD / 扩展 $APPEX_BUILD"; exit 1; }
-          echo "[ok] 扩展校验通过：$APPEX_ID / $APPEX_VER ($APPEX_BUILD)，前缀与版本均与主 App 对齐"
+          python3 tool/verify_widget_embed.py \
+            build/ios/iphoneos/Runner.app \
+            "${{ steps.version.outputs.name }}" \
+            "${{ steps.version.outputs.number }}"
 
       - name: Package unsigned IPA
         run: |
