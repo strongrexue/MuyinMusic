@@ -942,7 +942,7 @@ final class CyShineAppTaskChannel {
       out["sessionSetActive"] = false
       out["sessionError"] = "\(error)"
     }
-    out["sessionIsActive"] = session.isActive
+    // AVAudioSession 没有公开的 isActive 属性；是否激活以上面 setActive 是否抛错为准。
     out["sessionCategory"] = session.category.rawValue
 
     // 生成 12 秒 440Hz 正弦音（带标准 WAV 头），避免依赖任何音频文件/网络。
@@ -1030,10 +1030,14 @@ final class CyShineAppTaskChannel {
     wav.append(contentsOf: Array("data".utf8))
     wav.append(contentsOf: le32(UInt32(dataSize)))
 
+    let twoPiFreq: Double = 2.0 * .pi * 440.0
     for i in 0..<frameCount {
-      let s = 0.15 * sin(2.0 * .pi * 440.0 * Double(i) / Double(sampleRate))
-      var v = Int16(max(-1, min(1, s)) * Float(Int16.max))
-      withUnsafeBytes(of: &v) { wav.append(contentsOf: $0) }
+      let phase = twoPiFreq * Double(i) / Double(sampleRate)
+      let s = 0.15 * sin(phase)
+      let clamped = max(-1.0, min(1.0, s))
+      let sample = Int16(clamped * Double(Int16.max))
+      var littleEndian = sample.littleEndian
+      withUnsafeBytes(of: &littleEndian) { wav.append(contentsOf: $0) }
     }
     return wav
   }
@@ -1057,7 +1061,6 @@ final class CyShineAppTaskChannel {
     var parts: [String] = []
     parts.append("后台音频=\(Self.backgroundModes().contains("audio") ? "已声明" : "未声明⚠")")
     parts.append("会话分类=\(session.category.rawValue)")
-    parts.append("会话激活=\(session.isActive ? "是" : "否⚠")")
     parts.append("会话活动=\(session.isOtherAudioPlaying ? "他人有声" : "独占")")
     // nowPlayingInfo 为 nil 时系统不会画卡片，这里是最直接的判据。
     parts.append("nowPlaying=\(info == nil ? "空⚠" : "有\(info!.count)项")")
@@ -1078,7 +1081,6 @@ final class CyShineAppTaskChannel {
       "hasNowPlaying": info != nil,
       "backgroundAudioDeclared": Self.backgroundModes().contains("audio"),
       "sessionCategory": session.category.rawValue,
-      "sessionIsActive": session.isActive,
       "isOtherAudioPlaying": session.isOtherAudioPlaying,
     ]
   }
