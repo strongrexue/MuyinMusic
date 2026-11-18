@@ -160,6 +160,12 @@ jobs:
             cp -R "$BUILT_APPEX" "$APPEX"
           fi
           test -d "$APPEX" || { echo "::error::$APPEX 不存在，灵动岛扩展没打进去"; exit 1; }
+          # no-codesign 下 Xcode 生成的 appex Info.plist 可能不完整（实测缺
+          # CFBundleIdentifier 等关键键）。用仓库里权威的源 plist 覆盖，再用
+          # PlistBuddy 写入实际版本，绕开 Xcode 的 plist 变量展开。
+          cp ios/CyShineMusicWidget/Info.plist "$APPEX/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.name }}" "$APPEX/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.number }}" "$APPEX/Info.plist"
           APP_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
           APPEX_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APPEX/Info.plist")
           case "$APPEX_ID" in
