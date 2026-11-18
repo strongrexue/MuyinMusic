@@ -837,6 +837,9 @@ final class CyShineNativeTaggerChannel {
 final class CyShineAppTaskChannel {
   // 决定性诊断用的系统播放器必须强引用，否则出作用域即被释放、声音与卡片都停。
   private static var probePlayer: AVAudioPlayer?
+  // MPRemoteCommandCenter 的 target 必须强引用持有，否则被释放 → 命令失效、
+  // 系统可能因此不把本 App 认作当前媒体源（上岛三条件之一）。
+  private static var remoteCommandTargets: [Any] = []
 
   func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     switch call.method {
@@ -942,18 +945,10 @@ final class CyShineAppTaskChannel {
     out["sessionIsActive"] = session.isActive
     out["sessionCategory"] = session.category.rawValue
 
-    // 生成 12 秒 440Hz 正弦音，避免依赖任何音频文件/网络。
-    let sampleRate = 44_100.0
-    let frames = Int(sampleRate * 12)
-    var pcm = [Float](repeating: 0, count: frames)
-    for i in 0..<frames {
-      pcm[i] = 0.15 * sin(2 * .pi * 440 * Double(i) / sampleRate)
-    }
-    var data = Data(capacity: pcm.count * 2)
-    for s in pcm {
-      var v = Int16(max(-1, min(1, s)) * Float(Int16.max))
-      withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
-    }
+    // 生成 12 秒 440Hz 正弦音（带标准 WAV 头），避免依赖任何音频文件/网络。
+    // ⚠ AVAudioPlayer(data:) 无法解析裸 PCM —— 必须自带 WAV 容器头，否则
+    //   初始化失败、没声音，诊断就白费一次侧载。
+    let data = Self.makeTestToneData()
 
     do {
       let player = try AVAudioPlayer(data: data)
@@ -967,6 +962,12 @@ final class CyShineAppTaskChannel {
       out["playerError"] = "\(error)"
     }
 
+    // ★ 上岛三条件之②：注册至少一个 MPRemoteCommandCenter handler（play/pause），
+    //   target 必须强引用持有。飞牛/官方 audio_service 都走系统播放器并自动注册，
+    //   沐音的 BASS 自研引擎此前从未注册 —— 这是此前从未确证的盲点。
+    Self.setupRemoteCommands()
+    out["remoteCommandsRegistered"] = !Self.remoteCommandTargets.isEmpty
+
     let center = MPNowPlayingInfoCenter.default()
     center.nowPlayingInfo = [
       MPMediaItemPropertyTitle: "系统播放器诊断",
@@ -979,6 +980,62 @@ final class CyShineAppTaskChannel {
     out["nowPlayingWritten"] = center.nowPlayingInfo != nil
     out["nowPlayingCount"] = center.nowPlayingInfo?.count ?? 0
     return out
+  }
+
+  /// 注册远程控制命令并强引用持有 target（主线程，加 target 前先清旧）。
+  private static func setupRemoteCommands() {
+    let c = MPRemoteCommandCenter.shared()
+    remoteCommandTargets.removeAll()
+    c.playCommand.isEnabled = true
+    remoteCommandTargets.append(c.playCommand.addTarget { _ in
+      Self.probePlayer?.play()
+      MPNowPlayingInfoCenter.default().playbackState = .playing
+      return .success
+    })
+    c.pauseCommand.isEnabled = true
+    remoteCommandTargets.append(c.pauseCommand.addTarget { _ in
+      Self.probePlayer?.pause()
+      MPNowPlayingInfoCenter.default().playbackState = .paused
+      return .success
+    })
+  }
+
+  /// 生成 12 秒 440Hz 单声道 16bit 正弦音，带标准 44 字节 WAV 头。
+  private static func makeTestToneData() -> Data {
+    let sampleRate = 44_100
+    let frameCount = sampleRate * 12
+    let byteRate = sampleRate * 2  // 16bit 单声道
+
+    func le16(_ v: UInt16) -> [UInt8] {
+      [UInt8(v & 0xff), UInt8((v >> 8) & 0xff)]
+    }
+    func le32(_ v: UInt32) -> [UInt8] {
+      [UInt8(v & 0xff), UInt8((v >> 8) & 0xff),
+       UInt8((v >> 16) & 0xff), UInt8((v >> 24) & 0xff)]
+    }
+
+    let dataSize = frameCount * 2
+    var wav = Data()
+    wav.append(contentsOf: Array("RIFF".utf8))
+    wav.append(contentsOf: le32(UInt32(36 + dataSize)))
+    wav.append(contentsOf: Array("WAVE".utf8))
+    wav.append(contentsOf: Array("fmt ".utf8))
+    wav.append(contentsOf: le32(16))            // fmt chunk size
+    wav.append(contentsOf: le16(1))             // PCM
+    wav.append(contentsOf: le16(1))             // channels
+    wav.append(contentsOf: le32(UInt32(sampleRate)))
+    wav.append(contentsOf: le32(UInt32(byteRate)))
+    wav.append(contentsOf: le16(2))             // block align
+    wav.append(contentsOf: le16(16))            // bits per sample
+    wav.append(contentsOf: Array("data".utf8))
+    wav.append(contentsOf: le32(UInt32(dataSize)))
+
+    for i in 0..<frameCount {
+      let s = 0.15 * sin(2.0 * .pi * 440.0 * Double(i) / Double(sampleRate))
+      var v = Int16(max(-1, min(1, s)) * Float(Int16.max))
+      withUnsafeBytes(of: &v) { wav.append(contentsOf: $0) }
+    }
+    return wav
   }
 
   /// ★ 锁屏 / 控制中心播放卡片的诊断。
