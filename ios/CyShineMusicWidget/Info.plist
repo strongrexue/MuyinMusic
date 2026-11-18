@@ -19,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.8</string>
+	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleVersion</key>
-	<string>9</string>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
 
 	<!-- ★ 与主 App 一致（1=iPhone, 2=iPad）。
 	     这个键**缺失时 iOS 可能直接不加载扩展** —— 表现是「灵动岛和桌面小组件
@@ -45,7 +45,7 @@
 	     live_activities 插件）都要求两边都写 —— 只写主 App 时会出现
 	     「Activity.request 成功、灵动岛不渲染」这种没有报错的静默失败。 -->
 	<key>NSSupportsLiveActivities</key>
-	<false/>
+	<true/>
 
 	<!-- 与主 App 一致的深链 scheme 白名单（Link 打开 App 用） -->
 	<key>CFBundleURLTypes</key>

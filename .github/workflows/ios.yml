@@ -142,17 +142,10 @@ jobs:
             --build-name="${{ steps.version.outputs.name }}" \
             --build-number="${{ steps.version.outputs.number }}"
 
-      # Batch-2: WidgetKit 扩展（灵动岛实时活动 + 桌面小组件）。
-      # 扩展不进 Runner.xcodeproj，用 xcrun swiftc 独立编译成 .appex 再塞进 PlugIns/。
-      # 失败最多只是没有小组件，主 App 照常出包。
-      - name: Build WidgetKit extension
-        env:
-          IOS_BUILD_NAME: ${{ steps.version.outputs.name }}
-          IOS_BUILD_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          APP_PATH=build/ios/iphoneos/Runner.app
-          bash tool/build_widget_extension.sh "$APP_PATH"
-
+      # WidgetKit 扩展（灵动岛实时活动 + 桌面小组件）已作为正经的 app-extension
+      # target 接进 Runner.xcodeproj：由 patch_xcodeproj.py 注入 target 与
+      # "Embed App Extensions" phase，flutter build ios 通过 target 依赖自动
+      # 编译扩展并嵌入 Runner.app/PlugIns/。不再需要 swiftc 手工拼装。
       - name: Verify WidgetKit extension
         run: |
           set -euo pipefail

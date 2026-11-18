@@ -52,9 +52,9 @@
 	<!-- 实时活动（灵动岛 + 锁屏卡片）。渲染在 Widget Extension 里，
 	     见 ios/CyShineMusicWidget/ -->
 	<key>NSSupportsLiveActivities</key>
-	<false/>
+	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<false/>
+	<true/>
 
 	<!-- 深链：灵动岛 / 锁屏卡片 / 桌面小组件点一下回到 App，并带上控制动作。
 	     与 ios/CyShineMusicWidget/Info.plist 的 scheme 保持一致。 -->

@@ -79,18 +79,32 @@ if (!/_ensureAvailable\s*\(\s*\{\s*bool\s+force/.test(service)) {
   ].join('\n  '));
 }
 
-// ⑤ Info.plist 两个键都要在（少一个都是静默失败）。
+// ⑤ Info.plist 两个键都要为 true（只写键但值是 false 同样静默失败）。
+//    注意：曾把这两个键改成 false 导致 areActivitiesEnabled 永远为 false，
+//    request 被系统拒绝，而本脚本旧版只查键存在、漏过了这个值错误。
 for (const key of ['NSSupportsLiveActivities', 'NSSupportsLiveActivitiesFrequentUpdates']) {
-  if (!plist.includes(key)) {
-    failures.push(`ios/Runner/Info.plist 缺少 ${key}`);
+  const trueRe = new RegExp(`<key>${key}</key>\\s*<true\\s*/>`);
+  const falseRe = new RegExp(`<key>${key}</key>\\s*<false\\s*/>`);
+  if (falseRe.test(plist)) {
+    failures.push(`ios/Runner/Info.plist 的 ${key} 是 false，必须为 true`);
+  } else if (!trueRe.test(plist)) {
+    failures.push(`ios/Runner/Info.plist 缺少 ${key} 或值不是 true`);
   }
 }
 
-// ⑥ 扩展侧也必须声明 NSSupportsLiveActivities（只写主 App 会「request 成功但不渲染」）。
+// ⑥ 扩展侧也必须把 NSSupportsLiveActivities 设为 true
+//    （只写主 App 或写成 false 都会「request 成功但不渲染」）。
 const widgetPlistPath = join(root, 'ios/CyShineMusicWidget/Info.plist');
 const widgetPlist = readFileSync(widgetPlistPath, 'utf8');
-if (!widgetPlist.includes('NSSupportsLiveActivities')) {
-  failures.push('ios/CyShineMusicWidget/Info.plist 缺少 NSSupportsLiveActivities（扩展侧也要写）');
+{
+  const key = 'NSSupportsLiveActivities';
+  const trueRe = new RegExp(`<key>${key}</key>\\s*<true\\s*/>`);
+  const falseRe = new RegExp(`<key>${key}</key>\\s*<false\\s*/>`);
+  if (falseRe.test(widgetPlist)) {
+    failures.push('ios/CyShineMusicWidget/Info.plist 的 NSSupportsLiveActivities 是 false，必须为 true');
+  } else if (!trueRe.test(widgetPlist)) {
+    failures.push('ios/CyShineMusicWidget/Info.plist 缺少 NSSupportsLiveActivities 或值不是 true（扩展侧也要写 true）');
+  }
 }
 
 // ⑥b ★ UIDeviceFamily —— 手工组装的 .appex 不会被 Xcode 自动补这个键，
@@ -114,6 +128,71 @@ if (!/CyShineActivityAttributes\.swift/.test(bridge)) {
   ].join('\n  '));
 }
 
+// ⑧ 主 App 与扩展的 entitlements 文件必须存在且声明同一个 App Group。
+//    扩展通过 UserDefaults(suiteName:) 读写这个 group 里的播放状态/歌词，
+//    没有 entitlements = 扩展沙盒里读不到数据 = 灵动岛内容为空或扩展加载失败。
+const runnerEntitlementsPath = join(root, 'ios/Runner/Runner.entitlements');
+const widgetEntitlementsPath = join(root, 'ios/CyShineMusicWidget/CyShineMusicWidget.entitlements');
+const APP_GROUP = 'group.com.cyshine.music';
+for (const [label, path] of [
+  ['主 App', runnerEntitlementsPath],
+  ['扩展', widgetEntitlementsPath],
+]) {
+  let ent;
+  try {
+    ent = readFileSync(path, 'utf8');
+  } catch {
+    failures.push(`缺少 ${path} —— ${label} 没有 entitlements，App Group 声明不了`);
+    continue;
+  }
+  if (!ent.includes(APP_GROUP)) {
+    failures.push(`${path.replace(root + '/', '')} 未声明 App Group ${APP_GROUP}`);
+  }
+  // application-identifier 必须用 $(AppIdentifierPrefix) 占位符，让签名端
+  // 自动填团队前缀；硬编码 team id 会在换账号/换签名工具时失效。
+  if (!/application-identifier[\s\S]*?\$\(AppIdentifierPrefix\)/.test(ent)) {
+    failures.push(`${path.replace(root + '/', '')} 的 application-identifier 未用 $(AppIdentifierPrefix) 占位符`);
+  }
+}
+
+// ⑨ project.pbxproj 必须有正经的 app-extension target + Embed App Extensions phase，
+//    且两个构建的 CODE_SIGN_ENTITLEMENTS 指向各自的 entitlements。
+//    早期用 swiftc 手工把 .appex 塞进 PlugIns/，没有 entitlements/前缀，
+//    伪签环境下扩展加载失败 —— 这里把它变成硬校验，防止回退到手工拼装。
+const pbxprojPath = join(root, 'ios/Runner.xcodeproj/project.pbxproj');
+try {
+  const pbx = readFileSync(pbxprojPath, 'utf8');
+  if (!/productType = "com\.apple\.product-type\.app-extension"/.test(pbx)) {
+    failures.push('project.pbxproj 没有 app-extension target（CyShineMusicWidget 未接进工程）');
+  }
+  const embedPhase = /isa = PBXCopyFilesBuildPhase;[\s\S]*?dstSubfolderSpec = 13;/;
+  if (!embedPhase.test(pbx)) {
+    failures.push('project.pbxproj 缺少 "Embed App Extensions" phase（dstSubfolderSpec=13），扩展不会被嵌进 Runner.app/PlugIns/');
+  }
+  if ((pbx.match(/CODE_SIGN_ENTITLEMENTS = Runner\/Runner\.entitlements;/g) || []).length < 1) {
+    failures.push('Runner 主 App 构建配置未挂 Runner.entitlements');
+  }
+  if ((pbx.match(/CODE_SIGN_ENTITLEMENTS = CyShineMusicWidget\/CyShineMusicWidget\.entitlements;/g) || []).length < 1) {
+    failures.push('Widget 扩展构建配置未挂 CyShineMusicWidget.entitlements');
+  }
+} catch {
+  failures.push(`读取 ${pbxprojPath.replace(root + '/', '')} 失败`);
+}
+
+// ⑩ Runner.xcscheme 的 Build 列表必须显式包含 Widget target，
+//    否则 flutter build ios 只编译 Runner，扩展不会随包产出。
+const schemePath = join(root, 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+try {
+  const scheme = readFileSync(schemePath, 'utf8');
+  const buildSection = (scheme.match(/<BuildActionEntries>[\s\S]*?<\/BuildActionEntries>/) || [''])[0];
+  if (!/BlueprintName = "CyShineMusicWidget"/.test(buildSection) ||
+      !/C7A0B0000000000000000001/.test(buildSection)) {
+    failures.push('Runner.xcscheme 的 Build 列表缺少 CyShineMusicWidget target，flutter build ios 不会编译扩展');
+  }
+} catch {
+  failures.push(`读取 ${schemePath.replace(root + '/', '')} 失败`);
+}
+
 // ---- 输出 ----
 console.log('实时活动授权链路检查');
 console.log('  bridge :', bridgePath.replace(root + '/', ''));
@@ -133,4 +212,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('✓ 全部通过：授权请求在 isSupported 路径上、Dart 会响应授权结果、两个 Info.plist 键齐全。');
+console.log('✓ 全部通过：授权链路、两个 Info.plist 键、App Group entitlements、app-extension target 与 Embed phase 均就位。');
