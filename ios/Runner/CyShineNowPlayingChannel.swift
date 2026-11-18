@@ -10,8 +10,14 @@ import UIKit
 final class CyShineNowPlayingChannel: NSObject {
   static let channelName = "cy_shine_music/now_playing"
 
+  // MPRemoteCommand 的 addTarget 不持有 target，必须自己强引用，否则命令失效。
+  private static var commandTargets: [Any] = []
+  private static var commandChannel: FlutterMethodChannel?
+
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
+    commandChannel = channel
+    setupRemoteCommands()
     channel.setMethodCallHandler { call, result in
       guard call.method == "publish",
             let a = call.arguments as? [String: Any],
@@ -43,8 +49,43 @@ final class CyShineNowPlayingChannel: NSObject {
           MPMediaItemArtwork(boundsSize: image.size) { _ in image }
       }
       center.nowPlayingInfo = info
+      // 五角星实心/空心随喜欢状态刷新；并重新 enable（audio_service 初始化时会
+      // 把 likeCommand/dislikeCommand 置 NO，这里每次写入都覆盖回来）。
+      Self.syncLikeState(liked: (a["liked"] as? Bool) ?? false)
       result(true)
     }
+  }
+
+  /// 注册 like/dislike 远程命令，点击后回调 Dart 切换喜欢（不打开 App）。
+  private static func setupRemoteCommands() {
+    let center = MPRemoteCommandCenter.shared()
+    commandTargets.removeAll()
+
+    let like = center.likeCommand
+    like.isEnabled = true
+    let likeTarget: Any = like.addTarget { _ in
+      commandChannel?.invokeMethod("toggleLike", arguments: nil)
+      return .success
+    }
+    commandTargets.append(likeTarget)
+
+    let dislike = center.dislikeCommand
+    dislike.isEnabled = true
+    let dislikeTarget: Any = dislike.addTarget { _ in
+      commandChannel?.invokeMethod("toggleLike", arguments: nil)
+      return .success
+    }
+    commandTargets.append(dislikeTarget)
+  }
+
+  /// audio_service 在启动时会 disable like/dislike，这里覆盖回来并同步实心/空心。
+  private static func syncLikeState(liked: Bool) {
+    let center = MPRemoteCommandCenter.shared()
+    let like = center.likeCommand
+    like.isEnabled = true
+    like.active = liked
+    let dislike = center.dislikeCommand
+    dislike.isEnabled = true
   }
 
   /// 按 cover 取封面图，支持 file:// / http(s) / 裸路径。

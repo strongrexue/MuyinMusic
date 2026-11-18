@@ -10,6 +10,12 @@ import '../../core/ui/cover_image_source.dart';
 import 'lyric_frame.dart';
 import 'player_audio_handler.dart';
 import 'player_controller.dart';
+import '../songs/liked_songs_store.dart';
+
+/// 是否发起自绘 Live Activity（灵动岛/锁屏自定义卡）。
+/// 切回系统标准播放卡后关闭：只写 MPNowPlayingInfoCenter，不再 start/update Activity。
+/// 设 false 后 _push 直接返回，_activeStarted 永远为 false，_end 也天然不会再发。
+const bool kEnableLiveActivity = false;
 
 /// 灵动岛 / 锁屏实时活动（Live Activity）的驱动。
 ///
@@ -32,6 +38,10 @@ final liveActivitySyncProvider = Provider<void>((ref) {
   ref.listen<PlayerState>(playerControllerProvider, (_, state) {
     service.publish(state);
   }, fireImmediately: true);
+  // 喜欢状态变化也要刷新系统卡五角星（实心/空心）。
+  ref.listen(likedSongsProvider, (_, _) {
+    service.refreshNowPlaying();
+  });
 });
 
 class LiveActivityService {
@@ -59,7 +69,14 @@ class LiveActivityService {
   Future<void> initialize() async {
     if (!Platform.isIOS) return;
     _channel.setMethodCallHandler(_handleNativeCall);
+    // 系统卡通道升级为双向：接收五角星 like/dislike 的 toggleLike 回调。
+    _nowPlayingChannel.setMethodCallHandler(_handleNativeCall);
     await _ensureAvailable();
+  }
+
+  /// 喜欢状态变化后主动重推一次系统卡，让五角星实心/空心立即同步。
+  void refreshNowPlaying() {
+    unawaited(_pushNowPlaying());
   }
 
   /// 检查系统的实时活动开关。
@@ -138,6 +155,18 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
           await _push(afterArtwork: true);
         }
         return true;
+      case 'toggleLike':
+        // 系统卡五角星被点击（MPRemoteCommandCenter like/dislike）。
+        // 后台 isolate 常驻，SharedPreferences 纯本地读写，可直接切换。
+        final state = _ref.read(playerControllerProvider);
+        final entry = state.queueIndex >= 0 && state.queueIndex < state.queue.length
+            ? state.queue[state.queueIndex]
+            : null;
+        if (entry == null) return false;
+        final nowLiked = _ref.read(likedSongsProvider.notifier).toggle(entry);
+        await AppLogger.write('live-activity', '系统卡切换喜欢: $nowLiked');
+        // toggle 会改变 likedSongsProvider，上面的 listen 会触发 _pushNowPlaying 刷新。
+        return nowLiked;
     }
     throw MissingPluginException('未知的实时活动方法: ${call.method}');
   }
@@ -252,6 +281,13 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       }
     }
 
+    // 当前曲目是否已喜欢：队列条目即 DownloadHistoryEntry，直接比身份键。
+    final queueEntry = state.queueIndex >= 0 && state.queueIndex < state.queue.length
+        ? state.queue[state.queueIndex]
+        : null;
+    final liked = queueEntry != null &&
+        _ref.read(likedSongsProvider.notifier).isLiked(queueEntry);
+
     return {
       'trackId': track.id,
       'title': track.title,
@@ -261,10 +297,13 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       'playing': playing,
       'loading': loading,
       'lyricText': lyricText,
+      'liked': liked,
     };
   }
 
   Future<void> _push({required bool afterArtwork}) async {
+    // 切回系统标准卡：不再发起/更新自绘 Live Activity。
+    if (!kEnableLiveActivity) return;
     if (!_available) return;
     final payload = _payload();
     if (payload == null) return;
