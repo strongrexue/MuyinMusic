@@ -83,7 +83,7 @@ final class CyShineNowPlayingChannel: NSObject {
     let center = MPRemoteCommandCenter.shared()
     let like = center.likeCommand
     like.isEnabled = true
-    like.active = liked
+    like.isActive = liked
     let dislike = center.dislikeCommand
     dislike.isEnabled = true
   }
