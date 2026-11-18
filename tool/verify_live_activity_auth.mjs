@@ -179,15 +179,21 @@ try {
   failures.push(`读取 ${pbxprojPath.replace(root + '/', '')} 失败`);
 }
 
-// ⑩ Runner.xcscheme 的 Build 列表必须显式包含 Widget target，
-//    否则 flutter build ios 只编译 Runner，扩展不会随包产出。
+// ⑩ Runner.xcscheme 的 Build 列表必须【只有】主 App（Runner）一个 entry。
+//    若把 Widget target 加进 scheme 的 BuildActionEntries，flutter build ios
+//    会把构建目标识别成扩展，只产出 appex、不产出 Runner.app（实测打包出的
+//    IPA 只剩扩展、主 App 二进制丢失）。扩展靠 pbxproj 的 target dependency
+//    + Embed App Extensions phase 随主 App 编译，不需要也不允许进 scheme。
 const schemePath = join(root, 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
 try {
   const scheme = readFileSync(schemePath, 'utf8');
   const buildSection = (scheme.match(/<BuildActionEntries>[\s\S]*?<\/BuildActionEntries>/) || [''])[0];
-  if (!/BlueprintName = "CyShineMusicWidget"/.test(buildSection) ||
-      !/C7A0B0000000000000000001/.test(buildSection)) {
-    failures.push('Runner.xcscheme 的 Build 列表缺少 CyShineMusicWidget target，flutter build ios 不会编译扩展');
+  const entryCount = (buildSection.match(/<BuildActionEntry\b/g) || []).length;
+  if (/BlueprintName = "CyShineMusicWidget"/.test(buildSection) ||
+      /C7A0B0000000000000000001/.test(buildSection)) {
+    failures.push('Runner.xcscheme 的 Build 列表含 CyShineMusicWidget —— 会导致 flutter build 只产 appex 不产主 App，必须移除');
+  } else if (entryCount !== 1) {
+    failures.push(`Runner.xcscheme 的 Build 列表应只有主 App 一个 entry，实际 ${entryCount} 个`);
   }
 } catch {
   failures.push(`读取 ${schemePath.replace(root + '/', '')} 失败`);

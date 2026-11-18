@@ -27,7 +27,16 @@ def fail(msg):
     sys.exit(1)
 
 
-# 1) no-codesign 下 Xcode 会编译出 appex 但跳过 Embed phase，手动嵌入。
+# 1) 前置硬校验：主 App 必须真实存在，绝不能靠 makedirs 造空壳。
+#    实测若 scheme 误把 Widget 加进 BuildActionEntries，flutter build 只产出
+#    appex、不产出 Runner.app；此时若继续 mkdir 嵌入会打出只有扩展的废 IPA。
+if not os.path.isdir(APP_PATH):
+    fail(f"{APP_PATH} 不存在，flutter build 未产出主 App（检查 scheme 是否被加了 Widget entry）")
+if not os.path.isfile(os.path.join(APP_PATH, "Info.plist")):
+    fail(f"{APP_PATH}/Info.plist 不存在，主 App 构建产物不完整（空壳目录不能当产物）")
+
+# 2) no-codesign 下 Xcode 会编译出 appex 但跳过 Embed phase，手动嵌入。
+#    这里 APPEX 不存在时 PlugIns 父目录已随主 App 存在，绝不新建 APP_PATH 本身。
 if not os.path.isdir(APPEX) and os.path.isdir(BUILT_APPEX):
     print("no-codesign 下 Embed App Extensions 未执行，手动嵌入 Xcode 编译的 appex")
     os.makedirs(os.path.dirname(APPEX), exist_ok=True)
