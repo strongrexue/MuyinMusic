@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 /// 这两层状态一次读全，用来区分「通道没写」还是「写了系统不画」：
 ///   ① 读当前 mediaSession / widgetStatus / diagnostics
 ///   ② 强制写一张测试卡片，再读一次 —— 由此判定 nowPlayingInfo 写入是否生效
+///   ③ 系统 AVAudioPlayer 播测试音+写卡片（决定性验证）—
+///      出卡=系统媒体链正常、锅在 BASS 引擎；不出=巨魔签名层无解
 class IosMediaDiagnosticsCard extends StatefulWidget {
   const IosMediaDiagnosticsCard({super.key});
 
@@ -73,6 +75,22 @@ class _IosMediaDiagnosticsCardState extends State<IosMediaDiagnosticsCard> {
             '强制写入返回 = $ok\n\n$after\n\n请现在息屏，看锁屏是否出现「诊断测试」卡片。');
       });
 
+  Future<void> _systemProbe() => _guarded(() async {
+        final data = await _taskChannel.invokeMapMethod<String, dynamic>(
+          'systemPlayerProbe',
+        );
+        final buffer = StringBuffer('系统播放器诊断（AVAudioPlayer）:\n');
+        if (data == null) {
+          buffer.writeln('  返回 null（通道未实现？）');
+        } else {
+          data.forEach((key, value) => buffer.writeln('  $key = $value'));
+        }
+        buffer.writeln('\n请息屏看锁屏是否出现「系统播放器诊断」卡片。');
+        buffer.writeln('出卡=系统媒体链正常、问题在 BASS 引擎；');
+        buffer.writeln('不出=巨魔签名层，代码无解。');
+        setState(() => _result = buffer.toString());
+      });
+
   @override
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return const SizedBox.shrink();
@@ -102,6 +120,10 @@ class _IosMediaDiagnosticsCardState extends State<IosMediaDiagnosticsCard> {
                 ElevatedButton(
                   onPressed: _busy ? null : _forceWrite,
                   child: const Text('② 强制写测试卡片'),
+                ),
+                ElevatedButton(
+                  onPressed: _busy ? null : _systemProbe,
+                  child: const Text('③ 系统播放器诊断'),
                 ),
               ],
             ),

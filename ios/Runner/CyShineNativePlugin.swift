@@ -835,6 +835,8 @@ final class CyShineNativeTaggerChannel {
 
 @available(iOS 13.0, *)
 final class CyShineAppTaskChannel {
+  // 决定性诊断用的系统播放器必须强引用，否则出作用域即被释放、声音与卡片都停。
+  private static var probePlayer: AVAudioPlayer?
 
   func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     switch call.method {
@@ -851,6 +853,9 @@ final class CyShineAppTaskChannel {
     case "widgetStatus":
       // 异步（getCurrentConfigurations 有回调），所以单独走一条路径。
       widgetStatus(result)
+
+    case "systemPlayerProbe":
+      result(systemPlayerProbe())
 
     default:
       result(FlutterMethodNotImplemented)
@@ -918,6 +923,64 @@ final class CyShineAppTaskChannel {
     }
   }
 
+  /// ★ 决定性诊断：用 iOS 系统 AVAudioPlayer（标准媒体路径，飞牛那一类）播放一段
+  ///   合成音并写 nowPlayingInfo。用来区分「BASS 自研引擎不被系统认作媒体源」与
+  ///   「巨魔重签本身拿不到媒体卡片权限」：
+  ///     · 出卡 ⇒ 系统媒体链是通的，问题在沐音的 BASS 引擎 → 换引擎可解
+  ///     · 不出 ⇒ 连系统标准播放器都画不出卡 → 巨魔签名层，代码无解
+  private func systemPlayerProbe() -> [String: Any] {
+    var out: [String: Any] = [:]
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setCategory(.playback, mode: .default, options: [])
+      try session.setActive(true)
+      out["sessionSetActive"] = true
+    } catch {
+      out["sessionSetActive"] = false
+      out["sessionError"] = "\(error)"
+    }
+    out["sessionIsActive"] = session.isActive
+    out["sessionCategory"] = session.category.rawValue
+
+    // 生成 12 秒 440Hz 正弦音，避免依赖任何音频文件/网络。
+    let sampleRate = 44_100.0
+    let frames = Int(sampleRate * 12)
+    var pcm = [Float](repeating: 0, count: frames)
+    for i in 0..<frames {
+      pcm[i] = 0.15 * sin(2 * .pi * 440 * Double(i) / sampleRate)
+    }
+    var data = Data(capacity: pcm.count * 2)
+    for s in pcm {
+      var v = Int16(max(-1, min(1, s)) * Float(Int16.max))
+      withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
+    }
+
+    do {
+      let player = try AVAudioPlayer(data: data)
+      player.numberOfLoops = -1
+      player.prepareToPlay()
+      let started = player.play()
+      Self.probePlayer = player
+      out["playerStarted"] = started
+    } catch {
+      out["playerStarted"] = false
+      out["playerError"] = "\(error)"
+    }
+
+    let center = MPNowPlayingInfoCenter.default()
+    center.nowPlayingInfo = [
+      MPMediaItemPropertyTitle: "系统播放器诊断",
+      MPMediaItemPropertyArtist: "AVAudioPlayer",
+      MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+      MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
+      MPMediaItemPropertyPlaybackDuration: 12.0,
+    ]
+    center.playbackState = .playing
+    out["nowPlayingWritten"] = center.nowPlayingInfo != nil
+    out["nowPlayingCount"] = center.nowPlayingInfo?.count ?? 0
+    return out
+  }
+
   /// ★ 锁屏 / 控制中心播放卡片的诊断。
   ///
   ///   这条链路与灵动岛**完全无关** —— 它由 `audio_service` → `MPNowPlayingInfoCenter`
@@ -937,6 +1000,7 @@ final class CyShineAppTaskChannel {
     var parts: [String] = []
     parts.append("后台音频=\(Self.backgroundModes().contains("audio") ? "已声明" : "未声明⚠")")
     parts.append("会话分类=\(session.category.rawValue)")
+    parts.append("会话激活=\(session.isActive ? "是" : "否⚠")")
     parts.append("会话活动=\(session.isOtherAudioPlaying ? "他人有声" : "独占")")
     // nowPlayingInfo 为 nil 时系统不会画卡片，这里是最直接的判据。
     parts.append("nowPlaying=\(info == nil ? "空⚠" : "有\(info!.count)项")")
@@ -957,6 +1021,7 @@ final class CyShineAppTaskChannel {
       "hasNowPlaying": info != nil,
       "backgroundAudioDeclared": Self.backgroundModes().contains("audio"),
       "sessionCategory": session.category.rawValue,
+      "sessionIsActive": session.isActive,
       "isOtherAudioPlaying": session.isOtherAudioPlaying,
     ]
   }
