@@ -933,6 +933,8 @@ final class CyShineAppTaskChannel {
   ///     · 不出 ⇒ 连系统标准播放器都画不出卡 → 巨魔签名层，代码无解
   private func systemPlayerProbe() -> [String: Any] {
     var out: [String: Any] = [:]
+    // 独占：先清掉此前播放/其它写入者残留的卡，避免探针卡被旧态覆盖而误判。
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     let session = AVAudioSession.sharedInstance()
     do {
       try session.setCategory(.playback, mode: .default, options: [])

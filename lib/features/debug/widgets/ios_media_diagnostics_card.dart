@@ -2,6 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../player/player_audio_handler.dart';
+import '../../player/player_controller.dart';
 
 /// iOS 媒体会话诊断卡片（仅调试用）。
 ///
@@ -11,15 +15,16 @@ import 'package:flutter/services.dart';
 ///   ② 强制写一张测试卡片，再读一次 —— 由此判定 nowPlayingInfo 写入是否生效
 ///   ③ 系统 AVAudioPlayer 播测试音+写卡片（决定性验证）—
 ///      出卡=系统媒体链正常、锅在 BASS 引擎；不出=巨魔签名层无解
-class IosMediaDiagnosticsCard extends StatefulWidget {
+class IosMediaDiagnosticsCard extends ConsumerStatefulWidget {
   const IosMediaDiagnosticsCard({super.key});
 
   @override
-  State<IosMediaDiagnosticsCard> createState() =>
+  ConsumerState<IosMediaDiagnosticsCard> createState() =>
       _IosMediaDiagnosticsCardState();
 }
 
-class _IosMediaDiagnosticsCardState extends State<IosMediaDiagnosticsCard> {
+class _IosMediaDiagnosticsCardState
+    extends ConsumerState<IosMediaDiagnosticsCard> {
   static const _taskChannel = MethodChannel('cy_shine_music/app_task');
   static const _nowPlayingChannel =
       MethodChannel('cy_shine_music/now_playing');
@@ -91,6 +96,42 @@ class _IosMediaDiagnosticsCardState extends State<IosMediaDiagnosticsCard> {
         setState(() => _result = buffer.toString());
       });
 
+  /// ★ 独占探针：先停播 + 清空队列（断掉 audio_service / now_playing /
+  /// live_activity 三个写入者），再让系统 AVAudioPlayer 独占写一张明确的卡，
+  /// 用来判定「卡到底能不能出」和「点卡能否进 App」。
+  Future<void> _exclusiveProbe() => _guarded(() async {
+        final steps = <String>[];
+        try {
+          await ref.read(playerAudioHandlerProvider).stop();
+          steps.add('停播 audio_service: OK');
+        } catch (e) {
+          steps.add('停播 audio_service: 失败 $e');
+        }
+        try {
+          await ref.read(playerControllerProvider.notifier).clearQueue();
+          steps.add('清空队列: OK');
+        } catch (e) {
+          steps.add('清空队列: 失败 $e');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        final data = await _taskChannel.invokeMapMethod<String, dynamic>(
+          'systemPlayerProbe',
+        );
+        final buffer = StringBuffer('④ 独占探针（系统 AVAudioPlayer）:\n');
+        for (final step in steps) {
+          buffer.writeln('  $step');
+        }
+        if (data == null) {
+          buffer.writeln('  探针返回 null（通道未实现？）');
+        } else {
+          data.forEach((key, value) => buffer.writeln('  $key = $value'));
+        }
+        buffer.writeln('\n请息屏：');
+        buffer.writeln('1) 看是否出现「系统播放器诊断」卡（卡能否出）');
+        buffer.writeln('2) 点那张卡看能否进 App（点击是否可用）');
+        setState(() => _result = buffer.toString());
+      });
+
   @override
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return const SizedBox.shrink();
@@ -124,6 +165,10 @@ class _IosMediaDiagnosticsCardState extends State<IosMediaDiagnosticsCard> {
                 ElevatedButton(
                   onPressed: _busy ? null : _systemProbe,
                   child: const Text('③ 系统播放器诊断'),
+                ),
+                ElevatedButton(
+                  onPressed: _busy ? null : _exclusiveProbe,
+                  child: const Text('④ 独占探针'),
                 ),
               ],
             ),
