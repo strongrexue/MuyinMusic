@@ -10,7 +10,8 @@
 // 设计要点：**不依赖 App Group**。
 // 歌名 / 歌手 / 播放位置 / 时长 / 播放状态全部放在 ContentState 里随活动一起传，
 // 所以即使签名时拿不到 App Group 权限，灵动岛也照常工作。
-// 只有封面图需要共享容器 —— 拿不到就回退到扩展内置的占位图。
+// 封面 JPEG 字节也直接放进 ContentState（artworkData），容器拿不到时照样显示封面；
+// artworkPath 仅为兼容旧逻辑保留。
 
 import ActivityKit
 import Foundation
@@ -37,7 +38,11 @@ struct CyShineActivityAttributes: ActivityAttributes {
         /// 自己推算当前位置，推更新只在换歌 / 播放暂停 / 跳转时发生。
         var updatedAt: TimeInterval
         /// 封面在 App Group 容器里的相对路径；拿不到共享容器时为 nil。
+        /// 仅为兼容旧逻辑保留，优先用 artworkData。
         var artworkPath: String?
+        /// 封面 JPEG 字节（已缩到 ≤256px、压缩质量 0.82）。随活动载荷直接传给扩展，
+        /// 不依赖 App Group 容器。`Data` 原生遵循 Codable / Hashable。
+        var artworkData: Data?
         /// 当前歌词帧文本（灵动岛/锁屏显示用）；无歌词时为空串。
         var lyricText: String
 

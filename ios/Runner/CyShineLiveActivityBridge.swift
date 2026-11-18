@@ -361,16 +361,14 @@ final class CyShineLiveActivityBridge: NSObject {
     info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
     info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
 
-    if let artworkPath, let image = Self.loadArtwork(relativePath: artworkPath) {
+    // 锁屏卡封面：file:// 缓存优先，http(s) 网络兜底，裸路径也支持。
+    // 音频在线时 cover 通常是 https://，缺这一支锁屏卡就没有封面。
+    if let image = Self.lockScreenArtwork(args: args) {
       info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in
         image
       }
-    } else if let cover = args["cover"] as? String,
-              cover.hasPrefix("file://"),
-              let url = URL(string: cover),
-              let data = try? Data(contentsOf: url),
-              let image = UIImage(data: data) {
-      // Dart 侧缓存到沙盒临时目录的封面（同一 App 内可直接读）。
+    } else if let artworkPath, let image = Self.loadArtwork(relativePath: artworkPath) {
+      // 容器里若有缓存封面（桌面小组件写入的），也可兜底。
       info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in
         image
       }
@@ -386,6 +384,25 @@ final class CyShineLiveActivityBridge: NSObject {
     ) else { return nil }
     let url = base.appendingPathComponent(relativePath)
     guard let data = try? Data(contentsOf: url) else { return nil }
+    return UIImage(data: data)
+  }
+
+  /// 从 Dart 传来的 cover 取封面图（供锁屏卡用），不依赖 App Group。
+  /// 支持 file://（沙盒缓存，同步直读）、http(s)（带 headers 同步下载，12s 超时）、裸路径。
+  private static func lockScreenArtwork(args: [String: Any]) -> UIImage? {
+    guard let cover = args["cover"] as? String, !cover.isEmpty else { return nil }
+    let headers = (args["headers"] as? [String: Any])?
+      .reduce(into: [String: String]()) { acc, e in acc[e.key] = String(describing: e.value) } ?? [:]
+
+    let data: Data?
+    if cover.hasPrefix("file://"), let url = URL(string: cover) {
+      data = try? Data(contentsOf: url)
+    } else if let url = URL(string: cover), url.scheme?.hasPrefix("http") == true {
+      data = downloadSynchronously(url: url, headers: headers)
+    } else {
+      data = try? Data(contentsOf: URL(fileURLWithPath: cover))
+    }
+    guard let data else { return nil }
     return UIImage(data: data)
   }
 
@@ -517,7 +534,9 @@ final class CyShineLiveActivityBridge: NSObject {
 
   // MARK: - 封面
 
-  /// 先不阻塞地发起活动，再把封面异步补上（写进 App Group 后 update 一次）。
+  /// 先不阻塞地发起活动，再把封面异步补上（update 一次）。
+  /// 封面 JPEG 字节直接放进 ContentState 的 artworkData —— 不依赖 App Group，
+  /// 容器拿不到也能显示；写容器只为兼容桌面小组件（失败也静默跳过）。
   private func resolveArtworkForCurrent(_ args: [String: Any]) {
     guard let trackId = args["trackId"] as? String, !trackId.isEmpty else { return }
     let cover = (args["cover"] as? String) ?? ""
@@ -526,13 +545,15 @@ final class CyShineLiveActivityBridge: NSObject {
 
     Task.detached(priority: .utility) { [weak self] in
       guard let self else { return }
-      guard let relative = Self.storeArtwork(trackId: trackId, cover: cover, headers: headers) else {
-        return
-      }
+      // 取图与容器解耦：拿不到容器照样拿到 jpeg。
+      guard let jpeg = Self.fetchArtworkData(cover: cover, headers: headers) else { return }
+      let relative = Self.storeArtwork(trackId: trackId, jpeg: jpeg)
+
       await MainActor.run {
         guard let activity = self.activity,
               activity.attributes.trackId == trackId else { return }
         var state = Self.lastState ?? Self.emptyState()
+        state.artworkData = jpeg
         state.artworkPath = relative
         Self.lastState = state
         Task { @MainActor in
@@ -543,16 +564,9 @@ final class CyShineLiveActivityBridge: NSObject {
     }
   }
 
-  /// 把封面落到 App Group 容器，返回相对路径。
-  /// 容器不可用（没开 App Groups 能力）时返回 nil —— 调用方会让 UI 回退到占位图。
-  private static func storeArtwork(
-    trackId: String,
-    cover: String,
-    headers: [String: String]
-  ) -> String? {
-    guard let base = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: appGroupIdentifier) else { return nil }
-
+  /// 取封面 → 缩放 → JPEG 压缩，返回可直接塞进 ContentState 的字节。
+  /// 完全不依赖 App Group：file:// / http(s) / 裸路径都支持。
+  private static func fetchArtworkData(cover: String, headers: [String: String]) -> Data? {
     let data: Data?
     if cover.hasPrefix("file://"), let url = URL(string: cover) {
       data = try? Data(contentsOf: url)
@@ -566,6 +580,14 @@ final class CyShineLiveActivityBridge: NSObject {
     guard let data, let image = UIImage(data: data) else { return nil }
     guard let scaled = downscale(image, maxPixels: maxArtworkPixels),
           let jpeg = scaled.jpegData(compressionQuality: 0.82) else { return nil }
+    return jpeg
+  }
+
+  /// 把封面 JPEG 写进 App Group 容器（供桌面小组件用），返回相对路径。
+  /// 容器不可用返回 nil —— 灵动岛不再依赖它，只是桌面小组件没封面。
+  private static func storeArtwork(trackId: String, jpeg: Data) -> String? {
+    guard let base = FileManager.default.containerURL(
+      forSecurityApplicationGroupIdentifier: appGroupIdentifier) else { return nil }
 
     let directory = base.appendingPathComponent(artworkDirectory, isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -587,8 +609,11 @@ final class CyShineLiveActivityBridge: NSObject {
     url: URL,
     headers: [String: String]
   ) -> Data? {
+    // 同时也被主线程上的锁屏卡路径（lockScreenArtwork）调用，semaphore 等待
+    // 会冻结 UI。用短超时：封面是小图，取不到就放弃（灵动岛有 file:// 兜底，
+    // 锁屏卡还有 audio_service 写的 artwork 兜底）。
     var request = URLRequest(url: url)
-    request.timeoutInterval = 12
+    request.timeoutInterval = 2.5
     for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
     let semaphore = DispatchSemaphore(value: 0)
     var output: Data?
@@ -596,7 +621,7 @@ final class CyShineLiveActivityBridge: NSObject {
       output = data
       semaphore.signal()
     }.resume()
-    _ = semaphore.wait(timeout: .now() + 15)
+    _ = semaphore.wait(timeout: .now() + 3)
     return output
   }
 
@@ -633,7 +658,7 @@ final class CyShineLiveActivityBridge: NSObject {
   private static func emptyState() -> CyShineActivityAttributes.ContentState {
     .init(title: "", artist: "", positionMs: 0, durationMs: 0,
           playing: false, updatedAt: Date().timeIntervalSince1970, artworkPath: nil,
-          lyricText: "")
+          artworkData: nil, lyricText: "")
   }
 
   private static func payload(
@@ -650,13 +675,15 @@ final class CyShineLiveActivityBridge: NSObject {
       durationMs: durationMs,
       playing: (args["playing"] as? Bool) ?? false,
       updatedAt: Date().timeIntervalSince1970,
-      // 同一首歌的后续更新沿用已经写好的封面路径
+      // 同一首歌的后续更新沿用已经写好的封面数据
       artworkPath: lastState?.artworkPath,
+      artworkData: lastState?.artworkData,
       lyricText: lyricText
     )
-    // 换歌时把上一首的封面路径丢掉，避免新歌短暂显示旧封面
+    // 换歌时把上一首的封面丢掉，避免新歌短暂显示旧封面
     if let previous = lastState, previous.title != title, !previous.title.isEmpty {
       state.artworkPath = nil
+      state.artworkData = nil
     }
     lastState = state
     return state

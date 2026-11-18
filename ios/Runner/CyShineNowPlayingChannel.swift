@@ -35,15 +35,49 @@ final class CyShineNowPlayingChannel: NSObject {
       let pos = (a["positionMs"] as? NSNumber)?.doubleValue ?? 0
       if dur > 0 { info[MPMediaItemPropertyPlaybackDuration] = dur / 1000 }
       info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = pos / 1000
-      if let cover = a["cover"] as? String, cover.hasPrefix("file://"),
-         let url = URL(string: cover),
-         let data = try? Data(contentsOf: url),
-         let image = UIImage(data: data) {
+      // 封面：file:// 缓存优先，http(s) 网络兜底，裸路径也支持。
+      // audio_service 写的 artwork 常不可靠，这里按 Dart 传入的 cover 自己补一份。
+      if let cover = a["cover"] as? String, !cover.isEmpty,
+         let image = Self.artworkImage(cover: cover, args: a) {
         info[MPMediaItemPropertyArtwork] =
           MPMediaItemArtwork(boundsSize: image.size) { _ in image }
       }
       center.nowPlayingInfo = info
       result(true)
     }
+  }
+
+  /// 按 cover 取封面图，支持 file:// / http(s) / 裸路径。
+  /// 网络下载带 12s 超时 + semaphore，避免卡住主线程上的媒体信息写入。
+  private static func artworkImage(cover: String, args: [String: Any]) -> UIImage? {
+    let headers = (args["headers"] as? [String: Any])?
+      .reduce(into: [String: String]()) { acc, e in acc[e.key] = String(describing: e.value) } ?? [:]
+
+    let data: Data?
+    if cover.hasPrefix("file://"), let url = URL(string: cover) {
+      data = try? Data(contentsOf: url)
+    } else if let url = URL(string: cover), url.scheme?.hasPrefix("http") == true {
+      data = downloadSynchronously(url: url, headers: headers)
+    } else {
+      data = try? Data(contentsOf: URL(fileURLWithPath: cover))
+    }
+    guard let data else { return nil }
+    return UIImage(data: data)
+  }
+
+  private static func downloadSynchronously(url: URL, headers: [String: String]) -> Data? {
+    // 这个方法在主线程的方法通道回调里调用，semaphore 等待会冻结 UI。
+    // 用短超时 + 专用 session，取不到就放弃（音频继续播，封面交给 audio_service）。
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 2
+    for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+    let semaphore = DispatchSemaphore(value: 0)
+    var output: Data?
+    URLSession.shared.dataTask(with: request) { data, _, _ in
+      output = data
+      semaphore.signal()
+    }.resume()
+    _ = semaphore.wait(timeout: .now() + 2.5)
+    return output
   }
 }

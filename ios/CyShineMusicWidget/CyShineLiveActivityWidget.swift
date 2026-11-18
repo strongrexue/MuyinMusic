@@ -134,8 +134,9 @@ private struct CyShineLockScreenView: View {
 
 // MARK: - 复用组件
 
-/// 封面。优先读 App Group 共享容器里的文件；拿不到（没开 App Groups 能力）
-/// 就回退到扩展内置的占位图 —— 这样灵动岛在两种情况下都好看。
+/// 封面。优先用活动载荷里直接传来的 JPEG 字节（artworkData），
+/// 不依赖 App Group；再回退共享容器文件（artworkPath，兼容旧逻辑），
+/// 最后回退到扩展内置占位图 —— 这样灵动岛在三种情况下都好看。
 @available(iOS 16.2, *)
 private struct CyShineArtwork: View {
     let context: ActivityViewContext<CyShineActivityAttributes>
@@ -143,7 +144,10 @@ private struct CyShineArtwork: View {
     let corner: CGFloat
 
     private var image: UIImage? {
-        CyShineSharedArtwork.load(relativePath: context.state.artworkPath)
+        if let data = context.state.artworkData, let img = UIImage(data: data) {
+            return img
+        }
+        return CyShineSharedArtwork.load(relativePath: context.state.artworkPath)
     }
 
     var body: some View {
