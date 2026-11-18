@@ -144,13 +144,21 @@ jobs:
 
       # WidgetKit 扩展（灵动岛实时活动 + 桌面小组件）已作为正经的 app-extension
       # target 接进 Runner.xcodeproj：由 patch_xcodeproj.py 注入 target 与
-      # "Embed App Extensions" phase，flutter build ios 通过 target 依赖自动
-      # 编译扩展并嵌入 Runner.app/PlugIns/。不再需要 swiftc 手工拼装。
+      # "Embed App Extensions" phase，flutter build ios 通过 target 依赖自动编译。
+      # 注意：--no-codesign 会全局禁签名，Xcode 虽编译出 appex，但 embed 阶段
+      # 因 extension 隐含 CodeSignOnCopy 而被跳过，不会自动 copy 到 PlugIns/。
+      # 这里把 Xcode 已编译好的正规 appex 显式嵌入（不回退 swiftc 手工拼装）。
       - name: Verify WidgetKit extension
         run: |
           set -euo pipefail
           APP_PATH=build/ios/iphoneos/Runner.app
           APPEX="$APP_PATH/PlugIns/CyShineMusicWidget.appex"
+          BUILT_APPEX=build/ios/iphoneos/CyShineMusicWidget.appex
+          if [ ! -d "$APPEX" ] && [ -d "$BUILT_APPEX" ]; then
+            echo "no-codesign 下 Embed App Extensions 未执行，手动嵌入 Xcode 编译的 appex"
+            mkdir -p "$APP_PATH/PlugIns"
+            cp -R "$BUILT_APPEX" "$APPEX"
+          fi
           test -d "$APPEX" || { echo "::error::$APPEX 不存在，灵动岛扩展没打进去"; exit 1; }
           APP_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
           APPEX_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APPEX/Info.plist")
