@@ -34,11 +34,27 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   /// 必须显式声明成 Int32：BassError.code 是 Int32，否则字面量会被推成 Int 而报类型错。
   private static let cancelledCode: Int32 = -1000
 
+  /// 原生→Dart 日志桥（与 ios/Runner/CyShineNativeLog.swift 同名通道），
+  /// 让 Release 包也能把原生打点落到 App 内「日志」页。仅用于诊断。
+  private static let nativeLogChannelName = "cy_shine_music/native_log"
+  private static var nativeLogChannel: FlutterMethodChannel?
+
+  private static func logNative(_ tag: String, _ message: String) {
+    guard let channel = nativeLogChannel else { return }
+    let payload: [String: Any] = ["tag": tag, "message": message]
+    if Thread.isMainThread {
+      channel.invokeMethod("log", arguments: payload)
+    } else {
+      DispatchQueue.main.async { channel.invokeMethod("log", arguments: payload) }
+    }
+  }
+
   // MARK: - 插件入口
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = BassPlayerPlugin()
     let messenger = registrar.messenger()
+    nativeLogChannel = FlutterMethodChannel(name: nativeLogChannelName, binaryMessenger: messenger)
     let methods = FlutterMethodChannel(name: methodChannelName, binaryMessenger: messenger)
     let events = FlutterEventChannel(name: eventChannelName, binaryMessenger: messenger)
     methods.setMethodCallHandler { [weak instance] call, result in
@@ -840,6 +856,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     let cacheFile = URL(fileURLWithPath: cachePath)
 
     let http: ProgressiveHttpSource
+    let tOpen = Int64(Date().timeIntervalSince1970 * 1000)
     do {
       http = try ProgressiveHttpSource(url: source, headers: headers, cacheFile: cacheFile) { [weak self] in
         guard let self = self else { return }
@@ -850,18 +867,25 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       }
       try http.open(timeoutMs: Int64(8_000))
     } catch {
+      let openMs = Int64(Date().timeIntervalSince1970 * 1000) - tOpen
+      BassPlayerPlugin.logNative("player-load", "progressive_open FAIL format=\(format) openMs=\(openMs) error=\(error)")
       AppLog.write("bass", "progressive open failed: \(error)")
       return 0
     }
+    let openMs = Int64(Date().timeIntervalSince1970 * 1000) - tOpen
 
     // 流创建阶段允许阻塞等待解码所需的数据（对齐 Android beginBlocking(10000)）。
     http.beginBlocking(budgetMs: 10_000)
     var procs = http.fileProcs
+    let tCreate = Int64(Date().timeIntervalSince1970 * 1000)
     let handle = withUnsafeMutablePointer(to: &procs) { ptr in
       createUserStream(format: format, flags: flags, procs: ptr,
                        user: http.userPointer, httpSource: http)
     }
-    _ = http.endBlocking()
+    let createMs = Int64(Date().timeIntervalSince1970 * 1000) - tCreate
+    let starved = http.endBlocking()
+    BassPlayerPlugin.logNative("player-load",
+      "progressive_open format=\(format) openMs=\(openMs) createMs=\(createMs) starved=\(starved) handle=\(handle)")
 
     if handle != 0 {
       // 强引用持有，生命周期跟随 stream；releaseStream 里 close。
