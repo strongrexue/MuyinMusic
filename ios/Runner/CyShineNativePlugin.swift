@@ -413,13 +413,10 @@ final class CyShineStorageBrowserChannel {
                                                   asCopy: false)
       picker.delegate = delegate
       picker.allowsMultipleSelection = false
-      // 从 App 自带 Documents 起 brows，减少用户在目录树里迷路；子目录同样可选。
-      if let docs = try? FileManager.default.url(for: .documentDirectory,
-                                                in: .userDomainMask,
-                                                appropriateFor: nil,
-                                                create: true) {
-        picker.directoryURL = docs
-      }
+      // 不设置 directoryURL：从「位置」根开始浏览，用户才能进入 iCloud Drive /
+      // 我的 iPhone / 其它 App 目录并选中真正的文件夹。锁定到本 App 的
+      // Documents 会把用户困在（往往没有子文件夹的）沙盒目录里，框选不到就
+      // 只能取消——这正是「点了没反应/总是变取消」的来源。
       root.present(picker, animated: true) {
         CyShineNativeLog.write("picker", "present_completed dir=\(picker.directoryURL?.path ?? "nil")")
       }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -542,6 +543,32 @@ class _SongsPageState extends ConsumerState<SongsPage> {
         .where((p) => p.isNotEmpty)
         .toSet();
     if (paths.isEmpty) return;
+    // Android 由系统 MediaStore 删除确认弹窗兜底；iOS/桌面 直接物理删除，
+    // 这里补应用内二次确认，避免误触即删。
+    if (!Platform.isAndroid) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => prism.AlertDialog(
+          title: entries.length == 1 ? '删除本地歌曲' : '删除本地歌曲',
+          actions: [
+            prism.TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            prism.FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('删除'),
+            ),
+          ],
+          child: Text(
+            entries.length == 1
+                ? '确定删除这首本地歌曲吗？文件会从设备中移除，且无法恢复。'
+                : '确定删除选中的 ${entries.length} 首本地歌曲吗？文件会从设备中移除，且无法恢复。',
+          ),
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
     _deletingFiles = true;
     final history = ref.read(downloadHistoryProvider);
     final historyNotifier = ref.read(downloadHistoryProvider.notifier);
