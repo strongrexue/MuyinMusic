@@ -146,24 +146,54 @@ class SafStorage {
     return await _channel.invokeMethod<int>('size', {'uri': location}) ?? 0;
   }
 
-  /// Files are removed only after native confirmation. Cancellation and partial
-  /// success are returned separately so callers retain undeleted records.
+  /// Android 走系统 MediaStore 删除确认；iOS/桌面 的本地音频是 App 沙盒内的
+  /// 普通文件（外部目录已在启动时持有 security scope），直接物理删除。
+  /// 取消与部分成功分开返回，调用方据此保留未删除记录。
   static Future<FileDeletionResult> deleteFiles(
     Iterable<String> locations,
   ) async {
-    if (!Platform.isAndroid) throw UnsupportedError('系统删除确认仅支持 Android');
-    final result = await _channel.invokeMapMethod<String, dynamic>(
-      'deleteFiles',
-      {'paths': locations.where((p) => p.isNotEmpty).toSet().toList()},
-    );
-    if (result == null) throw StateError('未收到删除结果');
-    final deletion = FileDeletionResult(
-      deletedPaths: Set<String>.from(
-        result['deletedPaths'] as List? ?? const [],
-      ),
-      failed: Map<String, String>.from(result['failed'] as Map? ?? const {}),
-      cancelled: result['cancelled'] == true,
-    );
+    final paths = locations.where((p) => p.isNotEmpty).toSet().toList();
+    if (paths.isEmpty) {
+      return const FileDeletionResult(
+        deletedPaths: <String>{},
+        failed: <String, String>{},
+        cancelled: false,
+      );
+    }
+    final FileDeletionResult deletion;
+    if (Platform.isAndroid) {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'deleteFiles',
+        {'paths': paths},
+      );
+      if (result == null) throw StateError('未收到删除结果');
+      deletion = FileDeletionResult(
+        deletedPaths: Set<String>.from(
+          result['deletedPaths'] as List? ?? const [],
+        ),
+        failed: Map<String, String>.from(result['failed'] as Map? ?? const {}),
+        cancelled: result['cancelled'] == true,
+      );
+    } else {
+      final deleted = <String>{};
+      final failed = <String, String>{};
+      for (final path in paths) {
+        try {
+          final file = File(path);
+          if (await file.exists()) {
+            await file.delete();
+          }
+          deleted.add(path);
+        } catch (e) {
+          failed[path] = e.toString();
+        }
+      }
+      deletion = FileDeletionResult(
+        deletedPaths: deleted,
+        failed: failed,
+        cancelled: false,
+      );
+    }
     await LocalAudioLibraryEvents.deleted(deletion.deletedPaths);
     return deletion;
   }
