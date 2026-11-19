@@ -421,7 +421,10 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       }
       completed = false
     }
-    if BASS_ChannelPlay(stream, 1) == 0 {
+    // restart=0：从暂停点续播（与 Android BASS_ChannelPlay(channel,false) 一致）。
+    // restart=1 会从头播，导致暂停后再点播放从开头开始。
+    // completed 分支上方已 seek 到 0，此处 restart=0 从 0 续播等价重播，无冲突。
+    if BASS_ChannelPlay(stream, 0) == 0 {
       throw BassError.fromLastError(operation: "play")
     }
     refreshPlaybackState()
@@ -711,6 +714,20 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   }
 
   private func handleStreamEnded() {
+    // 网络流下载中断也会触发 END，但曲目并未真正播完。
+    // 与 Android legacyStreamEndedEarly 一致：提前结束报 error，触发原地重载续播，
+    // 而不是判 completed 切下一首。容差 5s 与 Android TRUNCATED_END_TOLERANCE_MS 对齐。
+    if remoteSource,
+       let duration = durationMs,
+       readPositionMs() < duration - 5_000 {
+      playing = false
+      processingState = .ready
+      emitError(code: Int32(BASS_ERROR_ENDED),
+                message: "network stream ended before the track finished",
+                operation: "stream-ended")
+      stopTicking()
+      return
+    }
     processingState = .completed
     playing = false
     completed = true
