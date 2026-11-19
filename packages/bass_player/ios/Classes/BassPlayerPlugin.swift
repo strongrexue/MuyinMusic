@@ -60,6 +60,9 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private var initialized = false
   private var stream: HSTREAM = 0
   private var remoteSource = false
+  /// HTTP Range 随机访问数据源（网络流）。强引用，生命周期跟随 stream：
+  /// BASS 的 FILEPROCS 回调以 user 指针引用它，stream 存活期间不能被释放。
+  private var httpSource: ProgressiveHttpSource?
   private var playing = false
   private var completed = false
   private var processingState: PlaybackState = .idle
@@ -69,6 +72,10 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private var pendingSeekMs: Int?
   private var pendingSeekPlay = false
   private var pendingSeekOriginMs = 0
+  /// 待落位 seek 的放弃截止时间（epoch ms）。超时后回退到 origin 并恢复播放，
+  /// 杜绝"进度显示对但永久卡死"。对齐 Android SEEK_ATTEMPT_BUDGET_MS=2000。
+  private var pendingSeekDeadline: Double = 0
+  private static let seekAttemptBudgetMs: Double = 2_000
   private var channelVolume: Float = 1.0
   private var bassVersion = "unknown"
   private var fxVersion = "unknown"
@@ -361,10 +368,16 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     var handle: HSTREAM = 0
     do {
       switch scheme {
-      case "http", "https", "ftp":
-        handle = createNetworkStream(format: format,
-                                     request: BassPlayerPlugin.urlWithHeaders(source, headers),
-                                     flags: flags)
+      case "http", "https":
+        // 仅 http/https 走 HTTP Range 随机访问数据源（BASS_StreamCreateURL 不支持跳转）。
+        handle = createNetworkStream(source: source, headers: headers,
+                                     format: format, flags: flags)
+      case "ftp":
+        // FTP 仍走 BASS 内置的顺序下载（URLSession 不支持 FTP）。
+        handle = createLegacyNetworkStream(
+          format: format,
+          request: BassPlayerPlugin.urlWithHeaders(source, headers),
+          flags: flags)
       case "file":
         let path = URL(string: source)?.path ?? source
         handle = createFileStream(format: format, path: path, flags: flags)
@@ -383,6 +396,12 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
     if generation != loadGeneration {
       if handle != 0 { _ = BASS_StreamFree(handle) }
+      // 自定义源在 createProgressiveStream 里已强持有，取消时须一并关闭，避免下载线程泄漏。
+      if let source = httpSource {
+        source.cancel()
+        source.close()
+        httpSource = nil
+      }
       throw BassError(code: BassPlayerPlugin.cancelledCode, operation: "load",
                       message: "load cancelled")
     }
@@ -418,13 +437,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     _ = try initializeEngine()
     if stream == 0 { throw BassError(code: Int32(BASS_ERROR_HANDLE), operation: "play",
                                     message: "没有已加载的音频流") }
-    // 有待落位的 seek（网络流目标尚未缓冲）：先不实际起播，等落位后再恢复，
-    // 避免先在 0 起播、随后 seek 才到造成的"从头播一下再跳"。
+    // pending seek 时仍须真正起播（不能像旧版那样永久 gate 导致点播放无反应）。
+    // BASS 在自定义源数据不足时会自行 stall，落位由 ticker / downloadSync 完成。
     if pendingSeekMs != nil {
       pendingSeekPlay = true
+      pendingSeekDeadline = Date().timeIntervalSince1970 * 1000
+        + BassPlayerPlugin.seekAttemptBudgetMs
       startTicking()
-      emitSnapshot()
-      return snapshot()
+      // 不 return：继续往下走 BASS_ChannelPlay，保证点播放立即有声。
     }
     if completed {
       // 播完后再点播放：回到起点重播，与 Android 行为一致。
@@ -482,6 +502,13 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     }
     let seconds = max(0.0, Double(positionMs) / 1000.0)
     let position = BASS_ChannelSeconds2Bytes(stream, seconds)
+    // 自定义 Range 源：先把目标字节设为下载优先区，再落位；
+    // FILESEEKPROC 会直接改 readPosition，BASS 数据不足时自行 stall。
+    if let http = httpSource {
+      http.prioritize(Int64(clamping: position))
+      pendingSeekDeadline = Date().timeIntervalSince1970 * 1000
+        + BassPlayerPlugin.seekAttemptBudgetMs
+    }
     if BASS_ChannelSetPosition(stream, position, UInt32(BASS_POS_BYTE)) == 0 {
       if remoteSource {
         // 目标未缓冲：静默缓存而非抛错（抛出会被 Dart 当 non-fatal 吞掉，位置停在 0）。
@@ -498,6 +525,10 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       }
       throw BassError.fromLastError(operation: "seek")
     }
+    // 落位立即成功：FILESEEKPROC 已把 readPosition 移到目标，清掉临时优先区与旧 pending。
+    pendingSeekMs = nil
+    pendingSeekDeadline = 0
+    httpSource?.prioritize(nil)
     // seek 后滤波器里残留的历史会造成爆音，清掉。
     resetEqualizerState()
     completed = false
@@ -506,17 +537,63 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     return snapshot()
   }
 
-  /// 尝试把缓存的 seek 落位；目标仍未缓冲时保留 pending 待下次重试。
+  /// 尝试把缓存的 seek 落位；目标仍未缓冲时保留 pending 待下次重试，
+  /// 超过 SEEK_ATTEMPT_BUDGET_MS 则放弃并回退，绝不永久卡死。
   private func attemptPendingSeek() {
     guard let target = pendingSeekMs, stream != 0 else { return }
     let bytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, target)) / 1000.0)
-    guard BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0 else {
-      return  // 目标还没缓冲出来，保留 pending 待下次重试
+
+    // 自定义 Range 源：每次重试都优先下载目标区，并检查是否已缓冲。
+    if let http = httpSource {
+      http.prioritize(Int64(clamping: bytes))
     }
+
+    if BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0 {
+      completePendingSeek()
+      return
+    }
+
+    // 目标还没缓冲出来：超时则回退到原位置并恢复播放，避免永久 gate。
+    let now = Date().timeIntervalSince1970 * 1000
+    if pendingSeekDeadline <= 0 {
+      pendingSeekDeadline = now + BassPlayerPlugin.seekAttemptBudgetMs
+    } else if now > pendingSeekDeadline {
+      abandonPendingSeek()
+    }
+  }
+
+  /// 落位成功：清 pending、清滤波历史、按原始意图恢复播放。
+  private func completePendingSeek() {
     pendingSeekMs = nil
+    pendingSeekDeadline = 0
+    httpSource?.prioritize(nil)
     resetEqualizerState()
     if pendingSeekPlay {
-      _ = BASS_ChannelPlay(stream, 0)
+      pendingSeekPlay = false
+      if BASS_ChannelPlay(stream, 0) == 0 {
+        AppLog.write("bass", "resume after seek failed: \(BassError.fromLastError(operation: "resume").message)")
+      }
+    }
+    refreshPlaybackState()
+    emitSnapshot()
+  }
+
+  /// seek 预算耗尽：回退到发起 seek 前的位置并恢复播放，绝不遗留 pending。
+  private func abandonPendingSeek() {
+    pendingSeekMs = nil
+    pendingSeekDeadline = 0
+    httpSource?.prioritize(nil)
+    let origin = pendingSeekOriginMs
+    pendingSeekOriginMs = 0
+    let bytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, origin)) / 1000.0)
+    _ = BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE))
+    // 只有原本就在播放才恢复；暂停态 seek 超时后不应擅自起播（对齐 completePendingSeek）。
+    let shouldResume = pendingSeekPlay
+    pendingSeekPlay = false
+    if shouldResume {
+      if BASS_ChannelPlay(stream, 0) == 0 {
+        AppLog.write("bass", "resume after seek timeout failed: \(BassError.fromLastError(operation: "resume").message)")
+      }
     }
     refreshPlaybackState()
     emitSnapshot()
@@ -640,8 +717,99 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
   // MARK: - 流创建
 
-  private func createNetworkStream(format: String, request: String,
-                                   flags: UInt32) -> HSTREAM {
+  private func createNetworkStream(source: String, headers: [String: String],
+                                   format: String, flags: UInt32) -> HSTREAM {
+    // 1) HTTP Range 随机访问数据源：支持拖动进度条跳到未缓冲位置。
+    let progressive = createProgressiveStream(source: source, headers: headers,
+                                              format: format, flags: flags)
+    if progressive != 0 { return progressive }
+    // 2) fallback：原 BASS_StreamCreateURL 顺序下载（不支持 Range 的源仍能播）。
+    return createLegacyNetworkStream(format: format,
+                                     request: BassPlayerPlugin.urlWithHeaders(source, headers),
+                                     flags: flags)
+  }
+
+  /// 用自定义 ProgressiveHttpSource + BASS_StreamCreateFileUser 建流。
+  /// 返回 0 表示失败（由调用方回退到 URL 版）。
+  private func createProgressiveStream(source: String, headers: [String: String],
+                                       format: String, flags: UInt32) -> HSTREAM {
+    let cacheDir = (NSTemporaryDirectory() as NSString).appendingPathComponent("bass-stream")
+    try? FileManager.default.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
+    let cachePath = (cacheDir as NSString).appendingPathComponent("\(UUID().uuidString).cache")
+    let cacheFile = URL(fileURLWithPath: cachePath)
+
+    let http: ProgressiveHttpSource
+    do {
+      http = try ProgressiveHttpSource(url: source, headers: headers, cacheFile: cacheFile) { [weak self] in
+        guard let self = self else { return }
+        self.engineQueue.async {
+          self.refreshPlaybackStateQuietly()
+          self.emitSnapshot()
+        }
+      }
+      try http.open(timeoutMs: Int64(8_000))
+    } catch {
+      AppLog.write("bass", "progressive open failed: \(error)")
+      return 0
+    }
+
+    // 流创建阶段允许阻塞等待解码所需的数据（对齐 Android beginBlocking(10000)）。
+    http.beginBlocking(budgetMs: 10_000)
+    var procs = http.fileProcs
+    let handle = withUnsafeMutablePointer(to: &procs) { ptr in
+      createUserStream(format: format, flags: flags, procs: ptr,
+                       user: http.userPointer, httpSource: http)
+    }
+    _ = http.endBlocking()
+
+    if handle != 0 {
+      // 强引用持有，生命周期跟随 stream；releaseStream 里 close。
+      self.httpSource = http
+      return handle
+    }
+    http.close()
+    return 0
+  }
+
+  private func createUserStream(format: String, flags: UInt32,
+                                procs: UnsafeMutablePointer<BASS_FILEPROCS>,
+                                user: UnsafeMutableRawPointer,
+                                httpSource: ProgressiveHttpSource) -> HSTREAM {
+    let system = UInt32(STREAMFILE_NOBUFFER)
+    func generic() -> HSTREAM {
+      httpSource.rewind()
+      return BASS_StreamCreateFileUser(system, flags, procs, user)
+    }
+    func specialized(_ make: (UnsafeMutablePointer<BASS_FILEPROCS>, UnsafeMutableRawPointer) -> HSTREAM) -> HSTREAM {
+      httpSource.rewind()
+      let h = make(procs, user)
+      return h != 0 ? h : generic()
+    }
+    switch format {
+    case "flac":
+      return specialized { BASS_FLAC_StreamCreateFileUser(system, flags, $0, $1) }
+    case "ape":
+      return specialized { BASS_APE_StreamCreateFileUser(system, flags, $0, $1) }
+    case "wv":
+      return specialized { BASS_WV_StreamCreateFileUser(system, flags, $0, $1) }
+    case "opus":
+      return specialized { BASS_OPUS_StreamCreateFileUser(system, flags, $0, $1) }
+    case "dsd":
+      // DSD 附加库比其它库多一个 freq 参数（0 = 保持源采样率）。
+      return specialized { BASS_DSD_StreamCreateFileUser(system, flags, $0, $1, 0) }
+    case "lossless":
+      let g = generic()
+      if g != 0 { return g }
+      return specialized { BASS_FLAC_StreamCreateFileUser(system, flags, $0, $1) }
+    default:
+      // generic / m4a / alac：Apple 平台 BASS 核心走 CoreAudio 解码。
+      let g = generic()
+      if g != 0 { return g }
+      return specialized { BASS_FLAC_StreamCreateFileUser(system, flags, $0, $1) }
+    }
+  }
+
+  private func createLegacyNetworkStream(format: String, request: String, flags: UInt32) -> HSTREAM {
     func core() -> HSTREAM {
       request.withCString { BASS_StreamCreateURL($0, 0, flags, nil, nil) }
     }
@@ -660,17 +828,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     case "opus":
       return specialized { BASS_OPUS_StreamCreateURL($0, 0, flags, nil, nil) }
     case "dsd":
-      // BASS_DSD_* 比其它附加库多一个 freq 参数（0 = 保持源采样率）。
       return specialized { BASS_DSD_StreamCreateURL($0, 0, flags, nil, nil, 0) }
     case "m4a", "alac":
-      // Apple 平台 BASS 核心直接走 CoreAudio 解 ALAC/AAC。
       return core()
     case "lossless":
       let generic = core()
       if generic != 0 { return generic }
       return specialized { BASS_FLAC_StreamCreateURL($0, 0, flags, nil, nil) }
     default:
-      // generic / null / 未知：先试核心，核心不认再按 FLAC 猜一次。
       let generic = core()
       if generic != 0 { return generic }
       return specialized { BASS_FLAC_StreamCreateURL($0, 0, flags, nil, nil) }
@@ -868,6 +1033,18 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     guard let duration = durationMs else { return positionMs }
     if !remoteSource { return duration }
 
+    // 自定义 Range 源：NOBUFFER 下 BASS_StreamGetFilePosition 不可靠，
+    // 用数据源自身已缓存字节 / 总字节估算已缓冲时间点。
+    if let http = httpSource {
+      let total = http.totalBytes
+      let downloaded = http.downloadedBytes
+      if total > 0, downloaded >= 0 {
+        let mapped = Int(Double(duration) * Double(downloaded) / Double(total))
+        return min(max(mapped, positionMs), duration)
+      }
+      return positionMs
+    }
+
     let fileEnd = BASS_StreamGetFilePosition(stream, UInt32(BASS_FILEPOS_END))
     let downloaded = BASS_StreamGetFilePosition(stream, UInt32(BASS_FILEPOS_DOWNLOAD))
     if fileEnd > 0, fileEnd != UInt64.max, downloaded != UInt64.max {
@@ -928,6 +1105,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
   private func releaseStream() {
     pendingSeekMs = nil
+    pendingSeekOriginMs = 0
+    pendingSeekDeadline = 0
     pendingSeekPlay = false
     stopTicking()
     detachEqualizer()
@@ -944,6 +1123,12 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     deviceFailureSync = 0
     stream = 0
     remoteSource = false
+    // stream 已释放，BASS 不会再回调 user 指针；此时安全关闭并释放数据源。
+    if let source = httpSource {
+      source.cancel()
+      source.close()
+      httpSource = nil
+    }
   }
 
   private func disposeEngine() {
