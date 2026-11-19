@@ -446,14 +446,26 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     if stream == 0 { throw BassError(code: Int32(BASS_ERROR_HANDLE), operation: "play",
                                     message: "没有已加载的音频流") }
     if pendingSeekMs != nil {
+      // play 的意图是起播：先置位，落位成功后 completePendingSeek 才会恢复播放。
       pendingSeekPlay = true
+      // 2s 放弃窗口从用户点播放算起（保持原有语义）。
       pendingSeekDeadline = Date().timeIntervalSince1970 * 1000
         + BassPlayerPlugin.seekAttemptBudgetMs
+      // 先尝试一次落位：目标已缓冲则直接由 completePendingSeek 起播（load 不接收
+      // initialPosition，续播落位只能在播放入口/落位回调里完成，对齐 Android 的 ticker 尝试）。
+      attemptPendingSeek()
+      if pendingSeekMs == nil {
+        // 落位成功或已放弃：completePendingSeek / abandonPendingSeek 已完成 refresh + emit。
+        return snapshot()
+      }
+      // 仍未落位：保持 2s 兜底，落位交给 100ms ticker。
       startTicking()
       refreshPlaybackState()   // processingState = .buffering，界面转圈但不启动解码
       emitSnapshot()
       return snapshot()        // 对齐 Android :503：等落位成功后由 completePendingSeek 起播
     }
+    // 下载处于重试退避中时立即唤醒，避免起播被旧连接拖住（对齐 Android :506）。
+    httpSource?.retryNow(reconnect: false)
     if completed {
       // 播完后再点播放：回到起点重播，与 Android 行为一致。
       let position = BASS_ChannelSeconds2Bytes(stream, 0.0)
@@ -510,6 +522,24 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     }
     let seconds = max(0.0, Double(positionMs) / 1000.0)
     let position = BASS_ChannelSeconds2Bytes(stream, seconds)
+    // 远程 Range 源：统一走 pending + 64KB 门控，避免"碰运气"落位造成假 END。
+    // NOBUFFER 下 fileSeekProc 对未缓冲偏移也返回成功，SetPosition 的返回值不能作为落位成功依据，
+    // 必须交由 attemptPendingSeek 的 isBuffered 门控 + beginBlocking + moved 确认。
+    if remoteSource, let http = httpSource {
+      if pendingSeekMs == nil { pendingSeekOriginMs = readPositionMs() }
+      pendingSeekMs = positionMs
+      pendingSeekPlay = playing
+      http.prioritize(Int64(clamping: position))
+      pendingSeekDeadline = Date().timeIntervalSince1970 * 1000
+        + BassPlayerPlugin.seekAttemptBudgetMs
+      let active = BASS_ChannelIsActive(stream)
+      if active == UInt32(BASS_ACTIVE_PLAYING) || active == UInt32(BASS_ACTIVE_STALLED) {
+        _ = BASS_ChannelPause(stream)
+      }
+      attemptPendingSeek()
+      if pendingSeekMs != nil { startTicking(); refreshPlaybackState(); emitSnapshot() }
+      return snapshot()
+    }
     // 自定义 Range 源：先把目标字节设为下载优先区，再落位；
     // FILESEEKPROC 会直接改 readPosition，BASS 数据不足时自行 stall。
     if let http = httpSource {
@@ -555,6 +585,20 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       return
     }
     http.prioritize(Int64(clamping: bytes))
+    // 目标附近 64KB 还没下载时不进 2s 阻塞，直接等下次 ticker（对齐 Android :696
+    // 的 SEEK_PROBE_BYTES=64KB 预门控），消除每 100ms 无条件阻塞 2s 拖住 UI。
+    // 用 clamp 后的优先位置判缓冲（prioritize 内部已 clamp 到 [0,length-1]）。
+    // 仍未 buffered 时也保留 2s 放弃回退，避免不可能到达的位置永久卡在 buffering。
+    let probe = http.priorityPosition ?? Int64(clamping: bytes)
+    if !http.isBuffered(probe, 64 * 1024) {
+      let now = Date().timeIntervalSince1970 * 1000
+      if pendingSeekDeadline <= 0 {
+        pendingSeekDeadline = now + BassPlayerPlugin.seekAttemptBudgetMs
+      } else if now > pendingSeekDeadline {
+        abandonPendingSeek()
+      }
+      return
+    }
     // 关键：让同步预读在 FILEPROCS 里等数据到齐，避免"碰运气"落位（对齐 Android :637-640）
     http.beginBlocking(budgetMs: Int64(BassPlayerPlugin.seekAttemptBudgetMs))
     let moved = BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0
@@ -576,7 +620,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     pendingSeekMs = nil
     pendingSeekDeadline = 0
     httpSource?.prioritize(nil)
-    httpSource?.holdUntilBuffered(startBufferBytes)   // 对齐 Android :653，消除起播瞬间卡顿
+    // 落位后立即起播：不再 holdUntilBuffered 等攒满 2 秒，改为边播边缓冲（消除转圈）。
+    // 5s resume 阈值由 configureProgressiveBuffering 的 setResumeBytes 保留，不受影响。
     resetEqualizerState()
     if pendingSeekPlay {
       pendingSeekPlay = false
@@ -588,23 +633,41 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     emitSnapshot()
   }
 
-  /// seek 预算耗尽：回退到发起 seek 前的位置并恢复播放，绝不遗留 pending。
+  /// seek 预算耗尽：清掉 pending，落位到 seek 目标本身（用户上次位置/拖动目标），
+  /// 绝不回退 origin（新流 load 后 origin 常为 0）也绝不从 BASS 实际位置（可能仍是 0）播，
+  /// 从根源上杜绝"续播丢位置"。目标已缓冲则 SetPosition 到目标：shouldResume 时起播，
+  /// 否则停在目标位置由 Dart 后续 play() 以 restart=0 续播；目标未缓冲则报错让上层 fallback。
   private func abandonPendingSeek() {
+    let shouldResume = pendingSeekPlay
+    let targetMs = pendingSeekMs
     pendingSeekMs = nil
     pendingSeekDeadline = 0
-    httpSource?.prioritize(nil)
-    let origin = pendingSeekOriginMs
     pendingSeekOriginMs = 0
-    let bytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, origin)) / 1000.0)
-    _ = BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE))
-    // 只有原本就在播放才恢复；暂停态 seek 超时后不应擅自起播（对齐 completePendingSeek）。
-    let shouldResume = pendingSeekPlay
+    httpSource?.prioritize(nil)
     pendingSeekPlay = false
-    if shouldResume {
-      if BASS_ChannelPlay(stream, 0) == 0 {
-        AppLog.write("bass", "resume after seek timeout failed: \(BassError.fromLastError(operation: "resume").message)")
+    guard stream != 0 else {
+      refreshPlaybackState()
+      emitSnapshot()
+      return
+    }
+    if let targetMs {
+      let targetBytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, targetMs)) / 1000.0)
+      var canLand = targetBytes != UInt64.max
+      if canLand, let http = httpSource {
+        canLand = http.isBuffered(Int64(clamping: targetBytes), BassPlayerPlugin.minBufferBytes)
+      }
+      if canLand {
+        _ = BASS_ChannelSetPosition(stream, targetBytes, UInt32(BASS_POS_BYTE))
+        if shouldResume, BASS_ChannelPlay(stream, 0) == 0 {
+          AppLog.write("bass", "resume at target after seek abandon failed: \(BassError.fromLastError(operation: "resume").message)")
+        }
+        refreshPlaybackState()
+        emitSnapshot()
+        return
       }
     }
+    emitError(code: Int32(BASS_ERROR_POSITION), message: "seek timeout: target not buffered",
+              operation: "seek-timeout")
     refreshPlaybackState()
     emitSnapshot()
   }
@@ -742,9 +805,19 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   /// 按码率推算起播/续播缓冲字节数（对齐 Android configureProgressiveBuffering）。
   private func configureProgressiveBuffering(_ source: ProgressiveHttpSource) {
     let total = source.totalBytes
+    // 码率口径用实际音频字节（FILEPOS_END - FILEPOS_START），不含头部 tag，
+    // 替代原本的 totalBytes（对齐 Android audioDataBytes :707-716）。
+    let endPos = BASS_StreamGetFilePosition(stream, UInt32(BASS_FILEPOS_END))
+    let startPos = BASS_StreamGetFilePosition(stream, UInt32(BASS_FILEPOS_START))
+    let audioBytes: Int64
+    if endPos > 0, endPos != UInt64.max, startPos != UInt64.max, endPos >= startPos {
+      audioBytes = Int64(clamping: endPos - startPos)
+    } else {
+      audioBytes = total
+    }
     let bytesPerSecond: Double
-    if let duration = durationMs, duration > 0, total > 0 {
-      bytesPerSecond = Double(total) * 1000.0 / Double(duration)
+    if let duration = durationMs, duration > 0, audioBytes > 0 {
+      bytesPerSecond = Double(audioBytes) * 1000.0 / Double(duration)
     } else {
       bytesPerSecond = BassPlayerPlugin.fallbackBytesPerSecond
     }
@@ -753,7 +826,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     let resume = min(max(Int64(bytesPerSecond * BassPlayerPlugin.resumeBufferSeconds),
                          BassPlayerPlugin.minBufferBytes), BassPlayerPlugin.maxBufferBytes)
     source.setResumeBytes(resume)
-    source.holdUntilBuffered(startBufferBytes)
+    source.holdUntilBuffered(BassPlayerPlugin.minBufferBytes)
   }
 
   /// 用自定义 ProgressiveHttpSource + BASS_StreamCreateFileUser 建流。
@@ -949,7 +1022,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
           guard let user else { return }
           let plugin = Unmanaged<BassPlayerPlugin>.fromOpaque(user).takeUnretainedValue()
           plugin.engineQueue.async {
-            plugin.attemptPendingSeek()
+            // 对齐 Android downloadSync（:831-837）只 emitSnapshot；落位靠 ticker 的 attempt。
             plugin.emitSnapshot()
           }
         }, user)

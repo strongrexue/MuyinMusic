@@ -271,9 +271,9 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 - (void) updateNowPlayingInfo {
     BOOL updated = NO;
     if (mediaItem) {
-        updated |= [self updateNowPlayingField:MPMediaItemPropertyTitle value:mediaItem[@"title"]];
+        // title/artist 由 CyShineNowPlayingChannel 通道写入（title=歌名，artist=歌词行）
+        // 此处不再写，避免覆盖锁屏卡的歌词滚动语义
         updated |= [self updateNowPlayingField:MPMediaItemPropertyAlbumTitle value:mediaItem[@"album"]];
-        updated |= [self updateNowPlayingField:MPMediaItemPropertyArtist value:mediaItem[@"artist"]];
         NSNumber *duration = mediaItem[@"duration"];
         if (duration == (id)[NSNull null]) duration = @(0);
         updated |= [self updateNowPlayingField:MPMediaItemPropertyPlaybackDuration value:([NSNumber numberWithDouble: ([duration doubleValue] / 1000)])];
@@ -299,7 +299,15 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     }
     if (updated) {
         //NSLog(@"### updating nowPlayingInfo");
-        center.nowPlayingInfo = nowPlayingInfo;
+        // 合并写入：保留 CyShineNowPlayingChannel 已写的 title/artist，
+        // 只覆盖本通道维护的 album/duration/artwork/rate/position 等字段
+        NSMutableDictionary *merged = [NSMutableDictionary dictionary];
+        NSDictionary *current = center.nowPlayingInfo;
+        if (current) {
+            [merged addEntriesFromDictionary:current];
+        }
+        [merged addEntriesFromDictionary:nowPlayingInfo];
+        center.nowPlayingInfo = merged;
     }
   
     // TODO: List of all unused "nowPlayingInfo" keys, we might want to use these at some point:
