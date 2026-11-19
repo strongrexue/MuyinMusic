@@ -370,6 +370,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     // 用 `?? ""` 归一成非可选再 switch：避免依赖 Swift 对 Optional 的模式匹配推断。
     let scheme = URL(string: source)?.scheme?.lowercased() ?? ""
     let format = BassPlayerPlugin.normalizedFormat(formatHint, source: source)
+    AppLog.write("bass", "load format=\(format) hint=\(formatHint ?? "-") ext=\(URL(string: source)?.pathExtension.lowercased() ?? "")")
     let isRemote = ["http", "https", "ftp"].contains(scheme)
 
     var handle: HSTREAM = 0
@@ -898,8 +899,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       // DSD 附加库比其它库多一个 freq 参数（0 = 保持源采样率）。
       return specialized { BASS_DSD_StreamCreateFileUser(system, flags, $0, $1, 0) }
     case "lossless":
-      let g = generic()
-      if g != 0 { return g }
+      // 与 Android decodersFor(:1382) 一致：FLAC 插件优先，失败再回落 generic。
+      // （specialized 内部已实现 FLAC 失败回落 generic，不会回归。）
       return specialized { BASS_FLAC_StreamCreateFileUser(system, flags, $0, $1) }
     default:
       // generic / m4a / alac：Apple 平台 BASS 核心走 CoreAudio 解码。
@@ -1035,7 +1036,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     // 而不是判 completed 切下一首。容差 5s 与 Android TRUNCATED_END_TOLERANCE_MS 对齐。
     if remoteSource,
        let duration = durationMs,
-       readPositionMs() < duration - 5_000 {
+       readPositionMs() < duration - 5_000,
+       httpSource?.isComplete != true {
       playing = false
       processingState = .ready
       emitError(code: Int32(BASS_ERROR_ENDED),
@@ -1283,6 +1285,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     let trimmed = (hint ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     let path = URL(string: source)?.path ?? source
     let ext = (path as NSString).pathExtension.lowercased()
+
+    // 与 Android normalizedFormat(:1291) 一致：扩展名优先。高音质(master/hires/
+    // flac24bit)的 URL 通常是 .flac，必须让它们走 FLAC 插件，而不是被 hint 推去
+    // generic/CoreAudio；否则通用解码经稀疏 Range 源会提前判 END(stream-ended 45)，
+    // 触发 Dart 逐级降级直到 flac。
+    if ["flac", "ape", "alac", "m4a"].contains(ext) {
+      return ext
+    }
 
     if !trimmed.isEmpty {
       switch trimmed {
