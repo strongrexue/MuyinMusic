@@ -179,6 +179,19 @@ final class ProgressiveHttpSource: NSObject {
   private static let tooManyRequests = 429
   private static let userAgent = "BASS/2.4"
 
+  // 跨歌复用同一个 URLSession：保留连接/DNS/TLS 池（对齐 Android HttpURLConnection
+  // keep-alive），避免每首歌重新握手导致起播秒级。实例 own 的 task 在 close() 里单独取消。
+  private static let sharedSession: URLSession = {
+    let config = URLSessionConfiguration.ephemeral
+    config.urlCache = nil
+    config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    config.timeoutIntervalForRequest = ProgressiveHttpSource.readTimeoutSeconds
+    config.timeoutIntervalForResource = 0   // 大文件不设总时长上限
+    config.httpMaximumConnectionsPerHost = 4
+    config.urlCredentialStorage = nil       // 过期链接不做凭据复用
+    return URLSession(configuration: config, delegate: nil, delegateQueue: nil)
+  }()
+
   // MARK: 单一条件锁（等价 Android ReentrantLock + Condition）
   private let cond = NSCondition()
 
@@ -253,14 +266,7 @@ final class ProgressiveHttpSource: NSObject {
     self.cacheFile = cacheFile
     self.onStateChanged = onStateChanged
 
-    let config = URLSessionConfiguration.ephemeral
-    config.urlCache = nil
-    config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    config.timeoutIntervalForRequest = ProgressiveHttpSource.readTimeoutSeconds
-    config.timeoutIntervalForResource = 0   // 大文件不设总时长上限
-    config.httpMaximumConnectionsPerHost = 4
-    config.urlCredentialStorage = nil       // 过期链接不做凭据复用
-    self.session = URLSession(configuration: config, delegate: nil, delegateQueue: nil)
+    self.session = ProgressiveHttpSource.sharedSession
 
     FileManager.default.createFile(atPath: cacheFile.path, contents: nil)
     self.writeHandle = try FileHandle(forWritingTo: cacheFile)
@@ -405,7 +411,7 @@ final class ProgressiveHttpSource: NSObject {
     cond.broadcast()
     cond.unlock()
     active?.cancel()
-    session.invalidateAndCancel()
+    // 共享 session 不能 invalidate（会波及其它歌曲）；本实例的 task 已在上面取消。
     try? writeHandle?.close()
     try? readHandle?.close()
     writeHandle = nil
@@ -630,9 +636,9 @@ final class ProgressiveHttpSource: NSObject {
       requestedStart: start,
       requestedEndInclusive: endInclusive,
       isMain: main,
-      shouldStop: { [weak self] in
+      shouldStop: { [weak self] pos in
         guard let self = self else { return true }
-        return self.shouldLeaveMain(start)
+        return self.shouldLeaveMain(pos)
       },
       onChunk: { [weak self] offset, data in
         guard let self = self, !data.isEmpty else { return }
@@ -756,7 +762,7 @@ final class ProgressiveHttpSource: NSObject {
     let requestedStart: Int64
     let requestedEndInclusive: Int64?
     let isMain: Bool
-    let shouldStop: () -> Bool
+    let shouldStop: (Int64) -> Bool
     let onChunk: (Int64, Data) -> Void
     let onLength: (Int64, Bool) -> SourceError?
     let onRangeUnsupported: () -> Void
@@ -774,7 +780,7 @@ final class ProgressiveHttpSource: NSObject {
     weak var task: URLSessionDataTask?
 
     init(requestedStart: Int64, requestedEndInclusive: Int64?, isMain: Bool,
-         shouldStop: @escaping () -> Bool,
+         shouldStop: @escaping (Int64) -> Bool,
          onChunk: @escaping (Int64, Data) -> Void,
          onLength: @escaping (Int64, Bool) -> SourceError?,
          onRangeUnsupported: @escaping () -> Void,
@@ -883,7 +889,7 @@ final class ProgressiveHttpSource: NSObject {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
       guard gotResponse, fatalError == nil, retryFailure == nil else { return }
-      if shouldStop() {
+      if shouldStop(bodyStart + written) {
         stopped = true
         task?.cancel()
         return

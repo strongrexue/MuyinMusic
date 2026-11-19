@@ -827,7 +827,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     let resume = min(max(Int64(bytesPerSecond * BassPlayerPlugin.resumeBufferSeconds),
                          BassPlayerPlugin.minBufferBytes), BassPlayerPlugin.maxBufferBytes)
     source.setResumeBytes(resume)
-    source.holdUntilBuffered(BassPlayerPlugin.minBufferBytes)
+    source.holdUntilBuffered(startBufferBytes)
   }
 
   /// 用自定义 ProgressiveHttpSource + BASS_StreamCreateFileUser 建流。
