@@ -76,6 +76,13 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   /// 杜绝"进度显示对但永久卡死"。对齐 Android SEEK_ATTEMPT_BUDGET_MS=2000。
   private var pendingSeekDeadline: Double = 0
   private static let seekAttemptBudgetMs: Double = 2_000
+  /// 按码率配置网络流缓冲（对齐 Android 的 START/RESUME_BUFFER_SECONDS 与 MIN/MAX）。
+  private static let startBufferSeconds = 2.0
+  private static let resumeBufferSeconds = 5.0
+  private static let minBufferBytes: Int64 = 32 * 1024
+  private static let maxBufferBytes: Int64 = 8 * 1024 * 1024
+  private static let fallbackBytesPerSecond = 40_000.0
+  private var startBufferBytes: Int64 = 256 * 1024
   private var channelVolume: Float = 1.0
   private var bassVersion = "unknown"
   private var fxVersion = "unknown"
@@ -421,6 +428,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       try installSynchronizers()
       try applyEqualizer(currentEq, forceRebuild: true)
       durationMs = readDurationMs()
+      if let http = httpSource { configureProgressiveBuffering(http) }
       processingState = .ready
       refreshPlaybackState()
     } catch {
@@ -437,14 +445,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     _ = try initializeEngine()
     if stream == 0 { throw BassError(code: Int32(BASS_ERROR_HANDLE), operation: "play",
                                     message: "没有已加载的音频流") }
-    // pending seek 时仍须真正起播（不能像旧版那样永久 gate 导致点播放无反应）。
-    // BASS 在自定义源数据不足时会自行 stall，落位由 ticker / downloadSync 完成。
     if pendingSeekMs != nil {
       pendingSeekPlay = true
       pendingSeekDeadline = Date().timeIntervalSince1970 * 1000
         + BassPlayerPlugin.seekAttemptBudgetMs
       startTicking()
-      // 不 return：继续往下走 BASS_ChannelPlay，保证点播放立即有声。
+      refreshPlaybackState()   // processingState = .buffering，界面转圈但不启动解码
+      emitSnapshot()
+      return snapshot()        // 对齐 Android :503：等落位成功后由 completePendingSeek 起播
     }
     if completed {
       // 播完后再点播放：回到起点重播，与 Android 行为一致。
@@ -542,24 +550,25 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private func attemptPendingSeek() {
     guard let target = pendingSeekMs, stream != 0 else { return }
     let bytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, target)) / 1000.0)
-
-    // 自定义 Range 源：每次重试都优先下载目标区，并检查是否已缓冲。
-    if let http = httpSource {
-      http.prioritize(Int64(clamping: bytes))
-    }
-
-    if BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0 {
-      completePendingSeek()
+    guard let http = httpSource else {
+      if BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0 { completePendingSeek() }
       return
     }
-
-    // 目标还没缓冲出来：超时则回退到原位置并恢复播放，避免永久 gate。
-    let now = Date().timeIntervalSince1970 * 1000
-    if pendingSeekDeadline <= 0 {
-      pendingSeekDeadline = now + BassPlayerPlugin.seekAttemptBudgetMs
-    } else if now > pendingSeekDeadline {
-      abandonPendingSeek()
+    http.prioritize(Int64(clamping: bytes))
+    // 关键：让同步预读在 FILEPROCS 里等数据到齐，避免"碰运气"落位（对齐 Android :637-640）
+    http.beginBlocking(budgetMs: Int64(BassPlayerPlugin.seekAttemptBudgetMs))
+    let moved = BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0
+    let starved = http.endBlocking()
+    if starved || !moved {
+      let now = Date().timeIntervalSince1970 * 1000
+      if pendingSeekDeadline <= 0 {
+        pendingSeekDeadline = now + BassPlayerPlugin.seekAttemptBudgetMs
+      } else if now > pendingSeekDeadline {
+        abandonPendingSeek()
+      }
+      return
     }
+    completePendingSeek()
   }
 
   /// 落位成功：清 pending、清滤波历史、按原始意图恢复播放。
@@ -567,6 +576,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     pendingSeekMs = nil
     pendingSeekDeadline = 0
     httpSource?.prioritize(nil)
+    httpSource?.holdUntilBuffered(startBufferBytes)   // 对齐 Android :653，消除起播瞬间卡顿
     resetEqualizerState()
     if pendingSeekPlay {
       pendingSeekPlay = false
@@ -727,6 +737,23 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     return createLegacyNetworkStream(format: format,
                                      request: BassPlayerPlugin.urlWithHeaders(source, headers),
                                      flags: flags)
+  }
+
+  /// 按码率推算起播/续播缓冲字节数（对齐 Android configureProgressiveBuffering）。
+  private func configureProgressiveBuffering(_ source: ProgressiveHttpSource) {
+    let total = source.totalBytes
+    let bytesPerSecond: Double
+    if let duration = durationMs, duration > 0, total > 0 {
+      bytesPerSecond = Double(total) * 1000.0 / Double(duration)
+    } else {
+      bytesPerSecond = BassPlayerPlugin.fallbackBytesPerSecond
+    }
+    startBufferBytes = min(max(Int64(bytesPerSecond * BassPlayerPlugin.startBufferSeconds),
+                               BassPlayerPlugin.minBufferBytes), BassPlayerPlugin.maxBufferBytes)
+    let resume = min(max(Int64(bytesPerSecond * BassPlayerPlugin.resumeBufferSeconds),
+                         BassPlayerPlugin.minBufferBytes), BassPlayerPlugin.maxBufferBytes)
+    source.setResumeBytes(resume)
+    source.holdUntilBuffered(startBufferBytes)
   }
 
   /// 用自定义 ProgressiveHttpSource + BASS_StreamCreateFileUser 建流。
@@ -1065,7 +1092,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private func startTicking() {
     guard tickTimer == nil else { return }
     let timer = DispatchSource.makeTimerSource(queue: engineQueue)
-    timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+    timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
     timer.setEventHandler { [weak self] in
       guard let self else { return }
       self.attemptPendingSeek()
