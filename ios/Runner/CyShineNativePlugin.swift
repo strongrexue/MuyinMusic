@@ -413,8 +413,18 @@ final class CyShineStorageBrowserChannel {
                                                   asCopy: false)
       picker.delegate = delegate
       picker.allowsMultipleSelection = false
-      root.present(picker, animated: true)
-      CyShineNativeLog.write("picker", "presented root=\(type(of: root))")
+      // 从 App 自带 Documents 起 brows，减少用户在目录树里迷路；子目录同样可选。
+      if let docs = try? FileManager.default.url(for: .documentDirectory,
+                                                in: .userDomainMask,
+                                                appropriateFor: nil,
+                                                create: true) {
+        picker.directoryURL = docs
+      }
+      root.present(picker, animated: true) {
+        CyShineNativeLog.write("picker", "present_completed dir=\(picker.directoryURL?.path ?? "nil")")
+      }
+      CyShineNativeLog.write("picker",
+                             "presented root=\(type(of: root)) dir=\(picker.directoryURL?.path ?? "nil")")
     }
   }
 
