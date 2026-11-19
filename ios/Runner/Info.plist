@@ -88,16 +88,12 @@
 		</dict>
 	</array>
 
-	<!-- 音源脚本允许访问任意 HTTP/HTTPS，且部分音源用 IP 直连。 -->
+	<!-- 音源脚本允许访问任意 HTTP/HTTPS，且部分音源用 IP 直连。
+	     注意：只能保留 NSAllowsArbitraryLoads。若同时存在 ForMedia/InWebContent/LocalNetworking
+	     等细分键，Apple 会整体忽略 NSAllowsArbitraryLoads，导致普通 URLSession 对 http 源被 ATS 拦截(-1022)。 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsForMedia</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
