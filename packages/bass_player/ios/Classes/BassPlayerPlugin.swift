@@ -868,7 +868,13 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       try http.open(timeoutMs: Int64(8_000))
     } catch {
       let openMs = Int64(Date().timeIntervalSince1970 * 1000) - tOpen
-      BassPlayerPlugin.logNative("player-load", "progressive_open FAIL format=\(format) openMs=\(openMs) error=\(error)")
+      let detail: String
+      if let se = error as? SourceError {
+        detail = "kind=\(se.kind) status=\(se.status) msg=\(se.message)"
+      } else {
+        detail = "error=\(error)"
+      }
+      BassPlayerPlugin.logNative("player-load", "progressive_open FAIL format=\(format) openMs=\(openMs) \(detail)")
       AppLog.write("bass", "progressive open failed: \(error)")
       return 0
     }

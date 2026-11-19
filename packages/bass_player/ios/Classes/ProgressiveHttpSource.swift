@@ -548,15 +548,20 @@ final class ProgressiveHttpSource: NSObject {
         if redirected { continue }
 
         var progressed: Bool
+        var opening: Bool
         cond.lock()
         progressed = received
         received = false
+        opening = length < 0
         cond.unlock()
         failures = progressed ? 1 : failures + 1
         if error.emptyBody && !progressed { emptyBodies += 1 } else { emptyBodies = 0 }
-        if emptyBodies >= ProgressiveHttpSource.maxEmptyBodies {
+        // 起播阶段（尚未拿到文件长度）快速失败：不再耗满 4 次退避（500+1000+2000ms）。
+        // progressive 注定失败时直接让上层回退 legacy BASS_StreamCreateURL，起播不再白等 3.5s。
+        let emptyLimit = opening ? 1 : ProgressiveHttpSource.maxEmptyBodies
+        if emptyBodies >= emptyLimit {
           cond.lock()
-          if fatal == nil { fatal = SourceError(.http, "truncated response") }
+          if fatal == nil { fatal = SourceError(.http, "truncated response: \(error.message)") }
           cond.broadcast()
           cond.unlock()
           onStateChanged()
