@@ -178,6 +178,9 @@ final class ProgressiveHttpSource: NSObject {
   private static let httpTimeout = 408
   private static let tooManyRequests = 429
   private static let userAgent = "BASS/2.4"
+  // 解码器打开时通常要读文件尾的标签（FLAC 等会 seek 到末尾）；在主下载之外并行预取尾段。
+  private static let tailBytes: Int64 = 64 * 1024
+  private static let tailMinFileBytes: Int64 = 1024 * 1024
 
   // 跨歌复用同一个 URLSession：保留连接/DNS/TLS 池（对齐 Android HttpURLConnection
   // keep-alive），避免每首歌重新握手导致起播秒级。实例 own 的 task 在 close() 里单独取消。
@@ -205,6 +208,8 @@ final class ProgressiveHttpSource: NSObject {
   private var writeHandle: FileHandle?
   private var readHandle: FileHandle?
   private let readLock = NSLock()
+  // 写句柄由主下载线程与尾段预取线程共享，seek+write 必须串行化。
+  private let writeLock = NSLock()
   private var ranges = ByteRanges()
   private var worker: Thread?
 
@@ -229,6 +234,8 @@ final class ProgressiveHttpSource: NSObject {
   private var mainTask: URLSessionDataTask?
   private var mainPosition: Int64 = 0
   private var redirectMain = false
+  private var tailPending = false
+  private var tailStart: Int64 = 0
 
   // MARK: 公开只读状态
 
@@ -411,9 +418,11 @@ final class ProgressiveHttpSource: NSObject {
     cond.broadcast()
     cond.unlock()
     active?.cancel()
+    writeLock.lock()
     // 共享 session 不能 invalidate（会波及其它歌曲）；本实例的 task 已在上面取消。
     try? writeHandle?.close()
     try? readHandle?.close()
+    writeLock.unlock()
     writeHandle = nil
     readHandle = nil
     try? FileManager.default.removeItem(at: cacheFile)
@@ -587,6 +596,7 @@ final class ProgressiveHttpSource: NSObject {
   private func nextTransfer() -> (Int64, Int64?)? {
     cond.lock()
     defer { cond.unlock() }
+    while true {
     if closed || fatal != nil { return nil }
     if length < 0 { return (0, nil) }                        // 首次请求以拿到长度
 
@@ -594,20 +604,37 @@ final class ProgressiveHttpSource: NSObject {
       let start = priority != nil
         ? max(ranges.gapStart(needed), needed - ProgressiveHttpSource.seekLookbackBytes)
         : needed
-      return (start, ranges.nextRun(start).map { $0 - 1 })
+      return (start, rangeEndTailClamped(start))
     }
-    if !complete {
-      complete = true
-      transientError = nil
-      cond.broadcast()
+    if !tailPending {
+      if !complete {
+        complete = true
+        transientError = nil
+        cond.broadcast()
+      }
+      return nil
     }
-    return nil
+    // 尾段预取进行中：等它落地再判断是否完成（避免主线程空转）。
+    cond.wait(until: Date(timeIntervalSinceNow: 1.0))
+    }
   }
 
   private func neededLocked() -> Int64? {
     let anchor = max(0, min(priority ?? readPosition, length))
     let needed = ranges.runEnd(anchor)
+    if tailPending && needed >= tailStart { return nil }
     return needed >= length ? nil : needed
+  }
+
+  /// nextRun 的结束位置，但尾段预取期间把主下载截止到 tailStart 之前，避免与尾线程重复拉取。
+  private func rangeEndTailClamped(_ start: Int64) -> Int64? {
+    guard tailPending && start < tailStart else {
+      return ranges.nextRun(start).map { $0 - 1 }
+    }
+    if let next = ranges.nextRun(start), next <= tailStart {
+      return next - 1
+    }
+    return tailStart - 1
   }
 
   /// 所需数据不在主连接即将到达的窗口内时，返回该主连接以便取消。
@@ -648,9 +675,11 @@ final class ProgressiveHttpSource: NSObject {
       onChunk: { [weak self] offset, data in
         guard let self = self, !data.isEmpty else { return }
         self.writeCache(position: offset, data: data)
-        self.cond.lock()
-        self.mainPosition = offset + Int64(data.count)
-        self.cond.unlock()
+        if main {
+          self.cond.lock()
+          self.mainPosition = offset + Int64(data.count)
+          self.cond.unlock()
+        }
       },
       onLength: { [weak self] total, rangesWork in
         guard let self = self else { return nil }
@@ -729,8 +758,21 @@ final class ProgressiveHttpSource: NSObject {
     if length < 0 {
       length = total
       rangeSupported = rangesWork
+      if rangesWork && total >= ProgressiveHttpSource.tailMinFileBytes {
+        tailStart = total - ProgressiveHttpSource.tailBytes
+        tailPending = true
+      }
       try? writeHandle?.truncate(atOffset: UInt64(total))    // 稀疏占位（等价 Android setLength）
       cond.broadcast()
+      let startTail = tailPending
+      cond.unlock()
+      if startTail {
+        let thread = Thread { [weak self] in self?.fetchTail() }
+        thread.name = "CyShine-HTTP-tail"
+        thread.stackSize = 256 * 1024
+        thread.start()
+      }
+      cond.lock()
       return nil
     }
     if length != total {
@@ -740,14 +782,35 @@ final class ProgressiveHttpSource: NSObject {
     return nil
   }
 
+  /// 尾段预取：解码器打开时常读文件尾标签，阻塞等网络；独立线程先拉最后 64KB。
+  private func fetchTail() {
+    cond.lock()
+    guard tailPending, length >= 0 else { cond.unlock(); return }
+    let start = tailStart
+    let end = length - 1
+    cond.unlock()
+    do {
+      try transfer(start: start, endInclusive: end, main: false)
+    } catch {
+      // 尾段失败不影响主下载：主线程走到 tailStart 后会自行继续。
+    }
+    cond.lock()
+    tailPending = false
+    cond.broadcast()
+    cond.unlock()
+  }
+
   private func writeCache(position: Int64, data: Data) {
     cond.lock()
     guard !closed else { cond.unlock(); return }
     cond.unlock()
+    writeLock.lock()
     do {
       try writeHandle?.seek(toOffset: UInt64(position))
       try writeHandle?.write(contentsOf: data)
+      writeLock.unlock()
     } catch {
+      writeLock.unlock()
       cond.lock()
       if fatal == nil { fatal = SourceError(.unsupported, "cache write failed: \(error)") }
       cond.broadcast()
@@ -894,7 +957,7 @@ final class ProgressiveHttpSource: NSObject {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
       guard gotResponse, fatalError == nil, retryFailure == nil else { return }
-      if shouldStop(bodyStart + written) {
+      if isMain && shouldStop(bodyStart + written) {
         stopped = true
         task?.cancel()
         return
