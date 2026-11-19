@@ -2,6 +2,7 @@ import Flutter
 import Foundation
 import MediaPlayer
 import UIKit
+import AVFoundation
 
 /// 独立的系统媒体播放卡片通道，只写 MPNowPlayingInfoCenter。
 /// 与灵动岛（Live Activity / ActivityKit）完全解耦，无 @available 限制：
@@ -25,6 +26,18 @@ final class CyShineNowPlayingChannel: NSObject {
         result(false)
         return
       }
+      // ★ 写卡前确保 AVAudioSession 已激活：这是探针能出卡、正常播放不能出卡的
+      //   唯一差异。BASS 只在初始化时 setActive 一次且失败被吞，冷启动常没激活；
+      //   系统对未激活 session 的 App 不画锁屏卡，即使 nowPlayingInfo 写全也没用。
+      //   setCategory/setActive 幂等，BASS 播放中重复调用安全；与探针 :940-941 同款。
+      do {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default, options: [])
+        try session.setActive(true)
+      } catch {
+        NSLog("[nowPlaying] session 激活失败: %@", "\(error)")
+      }
+
       // 关键：在现有 nowPlayingInfo 上合并，而不是整字典覆盖。
       // audio_service 也会写这个中心（artwork / duration / 播放速率等），
       // 直接赋新字典会把它写的完整字段冲掉，导致锁屏/灵动岛卡片不出。
