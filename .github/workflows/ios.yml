@@ -16,8 +16,9 @@ on:
         required: false
         default: ''
   push:
+    # iOS 分支停用后，推送与发版构建统一走 main。
     branches:
-      - ios
+      - main
     tags:
       - 'ios-*'
     # 文档/截图等改动没必要跑 10 分钟的 macOS 构建。
