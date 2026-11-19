@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'storage_location.dart';
+import 'storage_browser_service.dart';
 import 'local_audio_library_events.dart';
 
 /// The stored location is either a legacy filesystem path or an opaque SAF URI.
@@ -29,7 +29,18 @@ class SafStorage {
     String? initialLocation,
   }) async {
     if (!Platform.isAndroid) {
-      return FilePicker.platform.getDirectoryPath(lockParentWindow: true);
+      // iOS：走 storage_browser 通道，弹出系统文档选择器并持久化 bookmark，
+      // 返回沙盒外目录的绝对路径（会话内已持有 security scope）。
+      final picked = await const StorageBrowserService().pickDirectory();
+      if (picked == null) return null;
+      final path = picked['path']!;
+      final name = picked['name'] ?? path;
+      _labels[path] = name;
+      await (await SharedPreferences.getInstance()).setString(
+        '$_labelPrefix$path',
+        name,
+      );
+      return path;
     }
     final selected = await _channel.invokeMapMethod<String, dynamic>(
       'pickDirectory',
@@ -135,24 +146,67 @@ class SafStorage {
     return await _channel.invokeMethod<int>('size', {'uri': location}) ?? 0;
   }
 
-  /// Files are removed only after native confirmation. Cancellation and partial
-  /// success are returned separately so callers retain undeleted records.
+  /// Android 走系统 MediaStore 删除确认；iOS/桌面 的本地音频是 App 沙盒内的
+  /// 普通文件（外部目录已在启动时持有 security scope），直接物理删除。
+  /// 取消与部分成功分开返回，调用方据此保留未删除记录。
   static Future<FileDeletionResult> deleteFiles(
     Iterable<String> locations,
   ) async {
-    if (!Platform.isAndroid) throw UnsupportedError('系统删除确认仅支持 Android');
-    final result = await _channel.invokeMapMethod<String, dynamic>(
-      'deleteFiles',
-      {'paths': locations.where((p) => p.isNotEmpty).toSet().toList()},
-    );
-    if (result == null) throw StateError('未收到删除结果');
-    final deletion = FileDeletionResult(
-      deletedPaths: Set<String>.from(
-        result['deletedPaths'] as List? ?? const [],
-      ),
-      failed: Map<String, String>.from(result['failed'] as Map? ?? const {}),
-      cancelled: result['cancelled'] == true,
-    );
+    final paths = locations.where((p) => p.isNotEmpty).toSet().toList();
+    if (paths.isEmpty) {
+      return const FileDeletionResult(
+        deletedPaths: <String>{},
+        failed: <String, String>{},
+        cancelled: false,
+      );
+    }
+    final FileDeletionResult deletion;
+    if (Platform.isAndroid) {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'deleteFiles',
+        {'paths': paths},
+      );
+      if (result == null) throw StateError('未收到删除结果');
+      deletion = FileDeletionResult(
+        deletedPaths: Set<String>.from(
+          result['deletedPaths'] as List? ?? const [],
+        ),
+        failed: Map<String, String>.from(result['failed'] as Map? ?? const {}),
+        cancelled: result['cancelled'] == true,
+      );
+    } else {
+      final deleted = <String>{};
+      final removedFromListOnly = <String>{};
+      final failed = <String, String>{};
+      for (final path in paths) {
+        try {
+          final file = File(path);
+          if (await file.exists()) {
+            await file.delete();
+            deleted.add(path);
+          } else {
+            // 物理文件不存在或当前 scope 访问不到：不假报"已删除"，
+            // 仅从列表移除（上层照常清索引/历史），单独统计以便如实提示。
+            removedFromListOnly.add(path);
+          }
+        } catch (e) {
+          final file = File(path);
+          if (await file.exists().catchError((_) => false)) {
+            // 删除抛异常但文件仍在：算真失败，保留列表记录。
+            failed[path] = e.toString();
+          } else {
+            // 异常源于访问不到（scope 失效）：仅从列表移除。
+            removedFromListOnly.add(path);
+          }
+        }
+      }
+      deletion = FileDeletionResult(
+        deletedPaths: {...deleted, ...removedFromListOnly},
+        failed: failed,
+        cancelled: false,
+        removedFromListOnly: removedFromListOnly,
+      );
+    }
     await LocalAudioLibraryEvents.deleted(deletion.deletedPaths);
     return deletion;
   }
@@ -163,9 +217,14 @@ class FileDeletionResult {
     required this.deletedPaths,
     required this.failed,
     required this.cancelled,
+    this.removedFromListOnly = const <String>{},
   });
 
   final Set<String> deletedPaths;
   final Map<String, String> failed;
   final bool cancelled;
+
+  /// 物理文件删不掉（外部目录 scope 失效 / 路径已变），仅从列表移除的路径。
+  /// 这些路径仍在 [deletedPaths] 中以便上层刷新列表，但不计入"已删除文件数"。
+  final Set<String> removedFromListOnly;
 }

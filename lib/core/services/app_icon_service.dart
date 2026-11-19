@@ -20,8 +20,11 @@ enum AppIconVariant {
       values.firstWhere((icon) => icon.code == code, orElse: () => classic);
 }
 
-bool get supportsCustomAppIcons =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+bool get supportsCustomAppIcons {
+  if (kIsWeb) return false;
+  return defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+}
 
 final appIconProvider =
     AsyncNotifierProvider<AppIconController, AppIconVariant>(

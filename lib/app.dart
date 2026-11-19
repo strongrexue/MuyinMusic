@@ -10,6 +10,7 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
 import 'core/services/saf_storage.dart';
+import 'core/services/storage_browser_service.dart';
 import 'core/services/storage_location.dart';
 import 'core/storage/settings_store.dart';
 import 'core/sync/webdav_sync_controller.dart';
@@ -20,6 +21,8 @@ import 'features/downloads/download_history_store.dart';
 import 'core/music_sources/music_source_controller.dart';
 import 'features/music_sources/music_source_update_prompt.dart';
 import 'features/player/player_controller.dart';
+import 'features/player/live_activity_service.dart'
+    show liveActivitySyncProvider;
 import 'features/playlists/playlist_store.dart';
 import 'features/player/music_home_widget_service.dart';
 import 'features/songs/local_song_scan_cache.dart';
@@ -76,6 +79,10 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       ref.read(webDavSyncControllerProvider);
       ref.read(playerControllerProvider.notifier);
       if (Platform.isAndroid) ref.read(musicHomeWidgetSyncProvider);
+      // iOS（尤其巨魔/无 Live Activity 权限）：必须主动接上播放状态监听，
+      // 否则 nowPlayingInfo 降级通道不会随播放刷新，系统媒体卡片
+      // （灵动岛 / 锁屏）始终为空。与 Android 小组件监听对称。
+      if (Platform.isIOS) ref.read(liveActivitySyncProvider);
       unawaited(_initializeLocalLibrary());
     });
   }
@@ -89,6 +96,11 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   }
 
   Future<void> _initializeLocalLibrary() async {
+    // iOS：先为所有已授权的 security-scoped bookmark 根持续持有 scope，
+    // 之后 dart:io 扫描与 BASS fopen 才能读取沙盒外目录里的文件。
+    if (Platform.isIOS) {
+      await const StorageBrowserService().acquireAllAccess();
+    }
     final cache = ref.read(localSongScanCacheProvider);
     final selected = ref.read(settingsProvider).localMusicDirs;
     final directories = <String>[];

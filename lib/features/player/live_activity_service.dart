@@ -1,0 +1,420 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:audio_service/audio_service.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/services/app_logger.dart';
+import '../../core/ui/cover_image_source.dart';
+import 'lyric_frame.dart';
+import 'player_audio_handler.dart';
+import 'player_controller.dart';
+import '../songs/liked_songs_store.dart';
+
+/// 是否发起自绘 Live Activity（灵动岛/锁屏自定义卡）。
+/// 切回系统标准播放卡后关闭：只写 MPNowPlayingInfoCenter，不再 start/update Activity。
+/// 设 false 后 _push 直接返回，_activeStarted 永远为 false，_end 也天然不会再发。
+const bool kEnableLiveActivity = false;
+
+/// 灵动岛 / 锁屏实时活动（Live Activity）的驱动。
+///
+/// 只在 iOS 上生效，且系统「设置 → 栖弦 → 实时活动」打开时才真正工作。
+/// 原生实现见 ios/Runner/CyShineLiveActivityBridge.swift，
+/// 渲染见 ios/CyShineMusicWidget/CyShineLiveActivityWidget.swift。
+///
+/// 更新频率刻意压得很低：只在**换歌 / 播放暂停 / 跳转**时推一次。
+/// 进度条由原生侧的 `ProgressView(timerInterval:)` 自己推进，
+/// 所以不需要每秒推更新。
+final liveActivityProvider = Provider<LiveActivityService>((ref) {
+  final service = LiveActivityService(ref);
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+/// 与 `musicHomeWidgetSyncProvider` 同样的作用：声明它就开始跟随播放状态。
+final liveActivitySyncProvider = Provider<void>((ref) {
+  final service = ref.read(liveActivityProvider);
+  ref.listen<PlayerState>(playerControllerProvider, (_, state) {
+    service.publish(state);
+  }, fireImmediately: true);
+  // 喜欢状态变化也要刷新系统卡五角星（实心/空心）。
+  ref.listen(likedSongsProvider, (_, _) {
+    service.refreshNowPlaying();
+  });
+});
+
+class LiveActivityService {
+  LiveActivityService(this._ref);
+
+  static const MethodChannel _channel = MethodChannel(
+    'cy_shine_music/live_activity',
+  );
+  static const MethodChannel _nowPlayingChannel =
+      MethodChannel('cy_shine_music/now_playing');
+
+  final Ref _ref;
+  bool _available = false;
+  bool _checking = false;
+  bool _subscriptionsReady = false;
+  String? _activeTrackId;
+  String? _lastSignature;
+  StreamSubscription<PlaybackState>? _playbackSubscription;
+  StreamSubscription<Duration?>? _durationSubscription;
+  Future<void> _queue = Future<void>.value();
+
+  /// 点灵动岛 / 锁屏卡片时把播放器推到前台。
+  Future<void> Function()? onOpenPlayer;
+
+  Future<void> initialize() async {
+    if (!Platform.isIOS) return;
+    _channel.setMethodCallHandler(_handleNativeCall);
+    // 系统卡通道升级为双向：接收五角星 like/dislike 的 toggleLike 回调。
+    _nowPlayingChannel.setMethodCallHandler(_handleNativeCall);
+    await _ensureAvailable();
+  }
+
+  /// 喜欢状态变化后主动重推一次系统卡，让五角星实心/空心立即同步。
+  void refreshNowPlaying() {
+    unawaited(_pushNowPlaying());
+  }
+
+  /// 检查系统的实时活动开关。
+  ///
+  /// 刻意做成可以反复调用：用户可能先播放、才想起来去
+  /// 「设置 → 栖弦 → 实时活动」打开开关 —— 只在启动时检查一次的话，
+  /// 就得重启 App 才生效，表现成「灵动岛怎么都不出现」。
+/// 每次播放状态变化都会重试一次，代价只是一次轻量通道调用。
+  ///
+  /// [force] 用于「通知授权刚被回答」这种外部状态变化的场景：
+  /// 之前拿到过 false 而放弃了，必须强制重新判定一次。
+  Future<void> _ensureAvailable({bool force = false}) async {
+    if (!Platform.isIOS || (_available && !force) || _checking) return;
+    _checking = true;
+    try {
+      final supported =
+          await _channel.invokeMethod<bool>('isSupported') ?? false;
+      if (!supported) {
+        await AppLogger.write(
+          'live-activity',
+          '系统未开启实时活动（设置 → 栖弦 → 实时活动），暂不推送；开关打开后无需重启即可生效',
+        );
+        _available = false;
+        return;
+      }
+      _available = true;
+      _attachListeners();
+      await AppLogger.write('live-activity', '实时活动已就绪');
+    } on MissingPluginException {
+      _available = false;
+    } catch (error) {
+      _available = false;
+      await AppLogger.write('live-activity', '初始化失败: $error');
+    } finally {
+      _checking = false;
+    }
+  }
+
+  void _attachListeners() {
+    if (_subscriptionsReady) return;
+    _subscriptionsReady = true;
+    final handler = _ref.read(playerAudioHandlerProvider);
+    // 播放传输走 playbackState，曲目变化走 playerController。
+    _playbackSubscription = handler.playbackState.listen(_onPlaybackState);
+    // 时长通常比播放状态晚一步解析出来，进度条要靠这次更新才会出现。
+    _durationSubscription = handler.durationStream.listen(
+      (_) => unawaited(_push(afterArtwork: false)),
+    );
+  }
+
+  // MARK: - 原生回调
+
+Future<dynamic> _handleNativeCall(MethodCall call) async {
+    switch (call.method) {
+      case 'control':
+        final action = call.arguments as String? ?? '';
+        // 串行化，避免连点灵动岛按钮时互相打断。
+        _queue = _queue
+            .then((_) => _control(action))
+            .catchError((Object error) async {
+              await AppLogger.write('live-activity', 'control 失败: $error');
+            });
+        return true;
+      case 'openPlayer':
+        await onOpenPlayer?.call();
+        return true;
+      case 'authorizationResolved':
+        // 原生的通知授权弹窗刚被回答。此刻 areActivitiesEnabled 才翻成 true，
+        // 立刻重新判定一次并把当前曲目推上去 —— 否则要等下一次播放状态变化
+        // 才恢复，表现为「授权完了还是没反应，再播一次才有」。
+        await _ensureAvailable(force: true);
+        final state = _ref.read(playerControllerProvider);
+        if (state.track != null) {
+          _activeStarted = false;
+          _lastSignature = null;
+          await _push(afterArtwork: true);
+        }
+        return true;
+      case 'toggleLike':
+        // 系统卡五角星被点击（MPRemoteCommandCenter like/dislike）。
+        // 后台 isolate 常驻，SharedPreferences 纯本地读写，可直接切换。
+        final state = _ref.read(playerControllerProvider);
+        final entry = state.queueIndex >= 0 && state.queueIndex < state.queue.length
+            ? state.queue[state.queueIndex]
+            : null;
+        if (entry == null) return false;
+        final nowLiked = _ref.read(likedSongsProvider.notifier).toggle(entry);
+        await AppLogger.write('live-activity', '系统卡切换喜欢: $nowLiked');
+        // toggle 会改变 likedSongsProvider，上面的 listen 会触发 _pushNowPlaying 刷新。
+        return nowLiked;
+    }
+    throw MissingPluginException('未知的实时活动方法: ${call.method}');
+  }
+
+  Future<void> _control(String action) async {
+    _ref.read(liveActivitySyncProvider);
+    final player = _ref.read(playerControllerProvider.notifier);
+    await player.waitForSessionRestore();
+    if (!_ref.read(playerControllerProvider).hasTrack) {
+      await onOpenPlayer?.call();
+      return;
+    }
+    switch (action) {
+      case 'toggle':
+        await player.toggle();
+      case 'previous':
+        await player.playPrevious();
+      case 'next':
+        await player.playNext();
+    }
+    await AppLogger.write('live-activity', '控制: $action');
+  }
+
+  // MARK: - 状态推送
+
+  /// 曲目变化（可能是换歌，也可能是首次播放）。
+  void publish(PlayerState state) {
+    unawaited(_pushNowPlaying());
+    if (!_available) {
+      // 可能只是「实时活动开关后来才打开」，重试一次而不是永远放弃。
+      unawaited(_ensureAvailable());
+      return;
+    }
+    final track = state.track;
+    if (track == null) {
+      _end();
+      return;
+    }
+    final changed = track.id != _activeTrackId;
+    _activeTrackId = track.id;
+    unawaited(_push(afterArtwork: changed));
+  }
+
+  void _onPlaybackState(PlaybackState state) {
+    unawaited(_pushNowPlaying());
+    if (!_available) {
+      unawaited(_ensureAvailable());
+      return;
+    }
+    final playerState = _ref.read(playerControllerProvider);
+    if (playerState.track == null) {
+      _end();
+      return;
+    }
+    final processing = state.processingState;
+    final stopped =
+        processing == AudioProcessingState.idle ||
+        processing == AudioProcessingState.error;
+    // 注意：completed 不停活动 —— 下一首马上会接着 start，
+    // 停掉再建会让灵动岛闪一下。
+    if (stopped && !state.playing) {
+      _end();
+      return;
+    }
+    unawaited(_push(afterArtwork: false));
+  }
+
+  /// 计算要推给原生的载荷。
+  ///
+  /// 返回 null 表示这次没有实质变化（比如进度回调），可以跳过，
+  /// 避免把通道刷爆。
+  Map<String, dynamic>? _payload() {
+    final audioHandler = _ref.read(playerAudioHandlerProvider);
+    final playback = audioHandler.playbackState.value;
+    final state = _ref.read(playerControllerProvider);
+    final track = state.track;
+    if (track == null) return null;
+
+    final playing =
+        playback.playing &&
+        playback.processingState != AudioProcessingState.idle &&
+        playback.processingState != AudioProcessingState.completed &&
+        playback.processingState != AudioProcessingState.error;
+    final loading =
+        playback.processingState == AudioProcessingState.loading ||
+        playback.processingState == AudioProcessingState.buffering;
+
+    // audio_service 的 updatePosition 是「上次更新时的位置」，
+    // 播放中要按经过时间补上，否则进度条会一直落后。
+    var positionMs = playback.updatePosition.inMilliseconds;
+    if (playing) {
+      final elapsed =
+          DateTime.now().difference(playback.updateTime).inMilliseconds;
+      if (elapsed > 0) positionMs += elapsed;
+    }
+    // 时长在 MediaItem 上，不在 PlaybackState 上；而且往往播放开始后才解析出来，
+    // 所以这里每次都重新读，解析到之后会通过 durationStream 再推一次更新。
+    final durationMs = audioHandler.duration?.inMilliseconds ??
+        audioHandler.mediaItem.value?.duration?.inMilliseconds ??
+        0;
+    if (positionMs < 0) positionMs = 0;
+    if (durationMs > 0 && positionMs > durationMs) positionMs = durationMs;
+
+    var lyricText = '';
+    final lyrics = state.lyrics;
+    if (!lyrics.isEmpty) {
+      final idx = lyrics.activeIndex(Duration(milliseconds: positionMs));
+      if (idx >= 0 && idx < lyrics.lines.length) {
+        lyricText = LyricFrameAlgorithms.frameForLine(
+          lyrics.lines[idx], positionMs,
+        ).text;
+      }
+    }
+
+    // 系统锁屏卡副标题用的「整行」歌词：上面的 lyricText 是灵动岛的逐字分帧
+    // 短文本，直接当锁屏行会被切成半截字。这里取当前行完整文本，无歌词则空串。
+    var lyricLine = '';
+    if (!lyrics.isEmpty) {
+      final lineIdx = lyrics.activeIndex(Duration(milliseconds: positionMs));
+      if (lineIdx >= 0 && lineIdx < lyrics.lines.length) {
+        lyricLine = lyrics.lines[lineIdx].text.trim();
+      }
+    }
+
+    // 当前曲目是否已喜欢：队列条目即 DownloadHistoryEntry，直接比身份键。
+    final queueEntry = state.queueIndex >= 0 && state.queueIndex < state.queue.length
+        ? state.queue[state.queueIndex]
+        : null;
+    final liked = queueEntry != null &&
+        _ref.read(likedSongsProvider.notifier).isLiked(queueEntry);
+
+    return {
+      'trackId': track.id,
+      'title': track.title,
+      // 系统卡副标题位塞当前歌词行；无歌词回退真歌手（对齐胖虎做法）。
+      'artist': lyricLine.isNotEmpty ? lyricLine : track.artist,
+      'displaySubtitle': track.artist,
+      'durationMs': durationMs,
+      'positionMs': positionMs,
+      'playing': playing,
+      'loading': loading,
+      'lyricText': lyricText,
+      'lyricLine': lyricLine,
+      'liked': liked,
+    };
+  }
+
+  Future<void> _push({required bool afterArtwork}) async {
+    // 切回系统标准卡：不再发起/更新自绘 Live Activity。
+    if (!kEnableLiveActivity) return;
+    if (!_available) return;
+    final payload = _payload();
+    if (payload == null) return;
+
+    // 只有「换歌 / 播放状态变化 / 明显跳转」才值得推一次更新。
+    // 位置量化到 5 秒，避免连续微调把通道刷爆；seek 会直接改变量化后的值。
+    final signature = [
+      payload['trackId'],
+      payload['playing'],
+      (payload['positionMs'] as int) ~/ 5000,
+      payload['durationMs'],
+      payload['lyricText'],
+    ].join('|');
+    // 首帧（换歌）必须推一次，哪怕签名"看起来"没变。
+    if (!afterArtwork && _activeStarted && signature == _lastSignature) return;
+    _lastSignature = signature;
+
+    try {
+      final method = _activeStarted ? 'update' : 'start';
+      await _channel.invokeMethod<dynamic>(method, {
+        ...payload,
+        ...await _coverPayload(),
+      });
+      _activeStarted = true;
+    } on MissingPluginException {
+      _available = false;
+    } catch (error) {
+      await AppLogger.write('live-activity', '推送失败: $error');
+    }
+  }
+
+  /// 无条件写系统媒体播放卡片（灵动岛/锁屏）。
+  /// 与 Live Activity 可用性完全解耦：即使 ActivityKit 不可用（巨魔/低版本 iOS），
+  /// 只要写了 nowPlayingInfo，系统就会画出标准播放卡片。
+  Future<void> _pushNowPlaying() async {
+    final payload = _payload();
+    if (payload == null) return;
+    // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，
+    // 否则连续歌词行会因 key 不变被吞（胖虎同款坑）。liked 也纳入，
+    // 保证五角星点亮/取消能即时重推系统卡。
+    final npKey = [
+      payload['trackId'],
+      payload['artist'],
+      payload['playing'],
+      payload['liked'],
+    ].join('|');
+    if (npKey == _lastNowPlayingKey) return;
+    _lastNowPlayingKey = npKey;
+    final cover = await _coverPayload();
+    try {
+      await _nowPlayingChannel.invokeMethod<bool>('publish', {
+        ...payload,
+        ...cover,
+      });
+    } on MissingPluginException {
+      // 老版本原生没有该通道，忽略。
+    } catch (error) {
+      await AppLogger.write('live-activity', '写播放卡片失败: $error');
+    }
+  }
+
+  String? _lastNowPlayingKey;
+  bool _activeStarted = false;
+
+  Future<Map<String, dynamic>> _coverPayload() async {
+    try {
+      final track = _ref.read(playerControllerProvider).track;
+      final embedded = await _ref
+          .read(playerAudioHandlerProvider)
+          .cacheArtwork(track?.coverBytes);
+      final cover =
+          embedded?.toString() ??
+          CoverImageSource.normalizeUrl(track?.coverUrl, size: 512) ??
+          '';
+      return {'cover': cover, 'headers': CoverImageSource.headersFor(cover) ?? {}};
+    } catch (error) {
+      await AppLogger.write('live-activity', '封面处理失败: $error');
+      return {'cover': '', 'headers': <String, String>{}};
+    }
+  }
+
+  void _end() {
+    if (!_available || !_activeStarted) return;
+    _activeStarted = false;
+    _activeTrackId = null;
+    _lastSignature = null;
+    unawaited(
+      _channel.invokeMethod<void>('end').catchError((Object error) async {
+        await AppLogger.write('live-activity', '结束活动失败: $error');
+      }),
+    );
+  }
+
+  void dispose() {
+    _end();
+    unawaited(_playbackSubscription?.cancel());
+    _playbackSubscription = null;
+    unawaited(_durationSubscription?.cancel());
+    _durationSubscription = null;
+  }
+}

@@ -301,8 +301,12 @@ class BassPlayer {
   }
 
   Future<BassEngineInfo> _initialize() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      throw UnsupportedError('BASS playback is available on Android only');
+    // iOS 端由 packages/bass_player/ios/BassPlayerPlugin.swift 提供等价实现，
+    // 因此 Android 与 iOS 均放行；其它平台（web/桌面）仍不支持。
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      throw UnsupportedError('BASS playback is available on Android/iOS only');
     }
     _eventSubscription ??= _events.receiveBroadcastStream().listen(
       _handleEvent,

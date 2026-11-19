@@ -46,6 +46,7 @@ class AppLogger {
   static final sessionId = '${DateTime.now().microsecondsSinceEpoch}-$pid';
   static String _environment = 'environment=unavailable';
   static String _androidDiagnostics = 'unavailable';
+  static String _iosDiagnostics = 'unavailable';
   static bool _errorHandlersInstalled = false;
 
   static ValueListenable<Set<AppLogCategory>> get recordingCategories =>
@@ -150,6 +151,9 @@ class AppLogger {
     );
     // A headless media engine has no Activity to answer this optional request.
     unawaited(logAndroidDiagnostics('startup'));
+    // 启动就采一次：灵动岛不显示时，用户打开日志页第一屏就能看到
+    // 「扩展到底有没有被系统加载」，不必先播歌再切后台。
+    unawaited(logIosWidgetStatus('startup'));
   }
 
   /// Persist an uncaught Dart/Flutter error independently of log categories.
@@ -175,22 +179,83 @@ class AppLogger {
   }
 
   static Future<void> logAndroidDiagnostics(String reason) async {
-    if (!Platform.isAndroid) return;
+    final scope = Platform.isAndroid
+        ? 'android-runtime'
+        : (Platform.isIOS ? 'ios-runtime' : null);
+    if (scope == null) return;
     try {
       final data = await const MethodChannel('cy_shine_music/app_task')
           .invokeMapMethod<String, dynamic>('diagnostics')
           .timeout(const Duration(seconds: 2));
-      if (data != null) await recordAndroidDiagnostics(data);
+      String json;
+      if (data != null) {
+        json = jsonEncode(data);
+        if (Platform.isIOS) {
+          _iosDiagnostics = compactLogMessage(json, maxLength: 16000);
+        } else {
+          await recordAndroidDiagnostics(data);
+          json = _androidDiagnostics;
+        }
+      } else {
+        json = 'null';
+      }
       if (isRecording(AppLogCategory.application)) {
-        await write(
-          'android-runtime',
-          'reason=$reason data=$_androidDiagnostics',
-        );
+        await write(scope, 'reason=$reason data=$json');
       }
     } catch (error) {
       if (isRecording(AppLogCategory.application)) {
-        await write('android-runtime', 'reason=$reason unavailable=$error');
+        await write(scope, 'reason=$reason unavailable=$error');
       }
+    }
+  }
+
+  /// ★ 锁屏 / 控制中心播放卡片的诊断（仅 iOS）。
+  ///
+  /// 卡片由 `MPNowPlayingInfoCenter` 驱动，系统自绘，不需要 ActivityKit 或
+  /// Widget 扩展。查「锁屏没有播放卡片」时看这一行即可 —— 直接列出
+  /// nowPlayingInfo 是否为空、封面有无、后台音频是否声明。
+  static Future<void> logIosMediaSession(String reason) async {
+    if (!Platform.isIOS) return;
+    try {
+      final data = await const MethodChannel('cy_shine_music/app_task')
+          .invokeMapMethod<String, dynamic>('mediaSession')
+          .timeout(const Duration(seconds: 2));
+      final summary = data?['summary'] ?? '(空)';
+      await write('media-session', 'reason=$reason $summary');
+    } catch (error) {
+      await write('media-session', 'reason=$reason unavailable=$error');
+    }
+  }
+
+  /// ★ 判断「Widget 扩展有没有被系统加载」（仅 iOS）。
+  ///
+  /// 这是灵动岛不显示时最关键的判据：`.appex` 在不在包里与系统是否加载它是
+  /// 两回事 —— 侧载重签若没给嵌套 `.appex` 单独签名，文件还在、系统却不加载，
+  /// 此时 `Activity.request` 照样成功返回，但屏幕上什么都不出现。
+  static Future<void> logIosWidgetStatus(String reason) async {
+    if (!Platform.isIOS) return;
+    try {
+      final data = await const MethodChannel('cy_shine_music/app_task')
+          .invokeMapMethod<String, dynamic>('widgetStatus')
+          .timeout(const Duration(seconds: 3));
+      if (data == null) {
+        await write('widget-status', 'reason=$reason 无返回');
+        return;
+      }
+      final loaded = data['extensionLoaded'] == true;
+      final onDisk = data['extensionOnDisk'] == true;
+      final kinds = (data['widgetKinds'] as List?)?.join(',') ?? '—';
+      await write(
+        'widget-status',
+        'reason=$reason 扩展${onDisk ? "在包内" : "缺失"} '
+            '系统加载=${loaded ? "是" : "否⚠"} '
+            '小组件数=${data['widgetConfigCount'] ?? '?'} kinds=$kinds '
+            '活动数=${data['activityCount'] ?? '?'} '
+            '实时活动开关=${data['liveActivitiesEnabled'] ?? '?'} '
+            '| ${data['verdict'] ?? ''}',
+      );
+    } catch (error) {
+      await write('widget-status', 'reason=$reason unavailable=$error');
     }
   }
 
@@ -198,7 +263,8 @@ class AppLogger {
       '${DateTime.now().toIso8601String()} [log-export] session=$sessionId '
       'pid=$pid environment=$_environment '
       'recording=${_recordingCategories.value.map((item) => item.name).join(',')} '
-      'lastAndroidSnapshot=$_androidDiagnostics\n${lines.join('\n')}';
+      'lastAndroidSnapshot=$_androidDiagnostics '
+      'lastIosSnapshot=$_iosDiagnostics\n${lines.join('\n')}';
 
   static Future<void> _ensureInit() => _initFuture ??= _initialize();
 

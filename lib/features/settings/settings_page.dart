@@ -783,7 +783,7 @@ class SettingsPage extends ConsumerWidget {
   Future<void> _resetDownloadDir(BuildContext context, WidgetRef ref) async {
     await ref
         .read(settingsProvider.notifier)
-        .setDownloadDir(kDefaultDownloadDir);
+        .setDownloadDir(ref.read(defaultDownloadDirProvider));
     unawaited(
       ref
           .read(localSongScanCacheProvider)

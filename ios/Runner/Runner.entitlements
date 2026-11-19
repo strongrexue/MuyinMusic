@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- application-identifier 的前缀交给 $(AppIdentifierPrefix)，
+	     绝不硬编码 team id —— 侧签工具重签时会用自身前缀替换。 -->
+	<key>application-identifier</key>
+	<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+</dict>
+</plist>

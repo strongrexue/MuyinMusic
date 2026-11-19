@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -542,6 +543,32 @@ class _SongsPageState extends ConsumerState<SongsPage> {
         .where((p) => p.isNotEmpty)
         .toSet();
     if (paths.isEmpty) return;
+    // Android 由系统 MediaStore 删除确认弹窗兜底；iOS/桌面 直接物理删除，
+    // 这里补应用内二次确认，避免误触即删。
+    if (!Platform.isAndroid) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => prism.AlertDialog(
+          title: entries.length == 1 ? '删除本地歌曲' : '删除本地歌曲',
+          actions: [
+            prism.TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            prism.FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('删除'),
+            ),
+          ],
+          child: Text(
+            entries.length == 1
+                ? '确定删除这首本地歌曲吗？文件会从设备中移除，且无法恢复。'
+                : '确定删除选中的 ${entries.length} 首本地歌曲吗？文件会从设备中移除，且无法恢复。',
+          ),
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
     _deletingFiles = true;
     final history = ref.read(downloadHistoryProvider);
     final historyNotifier = ref.read(downloadHistoryProvider.notifier);
@@ -551,6 +578,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     try {
       final result = await SafStorage.deleteFiles(paths);
       final deletedKeys = result.deletedPaths.map(_pathKey).toSet();
+      final removedKeys = result.removedFromListOnly.map(_pathKey).toSet();
+      final physicalDeletedCount = deletedKeys.difference(removedKeys).length;
       if (deletedKeys.isNotEmpty) {
         for (final path in result.deletedPaths) {
           await playlists.removeLocalPathFromAll(
@@ -584,21 +613,41 @@ class _SongsPageState extends ConsumerState<SongsPage> {
         }
       }
       if (!mounted) return;
+      final removedCount = removedKeys.length;
       if (result.failed.isNotEmpty) {
         showAppToast(
           context,
-          '已删除 ${deletedKeys.length} 个文件，${result.failed.length} 个失败：${result.failed.values.first}',
-          type: deletedKeys.isEmpty ? AppToastType.error : AppToastType.warning,
+          '已删除 $physicalDeletedCount 个文件'
+          '${removedCount > 0 ? '，$removedCount 首仅从列表移除' : ''}'
+          '，${result.failed.length} 个失败：${result.failed.values.first}',
+          type:
+              physicalDeletedCount == 0 && removedCount == 0
+                  ? AppToastType.error
+                  : AppToastType.warning,
         );
       } else if (result.cancelled) {
         showAppToast(
           context,
-          deletedKeys.isEmpty ? '已取消删除' : '已删除 ${deletedKeys.length} 个文件，其余已取消',
+          physicalDeletedCount == 0 && removedCount == 0
+              ? '已取消删除'
+              : '已删除 $physicalDeletedCount 个文件'
+                  '${removedCount > 0 ? '，$removedCount 首仅从列表移除' : ''}，其余已取消',
+        );
+      } else if (removedCount > 0) {
+        showAppToast(
+          context,
+          physicalDeletedCount > 0
+              ? '已删除 $physicalDeletedCount 个文件，$removedCount 首仅从列表移除'
+              : '$removedCount 首本地文件已不在设备中，仅从列表移除',
+          type:
+              physicalDeletedCount > 0
+                  ? AppToastType.warning
+                  : AppToastType.success,
         );
       } else {
         showAppToast(
           context,
-          '已删除 ${deletedKeys.length} 个文件',
+          '已删除 $physicalDeletedCount 个文件',
           type: AppToastType.success,
         );
       }
