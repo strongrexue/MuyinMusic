@@ -176,22 +176,35 @@ class SafStorage {
       );
     } else {
       final deleted = <String>{};
+      final removedFromListOnly = <String>{};
       final failed = <String, String>{};
       for (final path in paths) {
         try {
           final file = File(path);
           if (await file.exists()) {
             await file.delete();
+            deleted.add(path);
+          } else {
+            // 物理文件不存在或当前 scope 访问不到：不假报"已删除"，
+            // 仅从列表移除（上层照常清索引/历史），单独统计以便如实提示。
+            removedFromListOnly.add(path);
           }
-          deleted.add(path);
         } catch (e) {
-          failed[path] = e.toString();
+          final file = File(path);
+          if (await file.exists().catchError((_) => false)) {
+            // 删除抛异常但文件仍在：算真失败，保留列表记录。
+            failed[path] = e.toString();
+          } else {
+            // 异常源于访问不到（scope 失效）：仅从列表移除。
+            removedFromListOnly.add(path);
+          }
         }
       }
       deletion = FileDeletionResult(
-        deletedPaths: deleted,
+        deletedPaths: {...deleted, ...removedFromListOnly},
         failed: failed,
         cancelled: false,
+        removedFromListOnly: removedFromListOnly,
       );
     }
     await LocalAudioLibraryEvents.deleted(deletion.deletedPaths);
@@ -204,9 +217,14 @@ class FileDeletionResult {
     required this.deletedPaths,
     required this.failed,
     required this.cancelled,
+    this.removedFromListOnly = const <String>{},
   });
 
   final Set<String> deletedPaths;
   final Map<String, String> failed;
   final bool cancelled;
+
+  /// 物理文件删不掉（外部目录 scope 失效 / 路径已变），仅从列表移除的路径。
+  /// 这些路径仍在 [deletedPaths] 中以便上层刷新列表，但不计入"已删除文件数"。
+  final Set<String> removedFromListOnly;
 }
