@@ -5,8 +5,8 @@ name: iOS Build
 # (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
 #
 # Batch-1 scope: BASS 播放 + JS 音源运行时 + Runner 原生通道 + 后台/锁屏。
-# Batch-2 scope: 灵动岛实时活动 + 桌面小组件（WidgetKit 扩展，build_widget_extension.sh
-#               独立编译后嵌入 PlugIns/）+ 备用图标运行时 + iOS 文件打开（takePendingAudio）。
+# Batch-2 scope: 灵动岛实时活动 + 备用图标运行时 + iOS 文件打开（takePendingAudio）。
+# 主 App 为纯 App（无 WidgetKit 扩展），--no-codesign 产出的 unsigned IPA 可直接侧载安装。
 on:
   # Manual dispatch is available once this workflow is merged to the default branch.
   workflow_dispatch:
@@ -133,27 +133,11 @@ jobs:
           cat "ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" 2>&1
           echo "::endgroup::"
 
-      - name: Verify live activity authorization
-        run: node tool/verify_live_activity_auth.mjs
-
       - name: Build iOS (no codesign)
         run: |
           flutter build ios --release --no-codesign \
             --build-name="${{ steps.version.outputs.name }}" \
             --build-number="${{ steps.version.outputs.number }}"
-
-      # WidgetKit 扩展（灵动岛实时活动 + 桌面小组件）已作为正经的 app-extension
-      # target 接进 Runner.xcodeproj：由 patch_xcodeproj.py 注入 target 与
-      # "Embed App Extensions" phase，flutter build ios 通过 target 依赖自动编译。
-      # 注意：--no-codesign 会全局禁签名，Xcode 虽编译出 appex，但 embed 阶段
-      # 因 extension 隐含 CodeSignOnCopy 而被跳过，不会自动 copy 到 PlugIns/。
-      # 这里把 Xcode 已编译好的正规 appex 显式嵌入（不回退 swiftc 手工拼装）。
-      - name: Verify WidgetKit extension
-        run: |
-          python3 tool/verify_widget_embed.py \
-            build/ios/iphoneos/Runner.app \
-            "${{ steps.version.outputs.name }}" \
-            "${{ steps.version.outputs.number }}"
 
       - name: Package unsigned IPA
         run: |
@@ -167,11 +151,6 @@ jobs:
           zip -qry ../MuyinMusic-unsigned.ipa Payload
           cd ../..
           ls -lh build/MuyinMusic-unsigned.ipa
-          # Batch-2 校验：WidgetKit 扩展是否真的被打进 IPA。
-          echo "::group::Widget extension on disk"
-          ls -la "$APP_PATH/PlugIns" 2>&1 || true
-          find "$APP_PATH/PlugIns" -maxdepth 2 -name '*.appex' 2>&1 || true
-          echo "::endgroup::"
           echo "### 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -186,28 +165,6 @@ jobs:
         with:
           name: MuyinMusic-unsigned-ipa
           path: build/MuyinMusic-unsigned.ipa
-          retention-days: 14
-
-      # 巨魔只保留二进制里已有的 entitlements；--no-codesign 产物二进制里没有
-      # 任何 entitlement，主 App 拿不到 application-identifier，锁屏卡不显示。
-      # ldid -S 把展开后的 entitlements 写回二进制，巨魔才有东西可保留。
-      - name: Install ldid
-        run: brew install ldid
-
-      - name: ldid pseudo-sign IPA
-        run: |
-          set -e
-          bash tool/ldid_sign_ipa.sh \
-            build/MuyinMusic-unsigned.ipa \
-            build/MuyinMusic-ldid.ipa
-          ls -lh build/MuyinMusic-ldid.ipa
-          echo "### 巨魔安装包" >> "$GITHUB_STEP_SUMMARY"
-          echo "ldid 伪签 IPA: build/MuyinMusic-ldid.ipa" >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MuyinMusic-ldid-ipa
-          path: build/MuyinMusic-ldid.ipa
           retention-days: 14
 
       - name: Upload build logs on failure
