@@ -188,6 +188,28 @@ jobs:
           path: build/MuyinMusic-unsigned.ipa
           retention-days: 14
 
+      # 巨魔只保留二进制里已有的 entitlements；--no-codesign 产物二进制里没有
+      # 任何 entitlement，主 App 拿不到 application-identifier，锁屏卡不显示。
+      # ldid -S 把展开后的 entitlements 写回二进制，巨魔才有东西可保留。
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: ldid pseudo-sign IPA
+        run: |
+          set -e
+          bash tool/ldid_sign_ipa.sh \
+            build/MuyinMusic-unsigned.ipa \
+            build/MuyinMusic-ldid.ipa
+          ls -lh build/MuyinMusic-ldid.ipa
+          echo "### 巨魔安装包" >> "$GITHUB_STEP_SUMMARY"
+          echo "ldid 伪签 IPA: build/MuyinMusic-ldid.ipa" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MuyinMusic-ldid-ipa
+          path: build/MuyinMusic-ldid.ipa
+          retention-days: 14
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
