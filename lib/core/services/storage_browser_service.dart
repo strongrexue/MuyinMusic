@@ -68,6 +68,24 @@ class StorageBrowserService {
 
   bool get isSupported => Platform.isAndroid || Platform.isIOS;
 
+  /// 弹出系统目录选择器并建立 security-scoped bookmark 持久授权（iOS）。
+  /// 返回 {path, name}；用户取消返回 null。
+  Future<Map<String, String>?> pickDirectory() async {
+    if (!Platform.isIOS) return null;
+    final raw = await _channel.invokeMapMethod<String, Object?>('pickDirectory');
+    if (raw == null) return null;
+    final path = raw['path'] as String?;
+    if (path == null || path.isEmpty) return null;
+    return {'path': path, 'name': raw['name'] as String? ?? path};
+  }
+
+  /// 启动时对全部已授权 bookmark 根持续持有 security scope（iOS）。
+  /// 返回成功持有 scope 的根数量。
+  Future<int> acquireAllAccess() async {
+    if (!Platform.isIOS) return 0;
+    return await _channel.invokeMethod<int>('acquireAllAccess') ?? 0;
+  }
+
   Future<List<StorageBrowserEntry>> listRoots() async {
     if (!isSupported) return const [];
     final raw = await _channel.invokeListMethod<Object?>('listRoots');

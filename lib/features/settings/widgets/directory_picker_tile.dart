@@ -38,7 +38,7 @@ class DirectoryPickerTile extends ConsumerWidget {
                 onPressed: () async {
                   await ref
                       .read(settingsProvider.notifier)
-                      .setDownloadDir(kDefaultDownloadDir);
+                      .setDownloadDir(ref.read(defaultDownloadDirProvider));
                   if (!context.mounted) return;
                   showAppToast(
                     context,

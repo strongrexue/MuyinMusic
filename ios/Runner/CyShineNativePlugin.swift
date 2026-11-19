@@ -327,11 +327,26 @@ final class CyShineStorageBrowserChannel {
 
   private let bookmarks = CyShineSecurityScopedStore()
   private let worker = DispatchQueue(label: "com.cyshine.music.storage_browser")
+  /// 系统文档选择器的 delegate 必须被强引用，否则弹出后即被释放、回调丢失。
+  private var pickerDelegate: FolderPickerDelegate?
+  /// 会话级持有所有已授权外部目录的 security scope：Dart 的 dart:io 扫描与
+  /// BASS 的 C fopen 都按绝对路径访问，只有全程持有 scope 才能正常读写。
+  private var heldScopedURLs: [URL] = []
 
   func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     switch call.method {
     case "listRoots":
       result(listRoots())
+
+    case "pickDirectory":
+      // iOS 扩展点：弹出系统文档选择器，建立 security-scoped bookmark 并
+      // 立即持有 scope。返回 {path, name}，与 Android 的 pickDirectory 对齐。
+      pickDirectory(result)
+
+    case "acquireAllAccess":
+      // 启动时对全部已保存的 bookmark 根持续持有 scope（不主动 stop），
+      // 让绝对路径的扫描/播放沿用既有代码。
+      result(acquireAllAccess())
 
     case "listChildren":
       guard let args = call.arguments as? [String: Any],
@@ -379,6 +394,41 @@ final class CyShineStorageBrowserChannel {
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  /// 弹出系统文档选择器（文件夹），建立 security-scoped bookmark 后立即持有
+  /// scope。返回 {path, name} 给 Dart 层；取消返回 nil。
+  private func pickDirectory(_ result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      guard let root = CyShineIncomingAudio.shared.topViewController() else {
+        result(FlutterError(code: "NO_VIEW_CONTROLLER",
+                            message: "无法弹出目录选择器", details: nil))
+        return
+      }
+      let delegate = FolderPickerDelegate(bookmarks: self.bookmarks, result: result)
+      // UIDocumentPickerViewController.delegate 是 weak，必须强引用到回调结束。
+      self.pickerDelegate = delegate
+      delegate.onDone = { [weak self] in self?.pickerDelegate = nil }
+      let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder],
+                                                  asCopy: false)
+      picker.delegate = delegate
+      picker.allowsMultipleSelection = false
+      root.present(picker, animated: true)
+    }
+  }
+
+  /// 启动时对全部已保存的 bookmark 根持续持有 scope（故意不 stop），
+  /// 使 dart:io 扫描与 BASS 的绝对路径访问在外部目录上同样可用。
+  /// 返回成功持有 scope 的根数量。
+  private func acquireAllAccess() -> Int {
+    var count = 0
+    for root in bookmarks.resolvedRoots() {
+      if root.url.startAccessingSecurityScopedResource() {
+        heldScopedURLs.append(root.url)
+        count += 1
+      }
+    }
+    return count
   }
 
   private func listRoots() -> [[String: Any?]] {
@@ -477,6 +527,49 @@ final class CyShineStorageBrowserChannel {
       "freeBytes": free,
       "state": state,
     ]
+  }
+}
+
+/// 系统文档选择器（选文件夹）的回调代理。UIDocumentPickerViewController 的
+/// delegate 是 weak，需由 CyShineStorageBrowserChannel 强引用到回调结束。
+@available(iOS 13.0, *)
+final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
+  private let bookmarks: CyShineSecurityScopedStore
+  private let result: FlutterResult
+  var onDone: (() -> Void)?
+
+  init(bookmarks: CyShineSecurityScopedStore, result: @escaping FlutterResult) {
+    self.bookmarks = bookmarks
+    self.result = result
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController,
+                      didPickDocumentsAt urls: [URL]) {
+    defer { onDone?() }
+    guard let url = urls.first else {
+      result(FlutterError(code: "CANCELLED", message: "未选择文件夹", details: nil))
+      return
+    }
+    // 选中后立即开始访问，随后建立可跨启动持久化的 security-scoped bookmark。
+    let scoped = url.startAccessingSecurityScopedResource()
+    do {
+      let data = try url.bookmarkData(options: [.withSecurityScope],
+                                      includingResourceValuesForKeys: nil,
+                                      relativeTo: nil)
+      bookmarks.save(name: url.lastPathComponent, bookmark: data)
+      // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
+      result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
+    } catch {
+      if scoped { url.stopAccessingSecurityScopedResource() }
+      result(FlutterError(code: "BOOKMARK_FAILED",
+                          message: error.localizedDescription, details: nil))
+    }
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    onDone?()
+    // 取消不视为错误：返回 nil 让 Dart 层静默返回。
+    result(nil)
   }
 }
 

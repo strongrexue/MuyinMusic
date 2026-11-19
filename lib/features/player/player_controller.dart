@@ -161,6 +161,7 @@ class PlayerController extends StateNotifier<PlayerState>
             playerState.processingState != BassProcessingState.completed) {
           _completionHandledForTrackId = null;
           _pausedBySleepTimer = false;
+          _hasStartedPlayback = true;
         }
         state = state.copyWith(
           playing: playerState.playing,
@@ -466,6 +467,7 @@ class PlayerController extends StateNotifier<PlayerState>
   int _playOrderCursor = -1;
   final math.Random _random = math.Random();
   String? _completionHandledForTrackId;
+  bool _hasStartedPlayback = false;
   Set<String> _attemptedRemoteSourceIds = <String>{};
   bool _lateSourceFallbackActive = false;
   int _consecutiveSourceFailureSkips = 0;
@@ -516,6 +518,7 @@ class PlayerController extends StateNotifier<PlayerState>
     bool announceNetworkWait = true,
   }) async {
     _completionHandledForTrackId = null;
+    _hasStartedPlayback = false;
     _pausedBySleepTimer = false;
     _cancelNetworkResume();
     final pauseGeneration = _sleepTimerPauseGeneration;
@@ -1463,6 +1466,7 @@ class PlayerController extends StateNotifier<PlayerState>
       queueIndex: _queueIndex,
     );
     _completionHandledForTrackId = null;
+    _hasStartedPlayback = false;
 
     await _beginAudioTransition(
       token,
@@ -1743,6 +1747,7 @@ class PlayerController extends StateNotifier<PlayerState>
   }
 
   void _autoAdvanceAfterCompletion() {
+    if (!_hasStartedPlayback) return;
     if (_pausedBySleepTimer) return;
     final trackId = state.track?.id;
     if (trackId == null || _completionHandledForTrackId == trackId) return;

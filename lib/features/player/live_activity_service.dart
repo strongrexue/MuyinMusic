@@ -281,6 +281,16 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       }
     }
 
+    // 系统锁屏卡副标题用的「整行」歌词：上面的 lyricText 是灵动岛的逐字分帧
+    // 短文本，直接当锁屏行会被切成半截字。这里取当前行完整文本，无歌词则空串。
+    var lyricLine = '';
+    if (!lyrics.isEmpty) {
+      final lineIdx = lyrics.activeIndex(Duration(milliseconds: positionMs));
+      if (lineIdx >= 0 && lineIdx < lyrics.lines.length) {
+        lyricLine = lyrics.lines[lineIdx].text.trim();
+      }
+    }
+
     // 当前曲目是否已喜欢：队列条目即 DownloadHistoryEntry，直接比身份键。
     final queueEntry = state.queueIndex >= 0 && state.queueIndex < state.queue.length
         ? state.queue[state.queueIndex]
@@ -291,12 +301,15 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     return {
       'trackId': track.id,
       'title': track.title,
-      'artist': track.artist,
+      // 系统卡副标题位塞当前歌词行；无歌词回退真歌手（对齐胖虎做法）。
+      'artist': lyricLine.isNotEmpty ? lyricLine : track.artist,
+      'displaySubtitle': track.artist,
       'durationMs': durationMs,
       'positionMs': positionMs,
       'playing': playing,
       'loading': loading,
       'lyricText': lyricText,
+      'lyricLine': lyricLine,
       'liked': liked,
     };
   }
@@ -341,6 +354,17 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   Future<void> _pushNowPlaying() async {
     final payload = _payload();
     if (payload == null) return;
+    // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，
+    // 否则连续歌词行会因 key 不变被吞（胖虎同款坑）。liked 也纳入，
+    // 保证五角星点亮/取消能即时重推系统卡。
+    final npKey = [
+      payload['trackId'],
+      payload['artist'],
+      payload['playing'],
+      payload['liked'],
+    ].join('|');
+    if (npKey == _lastNowPlayingKey) return;
+    _lastNowPlayingKey = npKey;
     final cover = await _coverPayload();
     try {
       await _nowPlayingChannel.invokeMethod<bool>('publish', {
@@ -354,6 +378,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     }
   }
 
+  String? _lastNowPlayingKey;
   bool _activeStarted = false;
 
   Future<Map<String, dynamic>> _coverPayload() async {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,6 +46,8 @@ const String _kEnabledSearchSourcesKey = 'enabled_search_source_codes';
 // saved an enabled-source list never learn about it. This flag makes the
 // one-time opt-in run exactly once.
 const String _kQsSearchAddedKey = 'qs_search_added_v1';
+// iOS 存量迁移标记：早期版本把 Android 路径写进 download_dir/local_music_dirs。
+const String _kIosDirMigratedKey = 'ios_default_dir_migrated_v1';
 const String _kDefaultSearchSourceKey = 'default_search_source';
 const String _kReplaceQueueOnSearchPlayKey = 'replace_queue_on_search_play';
 const String _kDiscoverySourceOrderKey = 'discovery_source_order';
@@ -300,6 +303,18 @@ final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
   throw UnimplementedError('Override sharedPreferencesProvider before runApp');
 });
 
+/// 平台默认音乐扫描根目录。Android 用历史常量，iOS 在 main.dart 用
+/// getApplicationDocumentsDirectory() 解析后 override。
+final defaultMusicDirProvider = Provider<String>((ref) {
+  return kDefaultDownloadDir;
+});
+
+/// 平台默认下载目录。iOS 默认为 Documents/MuyinMusic，与
+/// download_service.dart 的兜底一致；iOS 在 main.dart override。
+final defaultDownloadDirProvider = Provider<String>((ref) {
+  return kDefaultDownloadDir;
+});
+
 class SettingsNotifier extends Notifier<AppSettings> {
   late SharedPreferences _prefs;
 
@@ -311,8 +326,14 @@ class SettingsNotifier extends Notifier<AppSettings> {
     if (_prefs.containsKey(_kLegacyBaseUrlKey)) {
       unawaited(_prefs.remove(_kLegacyBaseUrlKey));
     }
-    final downloadDir =
-        _prefs.getString(_kDownloadDirKey) ?? kDefaultDownloadDir;
+    final defaultScanDir = ref.read(defaultMusicDirProvider);
+    final defaultDownloadDir = ref.read(defaultDownloadDirProvider);
+    final defaults = _migrateIosDirectories(
+      _prefs,
+      defaultScanDir,
+      defaultDownloadDir,
+    );
+    final downloadDir = defaults.downloadDir;
     final enabledSearchSources = _migrateQsSearchSource(
       _prefs,
       decodeEnabledSearchSources(_prefs.getStringList(_kEnabledSearchSourcesKey)),
@@ -327,8 +348,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       ),
       localMusicDirs: _normalizeLocalMusicDirs(
         _prefs.getStringList(_kLocalMusicDirsKey) ??
-            [_prefs.getString(_kLocalMusicDirKey) ?? downloadDir],
-        fallback: downloadDir,
+            [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
+        fallback: defaults.scanDir,
       ),
       useBuiltInSourceFilePicker:
           _prefs.getBool(_kUseBuiltInSourceFilePickerKey) ?? false,
@@ -478,10 +499,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       directories.add(directory);
     }
     if (directories.isEmpty) {
-      final path = fallback.trim().isEmpty
-          ? kDefaultDownloadDir
-          : fallback.trim();
-      directories.add(normalizeStorageLocation(path));
+      // fallback 由调用方传入，iOS 上是运行时解析出的默认目录；不再写死 Android 路径。
+      directories.add(normalizeStorageLocation(fallback.trim()));
     }
     return List.unmodifiable(directories);
   }
@@ -999,6 +1018,54 @@ Set<MusicSource> _migrateQsSearchSource(
   ));
   unawaited(prefs.setBool(_kQsSearchAddedKey, true));
   return merged;
+}
+
+/// iOS 存量目录迁移结果：build() 同步使用这些内存值，prefs 异步落盘。
+class _IosDirectories {
+  const _IosDirectories({required this.downloadDir, required this.scanDir});
+  final String downloadDir;
+  final String scanDir;
+}
+
+/// 早期 iOS 版本把 Android 路径 /storage/emulated/0/... 写进了设置。
+/// 一次性把 download_dir 与 local_music_dirs 换成运行时解析出的 iOS 默认目录。
+_IosDirectories _migrateIosDirectories(
+  SharedPreferences prefs,
+  String defaultScanDir,
+  String defaultDownloadDir,
+) {
+  var downloadDir = prefs.getString(_kDownloadDirKey);
+  var scanDirs = prefs.getStringList(_kLocalMusicDirsKey);
+  final legacyScan = prefs.getString(_kLocalMusicDirKey);
+
+  if (Platform.isIOS && prefs.getBool(_kIosDirMigratedKey) != true) {
+    bool isAndroidPath(String value) => value.startsWith('/storage/emulated/');
+
+    if (downloadDir == null || isAndroidPath(downloadDir)) {
+      downloadDir = defaultDownloadDir;
+      unawaited(prefs.setString(_kDownloadDirKey, downloadDir));
+    }
+    if (scanDirs == null || scanDirs.isEmpty) {
+      scanDirs = [defaultScanDir];
+      unawaited(prefs.setStringList(_kLocalMusicDirsKey, scanDirs));
+    } else if (scanDirs.any(isAndroidPath)) {
+      // 剔除 Android 路径；若剔除后为空则回落到 iOS 默认扫描目录。
+      final kept = scanDirs.where((dir) => !isAndroidPath(dir)).toList();
+      scanDirs = kept.isEmpty ? [defaultScanDir] : kept;
+      unawaited(prefs.setStringList(_kLocalMusicDirsKey, scanDirs));
+    }
+    if (legacyScan == null || isAndroidPath(legacyScan)) {
+      unawaited(prefs.setString(_kLocalMusicDirKey, defaultScanDir));
+    }
+    unawaited(prefs.setBool(_kIosDirMigratedKey, true));
+  }
+
+  return _IosDirectories(
+    downloadDir: downloadDir ?? defaultDownloadDir,
+    scanDir: scanDirs?.isEmpty == true
+        ? defaultScanDir
+        : (scanDirs?.first ?? defaultScanDir),
+  );
 }
 
 const List<MusicSource> kDefaultDiscoverySourceOrder = <MusicSource>[

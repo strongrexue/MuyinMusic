@@ -10,6 +10,7 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
 import 'core/services/saf_storage.dart';
+import 'core/services/storage_browser_service.dart';
 import 'core/services/storage_location.dart';
 import 'core/storage/settings_store.dart';
 import 'core/sync/webdav_sync_controller.dart';
@@ -95,6 +96,11 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
   }
 
   Future<void> _initializeLocalLibrary() async {
+    // iOS：先为所有已授权的 security-scoped bookmark 根持续持有 scope，
+    // 之后 dart:io 扫描与 BASS fopen 才能读取沙盒外目录里的文件。
+    if (Platform.isIOS) {
+      await const StorageBrowserService().acquireAllAccess();
+    }
     final cache = ref.read(localSongScanCacheProvider);
     final selected = ref.read(settingsProvider).localMusicDirs;
     final directories = <String>[];

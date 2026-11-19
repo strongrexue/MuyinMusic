@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'storage_location.dart';
+import 'storage_browser_service.dart';
 import 'local_audio_library_events.dart';
 
 /// The stored location is either a legacy filesystem path or an opaque SAF URI.
@@ -29,7 +29,18 @@ class SafStorage {
     String? initialLocation,
   }) async {
     if (!Platform.isAndroid) {
-      return FilePicker.platform.getDirectoryPath(lockParentWindow: true);
+      // iOS：走 storage_browser 通道，弹出系统文档选择器并持久化 bookmark，
+      // 返回沙盒外目录的绝对路径（会话内已持有 security scope）。
+      final picked = await const StorageBrowserService().pickDirectory();
+      if (picked == null) return null;
+      final path = picked['path']!;
+      final name = picked['name'] ?? path;
+      _labels[path] = name;
+      await (await SharedPreferences.getInstance()).setString(
+        '$_labelPrefix$path',
+        name,
+      );
+      return path;
     }
     final selected = await _channel.invokeMapMethod<String, dynamic>(
       'pickDirectory',

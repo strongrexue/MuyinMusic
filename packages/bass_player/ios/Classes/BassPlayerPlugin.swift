@@ -659,10 +659,13 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
     endSync = BASS_ChannelSetSync(
       stream, UInt32(BASS_SYNC_END), 0,
-      { _, _, _, user in
+      { _, channel, _, user in
         guard let user else { return }
         let plugin = Unmanaged<BassPlayerPlugin>.fromOpaque(user).takeUnretainedValue()
-        plugin.engineQueue.async { plugin.handleStreamEnded() }
+        plugin.engineQueue.async {
+          guard channel == plugin.stream, plugin.stream != 0 else { return }
+          plugin.handleStreamEnded()
+        }
       }, user)
 
     stallSync = BASS_ChannelSetSync(
