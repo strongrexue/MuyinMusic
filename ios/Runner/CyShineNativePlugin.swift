@@ -414,6 +414,7 @@ final class CyShineStorageBrowserChannel {
       picker.delegate = delegate
       picker.allowsMultipleSelection = false
       root.present(picker, animated: true)
+      CyShineNativeLog.write("picker", "presented root=\(type(of: root))")
     }
   }
 
@@ -545,6 +546,7 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
 
   func documentPicker(_ controller: UIDocumentPickerViewController,
                       didPickDocumentsAt urls: [URL]) {
+    CyShineNativeLog.write("picker", "didPick count=\(urls.count) first=\(urls.first?.path ?? "nil")")
     defer { onDone?() }
     guard let url = urls.first else {
       result(FlutterError(code: "CANCELLED", message: "未选择文件夹", details: nil))
@@ -569,6 +571,7 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    CyShineNativeLog.write("picker", "cancelled")
     onDone?()
     // 取消不视为错误：返回 nil 让 Dart 层静默返回。
     result(nil)
