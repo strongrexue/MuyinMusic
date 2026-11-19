@@ -64,6 +64,11 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private var completed = false
   private var processingState: PlaybackState = .idle
   private var durationMs: Int?
+  /// iOS 无 Android 的 ProgressiveHttpSource，用这组字段缓存"目标未缓冲"的 seek，
+  /// 等下载推进后由 ticker 重试落位（对齐 Android pendingSeekMs 机制）。
+  private var pendingSeekMs: Int?
+  private var pendingSeekPlay = false
+  private var pendingSeekOriginMs = 0
   private var channelVolume: Float = 1.0
   private var bassVersion = "unknown"
   private var fxVersion = "unknown"
@@ -413,6 +418,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     _ = try initializeEngine()
     if stream == 0 { throw BassError(code: Int32(BASS_ERROR_HANDLE), operation: "play",
                                     message: "没有已加载的音频流") }
+    // 有待落位的 seek（网络流目标尚未缓冲）：先不实际起播，等落位后再恢复，
+    // 避免先在 0 起播、随后 seek 才到造成的"从头播一下再跳"。
+    if pendingSeekMs != nil {
+      pendingSeekPlay = true
+      startTicking()
+      emitSnapshot()
+      return snapshot()
+    }
     if completed {
       // 播完后再点播放：回到起点重播，与 Android 行为一致。
       let position = BASS_ChannelSeconds2Bytes(stream, 0.0)
@@ -458,20 +471,55 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   }
 
   private func seek(_ positionMs: Int) throws -> [String: Any?] {
-    if stream == 0 { return snapshot() }
+    if stream == 0 {
+      // stream 未就绪（load 刚开始/网络流未建）：缓存目标，待就绪后落位。
+      pendingSeekMs = positionMs
+      pendingSeekOriginMs = 0
+      pendingSeekPlay = playing
+      refreshPlaybackState()
+      emitSnapshot()
+      return snapshot()
+    }
     let seconds = max(0.0, Double(positionMs) / 1000.0)
     let position = BASS_ChannelSeconds2Bytes(stream, seconds)
     if BASS_ChannelSetPosition(stream, position, UInt32(BASS_POS_BYTE)) == 0 {
+      if remoteSource {
+        // 目标未缓冲：静默缓存而非抛错（抛出会被 Dart 当 non-fatal 吞掉，位置停在 0）。
+        if pendingSeekMs == nil { pendingSeekOriginMs = readPositionMs() }
+        pendingSeekMs = positionMs
+        pendingSeekPlay = playing
+        let active = BASS_ChannelIsActive(stream)
+        if active == UInt32(BASS_ACTIVE_PLAYING) || active == UInt32(BASS_ACTIVE_STALLED) {
+          _ = BASS_ChannelPause(stream)
+        }
+        startTicking()
+        emitSnapshot()
+        return snapshot()
+      }
       throw BassError.fromLastError(operation: "seek")
     }
     // seek 后滤波器里残留的历史会造成爆音，清掉。
     resetEqualizerState()
-    if completed {
-      completed = false
-    }
+    completed = false
     refreshPlaybackState()
     emitSnapshot()
     return snapshot()
+  }
+
+  /// 尝试把缓存的 seek 落位；目标仍未缓冲时保留 pending 待下次重试。
+  private func attemptPendingSeek() {
+    guard let target = pendingSeekMs, stream != 0 else { return }
+    let bytes = BASS_ChannelSeconds2Bytes(stream, Double(max(0, target)) / 1000.0)
+    guard BASS_ChannelSetPosition(stream, bytes, UInt32(BASS_POS_BYTE)) != 0 else {
+      return  // 目标还没缓冲出来，保留 pending 待下次重试
+    }
+    pendingSeekMs = nil
+    resetEqualizerState()
+    if pendingSeekPlay {
+      _ = BASS_ChannelPlay(stream, 0)
+    }
+    refreshPlaybackState()
+    emitSnapshot()
   }
 
   private func setVolume(_ volume: Float) throws -> [String: Any?] {
@@ -708,7 +756,10 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         { _, _, _, user in
           guard let user else { return }
           let plugin = Unmanaged<BassPlayerPlugin>.fromOpaque(user).takeUnretainedValue()
-          plugin.engineQueue.async { plugin.emitSnapshot() }
+          plugin.engineQueue.async {
+            plugin.attemptPendingSeek()
+            plugin.emitSnapshot()
+          }
         }, user)
     }
   }
@@ -739,6 +790,13 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   // MARK: - 状态
 
   private func refreshPlaybackState() {
+    if pendingSeekMs != nil {
+      playing = pendingSeekPlay
+      processingState = .buffering
+      durationMs = readDurationMs() ?? durationMs
+      syncTicking()
+      return
+    }
     if stream == 0 || completed || processingState == .loading || processingState == .error {
       return
     }
@@ -763,7 +821,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   }
 
   private func snapshot() -> [String: Any?] {
-    let position = readPositionMs()
+    let position = pendingSeekMs ?? readPositionMs()
     return [
       "event": "snapshot",
       "playing": playing,
@@ -833,6 +891,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
     timer.setEventHandler { [weak self] in
       guard let self else { return }
+      self.attemptPendingSeek()
       self.refreshPlaybackStateQuietly()
       self.emitSnapshot()
     }
@@ -846,6 +905,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   }
 
   private func refreshPlaybackStateQuietly() {
+    if pendingSeekMs != nil { return }
     if stream == 0 || completed { return }
     durationMs = readDurationMs() ?? durationMs
     switch BASS_ChannelIsActive(stream) {
@@ -867,6 +927,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   // MARK: - 释放
 
   private func releaseStream() {
+    pendingSeekMs = nil
+    pendingSeekPlay = false
     stopTicking()
     detachEqualizer()
     if stream != 0 {
