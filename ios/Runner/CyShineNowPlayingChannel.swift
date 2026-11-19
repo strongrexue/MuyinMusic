@@ -49,6 +49,10 @@ final class CyShineNowPlayingChannel: NSObject {
           MPMediaItemArtwork(boundsSize: image.size) { _ in image }
       }
       center.nowPlayingInfo = info
+      // BASS 自研引擎输出不像 AVAudioPlayer 那样被系统天然认作媒体源，必须显式
+      // 标记播放态锁屏卡才出现（探针 systemPlayerProbe 即靠这一句 + nowPlayingInfo
+      // 画出卡）。飞牛/官方走系统播放器无需此标记，故此前对照里看不出它的必要性。
+      center.playbackState = ((a["playing"] as? Bool) ?? false) ? .playing : .paused
       // 五角星实心/空心随喜欢状态刷新；并重新 enable（audio_service 初始化时会
       // 把 likeCommand/dislikeCommand 置 NO，这里每次写入都覆盖回来）。
       Self.syncLikeState(liked: (a["liked"] as? Bool) ?? false)
