@@ -553,7 +553,9 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
     // 选中后立即开始访问，随后建立可跨启动持久化的 security-scoped bookmark。
     let scoped = url.startAccessingSecurityScopedResource()
     do {
-      let data = try url.bookmarkData(options: [.withSecurityScope],
+      // iOS 不支持 .withSecurityScope（macOS-only）；用默认 options 建立 bookmark，
+      // 解析后由 startAccessingSecurityScopedResource() 恢复访问。
+      let data = try url.bookmarkData(options: [],
                                       includingResourceValuesForKeys: nil,
                                       relativeTo: nil)
       bookmarks.save(name: url.lastPathComponent, bookmark: data)
