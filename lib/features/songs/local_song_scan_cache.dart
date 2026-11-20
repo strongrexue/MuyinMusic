@@ -240,8 +240,22 @@ class LocalSongScanCache extends ChangeNotifier {
         _directories?.call() ?? _snapshot?.directories ?? [],
       );
       final file = await savedLibraryFile(event.path, directories);
-      if (file == null ||
-          _disposed ||
+      if (file == null) {
+        // 增量归属判断失败（下载根与扫描根路径形态不一致 / owner==null /
+        // metadata 读取失败）。iOS 无系统媒体扫描，saved 事件是唯一的入库
+        // 机会；此前这里静默 return，加上 ensureScan 在目录未变时跳过全扫，
+        // 新文件就永久进不了索引——表现为「下载成功但扫描不到」。
+        // 兜底触发一次全扫：全扫按扫描根物理枚举，不依赖路径字符串归属。
+        unawaited(
+          AppLogger.write(
+            'local-library',
+            'incremental miss for ${event.path}, falling back to full refresh',
+          ),
+        );
+        unawaited(refresh(directories: directories));
+        return;
+      }
+      if (_disposed ||
           _eventRevisions[eventKey] != revision ||
           (_mutations[file.key]?.revision ?? 0) > revision) {
         return;

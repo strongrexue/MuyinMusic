@@ -1,5 +1,8 @@
 name: iOS Build
 
+permissions:
+  contents: write
+
 # Builds the iOS app on a hosted macOS runner, so a Mac is not needed locally.
 # The unsigned .ipa it produces can be signed on Windows with Sideloadly/AltStore
 # (free Apple ID, 7-day certificate) or uploaded to TestFlight with an account.
@@ -168,6 +171,25 @@ jobs:
           name: MuyinMusic-unsigned-ipa
           path: build/MuyinMusic-unsigned.ipa
           retention-days: 14
+
+      # tag 触发的构建把未签名 IPA 挂到 GitHub Release（与 Android 发版一致）。
+      # 未签名包仍需用户用 AltStore / Sideloadly 以自有 Apple ID 重签安装。
+      - name: Publish unsigned IPA to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/ios-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          IPA="MuyinMusic-${TAG#ios-}-unsigned.ipa"
+          cp build/MuyinMusic-unsigned.ipa "$IPA"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA" --clobber
+          else
+            gh release create "$TAG" "$IPA" --draft \
+              --title "MuyinMusic iOS ${TAG#ios-}" --generate-notes
+          fi
+          echo "未签名 IPA 已发布到 Release $TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build logs on failure
         if: failure()

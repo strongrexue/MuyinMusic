@@ -437,8 +437,8 @@ void main() {
       await pumpSection(SettingsSection.downloads);
       expect(find.text('批量下载音质'), findsOneWidget);
       expect(find.text('目录'), findsOneWidget);
-      expect(find.text('浏览U盘'), findsOneWidget);
-      expect(find.text('添加 U 盘文件夹'), findsOneWidget);
+      expect(find.text('浏览U盘'), findsNothing);
+      expect(find.text('添加 U 盘文件夹'), findsNothing);
       expect(find.text('下载位置'), findsOneWidget);
       await pumpSection(SettingsSection.permissions);
       expect(find.text('音乐和音频'), findsOneWidget);

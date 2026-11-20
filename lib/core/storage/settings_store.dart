@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/storage_location.dart';
@@ -1097,9 +1098,54 @@ _IosDirectories _migrateIosDirectories(
   var scanDirs = prefs.getStringList(_kLocalMusicDirsKey);
   final legacyScan = prefs.getString(_kLocalMusicDirKey);
 
-  if (Platform.isIOS && prefs.getBool(_kIosDirMigratedKey) != true) {
-    bool isAndroidPath(String value) => value.startsWith('/storage/emulated/');
+  bool isAndroidPath(String value) => value.startsWith('/storage/emulated/');
 
+  // 侧载 App 升级/重装后 Documents 容器的 UUID 会变。持久化的是绝对路径，
+  // 若仍指向旧 UUID：下载落到新容器、扫描却盯旧路径，saved 事件的 owner
+  // 归属判断失败被静默丢弃，表现为「下载成功但扫描不到」。
+  // 每次启动校验：只刷新落在沙盒容器内但 UUID 已过期的路径；用户手动选的
+  // 外部目录（不含此标记）原样保留。
+  const marker = '/Containers/Data/Application/';
+  final idx = defaultScanDir.indexOf(marker);
+  final currentUuid = idx < 0
+      ? ''
+      : defaultScanDir.substring(idx + marker.length).split('/').first;
+  bool stale(String value) {
+    if (currentUuid.isEmpty) return false;
+    final i = value.indexOf(marker);
+    if (i < 0) return false;
+    return value.substring(i + marker.length).split('/').first != currentUuid;
+  }
+
+  if (Platform.isIOS) {
+    if (downloadDir != null && stale(downloadDir)) {
+      downloadDir = defaultDownloadDir;
+      unawaited(prefs.setString(_kDownloadDirKey, downloadDir));
+    }
+    if (scanDirs != null && scanDirs.isNotEmpty) {
+      var changed = false;
+      final refreshed = <String>[];
+      for (final dir in scanDirs) {
+        final value = stale(dir) ? defaultScanDir : dir;
+        if (value != dir) changed = true;
+        if (refreshed.contains(value)) {
+          changed = true;
+        } else {
+          refreshed.add(value);
+        }
+      }
+      if (changed) {
+        scanDirs = refreshed;
+        unawaited(prefs.setStringList(_kLocalMusicDirsKey, scanDirs));
+      }
+    }
+    if (legacyScan != null && stale(legacyScan)) {
+      unawaited(prefs.setString(_kLocalMusicDirKey, defaultScanDir));
+    }
+  }
+
+  // 一次性迁移旧版本写入的 Android 路径。
+  if (Platform.isIOS && prefs.getBool(_kIosDirMigratedKey) != true) {
     if (downloadDir == null || isAndroidPath(downloadDir)) {
       downloadDir = defaultDownloadDir;
       unawaited(prefs.setString(_kDownloadDirKey, downloadDir));
@@ -1117,6 +1163,23 @@ _IosDirectories _migrateIosDirectories(
       unawaited(prefs.setString(_kLocalMusicDirKey, defaultScanDir));
     }
     unawaited(prefs.setBool(_kIosDirMigratedKey, true));
+  }
+
+  // 下载根与扫描根同源：iOS 上让下载目录始终是扫描根下的 MuyinMusic，
+  // 保证落点归属判断恒成立（对齐 Cymusic「固定自有目录」的做法）。
+  if (Platform.isIOS) {
+    final scanRoot = scanDirs?.isEmpty == true
+        ? defaultScanDir
+        : (scanDirs?.first ?? defaultScanDir);
+    final derived = p.join(scanRoot, 'MuyinMusic');
+    if (downloadDir == null || isAndroidPath(downloadDir) || stale(downloadDir)) {
+      downloadDir = derived;
+    } else {
+      final dl = normalizeStorageLocation(downloadDir);
+      final expected = normalizeStorageLocation(derived);
+      final root = normalizeStorageLocation(scanRoot);
+      if (dl != expected && dl != root) downloadDir = derived;
+    }
   }
 
   return _IosDirectories(

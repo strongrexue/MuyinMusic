@@ -324,7 +324,12 @@ class DownloadService {
       // Resolve and transfer inside the same source attempt so a stale CDN
       // URL can fall through to the next enabled source.
       log('step1 resolve with enabled local music sources');
-      final destDir = await _resolveDestinationDir(settings.downloadDir, log);
+      // iOS 上下载根派生自扫描根，保证文件落在扫描目录内、saved 事件的
+      // owner 归属判断恒成立；安卓沿用用户设置的下载目录。
+      final downloadRoot = Platform.isIOS
+          ? p.join(normalizeStorageLocation(settings.localMusicDir), 'MuyinMusic')
+          : settings.downloadDir;
+      final destDir = await _resolveDestinationDir(downloadRoot, log);
       final cacheRoot = await getTemporaryDirectory();
       taskCacheDir = await cacheRoot.createTemp('muyin-download-');
       ensureActive();
