@@ -1294,7 +1294,7 @@ final class CyShineNetworkTypeChannel: NSObject, FlutterStreamHandler {
       let next = path.isExpensive ? "cellular" : "wifi"
       let changed = self.updateType(next)
       if changed {
-        self.currentSink()(next)
+        self.currentSink()?(next)
       }
     }
     monitor.start(queue: queue)
@@ -1319,7 +1319,7 @@ final class CyShineNetworkTypeChannel: NSObject, FlutterStreamHandler {
   }
 
   func onListen(withArguments arguments: Any?,
-                events eventSink: @escaping FlutterEventSink) -> FlutterError? {
+                eventSink: @escaping FlutterEventSink) -> FlutterError? {
     lock.lock()
     sink = eventSink
     let type = currentType
