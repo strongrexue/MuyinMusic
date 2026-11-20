@@ -91,10 +91,12 @@ class _SliverMasonryPlaylistGridState
         final available = constraints.crossAxisExtent;
         final gridWidth = math.min(available, widget.maxWidth);
         final inset = (available - gridWidth) / 2;
-        final expandedGrid = carDisplay ||
-            (Platform.isWindows && gridWidth >= 840);
+        final windowsWide = Platform.isWindows && gridWidth >= 840;
+        final expandedGrid = carDisplay || windowsWide;
+        // 大窗口继续加列而不是把卡片等比撑大，让封面维持约 240px 的目标宽度。
+        // 车机沿用原上限 6，仅 Windows 放宽；手机端走下方原始分支。
         final columnCount = expandedGrid
-            ? (gridWidth / 240).floor().clamp(2, 6)
+            ? (gridWidth / 240).floor().clamp(2, windowsWide ? 10 : 6)
             : carPadModeEnabled || gridWidth >= 700
             ? 3
             : 2;
