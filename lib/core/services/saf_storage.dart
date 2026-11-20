@@ -32,7 +32,12 @@ class SafStorage {
   }) async {
     if (Platform.isWindows) {
       // Windows：file_picker 纯 Dart 实现，弹原生目录选择框。
-      final initialDir = initialLocation != null && p.isAbsolute(initialLocation)
+      // 只有存在的绝对路径才能作为 initialDirectory 传给 file_picker：
+      // Windows 实现会对不存在的路径直接抛 WindowsException（在弹框之前），
+      // 导致「下载位置」点击后毫无反应。
+      final initialDir = initialLocation != null &&
+              p.isAbsolute(initialLocation) &&
+              Directory(initialLocation).existsSync()
           ? initialLocation
           : null;
       final picked = await FilePicker.platform.getDirectoryPath(

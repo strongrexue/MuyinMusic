@@ -43,6 +43,7 @@ import 'song_search.dart';
 import 'songs_toolbar_state.dart';
 import 'songs_playback_location.dart';
 import 'widgets/song_row.dart';
+import 'widgets/windows_playlist_cover_card.dart';
 import 'widgets/songs_batch_action_bar.dart';
 import 'widgets/songs_placeholders.dart';
 import 'widgets/songs_sort_sheet.dart';
@@ -1354,37 +1355,108 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       ? 12
                       : ShellBottomArea.contentPadding(context, 104),
                 ),
-                sliver: SliverReorderableList(
-                  itemCount: visiblePlaylists.length,
-                  onReorderItem: (oldIndex, newIndex) {
-                    unawaited(_reorderPlaylists(oldIndex, newIndex));
-                  },
-                  itemBuilder: (context, index) {
-                    final playlist = visiblePlaylists[index];
-                    return Padding(
-                      key: ValueKey('songs-playlist-${playlist.id}'),
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: ReorderableDelayedDragStartListener(
-                        index: index,
-                        enabled: !_batchMode && !searching,
-                        child: PlaylistLibraryTile(
-                          playlist: playlist,
-                          batchMode: _batchMode,
-                          selected: _selectedIds.contains(playlist.id),
-                          onToggleSelected: () =>
-                              _togglePlaylistSelection(playlist.id),
-                          onOpen: () => unawaited(_openPlaylist(playlist)),
-                          onUpdate: playlist.isOnlineImport
-                              ? () => unawaited(_updatePlaylist(playlist))
-                              : null,
-                          updating: _updatingPlaylistIds.contains(playlist.id),
-                          onUnfavorite: () =>
-                              unawaited(_unfavoritePlaylist(playlist)),
-                        ),
+                sliver: Platform.isWindows
+                    ? SliverLayoutBuilder(
+                        builder: (context, constraints) {
+                          // 外层 SliverPadding 已保留左右各 12 的对称留白，这里按可用宽算列数。
+                          final gridWidth = constraints.crossAxisExtent;
+                          final columnCount =
+                              (gridWidth / 220).floor().clamp(2, 4);
+                          const gap = 10.0;
+                          final cellWidth =
+                              (gridWidth - gap * (columnCount - 1)) /
+                              columnCount;
+                          // 卡片 = 正方形封面 + 底部元信息（padding 22 + 标题 20 + 间距 4 + meta 16）。
+                          const metaHeight = 62.0;
+                          final childAspectRatio =
+                              cellWidth / (cellWidth + metaHeight);
+                          final canReorder = !_batchMode && !searching;
+                          return SliverGrid(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columnCount,
+                              mainAxisSpacing: gap,
+                              crossAxisSpacing: gap,
+                              childAspectRatio: childAspectRatio,
+                            ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final playlist = visiblePlaylists[index];
+                                return WindowsPlaylistCoverCard(
+                                  playlist: playlist,
+                                  index: index,
+                                  total: visiblePlaylists.length,
+                                  batchMode: _batchMode,
+                                  selected: _selectedIds.contains(playlist.id),
+                                  canMoveUp: index > 0,
+                                  canMoveDown:
+                                      index < visiblePlaylists.length - 1,
+                                  onOpen: () =>
+                                      unawaited(_openPlaylist(playlist)),
+                                  onUnfavorite: () =>
+                                      unawaited(_unfavoritePlaylist(playlist)),
+                                  onUpdate: playlist.isOnlineImport
+                                      ? () =>
+                                          unawaited(_updatePlaylist(playlist))
+                                      : null,
+                                  updating: _updatingPlaylistIds.contains(
+                                    playlist.id,
+                                  ),
+                                  onToggleSelected: () =>
+                                      _togglePlaylistSelection(playlist.id),
+                                  // 批量/搜索态不显示排序菜单（与手机端 enabled 条件一致）。
+                                  onMoveUp: canReorder && index > 0
+                                      ? () => unawaited(
+                                          _reorderPlaylists(index, index - 1),
+                                        )
+                                      : null,
+                                  onMoveDown: canReorder &&
+                                          index < visiblePlaylists.length - 1
+                                      ? () => unawaited(
+                                          _reorderPlaylists(index, index + 1),
+                                        )
+                                      : null,
+                                );
+                              },
+                              childCount: visiblePlaylists.length,
+                            ),
+                          );
+                        },
+                      )
+                    : SliverReorderableList(
+                        itemCount: visiblePlaylists.length,
+                        onReorderItem: (oldIndex, newIndex) {
+                          unawaited(_reorderPlaylists(oldIndex, newIndex));
+                        },
+                        itemBuilder: (context, index) {
+                          final playlist = visiblePlaylists[index];
+                          return Padding(
+                            key: ValueKey('songs-playlist-${playlist.id}'),
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: ReorderableDelayedDragStartListener(
+                              index: index,
+                              enabled: !_batchMode && !searching,
+                              child: PlaylistLibraryTile(
+                                playlist: playlist,
+                                batchMode: _batchMode,
+                                selected: _selectedIds.contains(playlist.id),
+                                onToggleSelected: () =>
+                                    _togglePlaylistSelection(playlist.id),
+                                onOpen: () =>
+                                    unawaited(_openPlaylist(playlist)),
+                                onUpdate: playlist.isOnlineImport
+                                    ? () => unawaited(_updatePlaylist(playlist))
+                                    : null,
+                                updating: _updatingPlaylistIds.contains(
+                                  playlist.id,
+                                ),
+                                onUnfavorite: () =>
+                                    unawaited(_unfavoritePlaylist(playlist)),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
               ),
           ] else ...[
             if (localSongs.isNotEmpty)
