@@ -26,10 +26,31 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
+  Win32Window::Size size(1500, 900);
   if (!window.Create(L"\u6c90\u97f3", origin, size)) {
     return EXIT_FAILURE;
   }
+
+  // Center on the primary monitor's work area (physical pixels, not DPI-scaled).
+  HWND hwnd = window.GetHandle();
+  if (hwnd != nullptr) {
+    RECT rect;
+    if (::GetWindowRect(hwnd, &rect)) {
+      const int width = rect.right - rect.left;
+      const int height = rect.bottom - rect.top;
+      HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO info{};
+      info.cbSize = sizeof(info);
+      if (::GetMonitorInfo(monitor, &info)) {
+        const RECT& work = info.rcWork;
+        const int x = work.left + (work.right - work.left - width) / 2;
+        const int y = work.top + (work.bottom - work.top - height) / 2;
+        ::SetWindowPos(hwnd, nullptr, x, y, 0, 0,
+                       SWP_NOSIZE | SWP_NOZORDER);
+      }
+    }
+  }
+
   window.SetQuitOnClose(true);
 
   ::MSG msg;
