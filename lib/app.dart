@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
+import 'package:prism_ui/scroll_behavior.dart' show BaseScrollBehavior;
 
 import 'core/services/app_logger.dart';
 import 'core/services/permission_service.dart';
@@ -345,6 +346,8 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       theme: lightTheme,
       darkTheme: darkTheme,
       routerConfig: appRouter,
+      // 仅桌面端让鼠标可拖动横向列表；手机端保持系统默认触摸滚动。
+      scrollBehavior: Platform.isWindows ? const BaseScrollBehavior() : null,
       builder: (context, child) {
         // Route-specific regions (such as artwork headers) override
         // this baseline only while they are visible in the layer tree.

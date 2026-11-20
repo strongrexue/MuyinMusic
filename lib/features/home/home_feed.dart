@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,8 +15,10 @@ import '../playlists/playlist_models.dart';
 import '../songs/liked_songs_store.dart';
 import 'recent_plays_store.dart';
 
-const int _dailyPickCount = 12;
-const int _guessCount = 12;
+/// Windows 大窗口展示更多条目；手机端保持原有 12 首不变。
+int get _shelfCount => Platform.isWindows ? 36 : 12;
+int get _dailyPickCount => _shelfCount;
+int get _guessCount => _shelfCount;
 
 /// Day number used to rotate the daily mix; the shelf only changes at midnight.
 int homeDayIndex(DateTime now) =>
@@ -24,7 +27,7 @@ int homeDayIndex(DateTime now) =>
         .inDays;
 
 String _dailyCacheKey(MusicSource source) =>
-    'home_daily_picks_${source.code}_v1';
+    'home_daily_picks_${source.code}_v1${Platform.isWindows ? '_w$_shelfCount' : ''}';
 
 DownloadHistoryEntry? _entryFor(MusicInfo music, String queueId) {
   final entry = PlaylistTrack.fromMusicInfo(music).toQueueEntry(playlistId: queueId);
@@ -133,7 +136,7 @@ final guessYouLikeProvider =
           final response = await api.searchMusic(
             keyword: artist,
             source: source,
-            limit: 12,
+            limit: _shelfCount,
           );
           picks.addAll(response.list.take(_guessCount - picks.length));
         } catch (_) {
