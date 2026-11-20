@@ -62,6 +62,15 @@ class LikedSongsNotifier extends Notifier<List<DownloadHistoryEntry>> {
     return liked;
   }
 
+  /// 批量取消喜欢：按 identity key 一次性移除并持久化，复用 toggle 的身份语义。
+  void removeMany(Iterable<DownloadHistoryEntry> entries) {
+    final keys = entries.map(songIdentityKey).toSet();
+    final next = state.where((item) => !keys.contains(songIdentityKey(item))).toList();
+    if (next.length == state.length) return;
+    state = List<DownloadHistoryEntry>.unmodifiable(next);
+    unawaited(_persist(next));
+  }
+
   Future<void> _persist(List<DownloadHistoryEntry> entries) => _prefs
       .setString(
         likedSongsStorageKey,

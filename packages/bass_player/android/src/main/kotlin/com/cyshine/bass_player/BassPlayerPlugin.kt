@@ -36,6 +36,11 @@ class BassPlayerPlugin :
     private lateinit var applicationContext: Context
     private lateinit var methods: MethodChannel
     private lateinit var events: EventChannel
+    // 在线播放音质按网络类型选档用的独立通道，与 bass 自身的 UTF-8 通道隔离。
+    private lateinit var networkTypeMethods: MethodChannel
+    private lateinit var networkTypeEvents: EventChannel
+    @Volatile private var networkTypeSink: EventChannel.EventSink? = null
+    @Volatile private var currentNetworkType: String = "cellular"
     private val mainHandler = Handler(Looper.getMainLooper())
     private val engineThread = HandlerThread("CyShine-BASS")
     private lateinit var engineHandler: Handler
@@ -147,6 +152,29 @@ class BassPlayerPlugin :
         )
         methods.setMethodCallHandler(this)
         events.setStreamHandler(this)
+        networkTypeMethods = MethodChannel(
+            binding.binaryMessenger,
+            "cy_shine_music/network_type",
+        )
+        networkTypeEvents = EventChannel(
+            binding.binaryMessenger,
+            "cy_shine_music/network_type_events",
+        )
+        networkTypeMethods.setMethodCallHandler { call, result ->
+            if (call.method == "getNetworkType") {
+                result.success(currentNetworkType)
+            } else {
+                result.notImplemented()
+            }
+        }
+        networkTypeEvents.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
+                networkTypeSink = sink
+            }
+            override fun onCancel(arguments: Any?) {
+                networkTypeSink = null
+            }
+        })
         engineHandler.post(::clearStreamCache)
         registerNetworkCallback()
     }
@@ -154,6 +182,9 @@ class BassPlayerPlugin :
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
+        networkTypeMethods.setMethodCallHandler(null)
+        networkTypeEvents.setStreamHandler(null)
+        networkTypeSink = null
         eventSink = null
         unregisterNetworkCallback()
         cancelPendingNetworkLoad()
@@ -1458,7 +1489,13 @@ class BassPlayerPlugin :
             as? ConnectivityManager ?: return
         networkAvailable = try {
             manager.activeNetwork?.let(manager::getNetworkCapabilities)
-                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                ?.let { capabilities ->
+                    val wifi = capabilities.hasTransport(
+                        NetworkCapabilities.TRANSPORT_WIFI,
+                    )
+                    currentNetworkType = if (wifi) "wifi" else "cellular"
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                } == true
         } catch (_: RuntimeException) {
             null
         }
@@ -1473,6 +1510,9 @@ class BassPlayerPlugin :
                 updateNetwork(
                     capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
                     replaced = false,
+                    wifiTransport = capabilities.hasTransport(
+                        NetworkCapabilities.TRANSPORT_WIFI,
+                    ),
                 )
         }
         try {
@@ -1495,9 +1535,20 @@ class BassPlayerPlugin :
     }
 
     // Runs on the connectivity thread.
-    private fun updateNetwork(available: Boolean, replaced: Boolean) {
+    private fun updateNetwork(
+        available: Boolean,
+        replaced: Boolean,
+        wifiTransport: Boolean? = null,
+    ) {
         val previous = networkAvailable
         networkAvailable = available
+        if (wifiTransport != null) {
+            val nextType = if (wifiTransport) "wifi" else "cellular"
+            if (currentNetworkType != nextType) {
+                currentNetworkType = nextType
+                mainHandler.post { networkTypeSink?.success(nextType) }
+            }
+        }
         if (available && (previous != true || replaced)) {
             // Sockets of a replaced network can hang until they time out; reconnect at once.
             engineHandler.post { httpSource?.retryNow(reconnect = previous == true) }

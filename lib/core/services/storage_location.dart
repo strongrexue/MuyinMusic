@@ -18,7 +18,15 @@ String contentDocumentKey(String value) {
 String normalizeStorageLocation(String value) {
   final trimmed = value.trim();
   if (isContentLocation(trimmed)) return trimmed;
-  return (trimmed.startsWith('/') ? p.posix : p.context).normalize(trimmed);
+  final normalized =
+      (trimmed.startsWith('/') ? p.posix : p.context).normalize(trimmed);
+  // iOS/macOS: /var 是 /private/var 的符号链接，指向同一目录。path_provider
+  // 与 UIDocumentPicker/FileManager 可能返回不同形态，统一到 /var 才能比较归属。
+  if (normalized == '/private/var') return '/var';
+  if (normalized.startsWith('/private/var/')) {
+    return '/var/${normalized.substring('/private/var/'.length)}';
+  }
+  return normalized;
 }
 
 String storageLocationLabel(String value) {

@@ -18,6 +18,7 @@ import ActivityKit
 import Flutter
 import Foundation
 import MediaPlayer
+import Network
 import UIKit
 import UniformTypeIdentifiers
 import WidgetKit
@@ -31,6 +32,7 @@ public final class CyShineNativePlugin: NSObject, FlutterPlugin {
   private let audioIntent = CyShineAudioIntentChannel()
   private let nativeTagger = CyShineNativeTaggerChannel()
   private let appTask = CyShineAppTaskChannel()
+  private let networkType = CyShineNetworkTypeChannel()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = CyShineNativePlugin()
@@ -58,6 +60,21 @@ public final class CyShineNativePlugin: NSObject, FlutterPlugin {
     connect("cy_shine_music/app_task", messenger) { [appTask] call, result in
       appTask.handle(call, result)
     }
+    // 在线播放音质按网络类型选档：方法读初值，事件通道推变化。
+    FlutterMethodChannel(
+      name: "cy_shine_music/network_type",
+      binaryMessenger: messenger
+    ).setMethodCallHandler { [networkType] call, result in
+      if call.method == "getNetworkType" {
+        result(networkType.currentType)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    FlutterEventChannel(
+      name: "cy_shine_music/network_type_events",
+      binaryMessenger: messenger
+    ).setStreamHandler(networkType)
     // 原生 → Dart 的日志桥。必须最先注册，后面各处才敢往里写。
     CyShineNativeLog.register(with: messenger)
     CyShineIncomingAudio.shared.bind(to: messenger)
@@ -1251,5 +1268,70 @@ final class CyShineAppTaskChannel {
       acc.append(Character(UnicodeScalar(UInt8(value))))
     }
     return identifier.isEmpty ? "unknown" : identifier
+  }
+}
+
+// MARK: - 网络类型（WiFi / 移动流量）
+
+/// 用 NWPathMonitor 判断当前网络是否按流量计费（.isExpensive == cellular）。
+/// 同时实现 FlutterStreamHandler 供 EventChannel 推送类型变化。
+@available(iOS 13.0, *)
+final class CyShineNetworkTypeChannel: NSObject, FlutterStreamHandler {
+  private let monitor = NWPathMonitor()
+  private let queue = DispatchQueue(label: "cy_shine.network_type")
+  private var sink: FlutterEventSink?
+  private let lock = NSLock()
+
+  /// 'wifi' 或 'cellular'，供 MethodChannel 同步读取。
+  private(set) var currentType: String = "wifi"
+
+  override init() {
+    super.init()
+    monitor.pathUpdateHandler = { [weak self] path in
+      guard let self else { return }
+      // 断网时保留上一次的类型；.isExpensive 表示按流量计费（cellular）。
+      if path.status == .unsatisfied { return }
+      let next = path.isExpensive ? "cellular" : "wifi"
+      let changed = self.updateType(next)
+      if changed {
+        self.currentSink()(next)
+      }
+    }
+    monitor.start(queue: queue)
+  }
+
+  deinit {
+    monitor.cancel()
+  }
+
+  private func updateType(_ next: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if currentType == next { return false }
+    currentType = next
+    return true
+  }
+
+  private func currentSink() -> FlutterEventSink? {
+    lock.lock()
+    defer { lock.unlock() }
+    return sink
+  }
+
+  func onListen(withArguments arguments: Any?,
+                events eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    lock.lock()
+    sink = eventSink
+    let type = currentType
+    lock.unlock()
+    eventSink(type)
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    lock.lock()
+    sink = nil
+    lock.unlock()
+    return nil
   }
 }

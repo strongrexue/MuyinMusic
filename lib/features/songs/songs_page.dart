@@ -1126,6 +1126,23 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     await _deleteSongs(selected);
   }
 
+  Future<void> _unlikeSelected(List<DownloadHistoryEntry> songs) async {
+    final selected = songs
+        .where((entry) => _selectedIds.contains(entry.id))
+        .toList(growable: false);
+    if (selected.isEmpty) {
+      showAppToast(context, '请先选择歌曲', type: AppToastType.warning);
+      return;
+    }
+    ref.read(likedSongsProvider.notifier).removeMany(selected);
+    if (!mounted) return;
+    setState(() {
+      _selectedIds.clear();
+      _batchMode = false;
+    });
+    showAppToast(context, '已取消喜欢 ${selected.length} 首', type: AppToastType.success);
+  }
+
   void _syncToolbarState({
     required SongsLibraryTab tab,
     required String libraryTitle,
@@ -1479,9 +1496,12 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                   )
                 : SongsBatchActionBar(
                     selectedCount: selectedCount,
+                    likedMode: tab == SongsLibraryTab.liked,
                     onDelete: selectedCount == 0
                         ? null
-                        : () => unawaited(_confirmDeleteSelected(songs)),
+                        : (tab == SongsLibraryTab.liked
+                            ? () => unawaited(_unlikeSelected(songs))
+                            : () => unawaited(_confirmDeleteSelected(songs))),
                     onAddToPlaylist: selectedCount == 0
                         ? null
                         : () => unawaited(_addSelectedToPlaylist(songs)),

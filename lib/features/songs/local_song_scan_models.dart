@@ -243,6 +243,9 @@ String localSongPathKey(String path) {
 
 bool isFileInScanDirectory(String path, String directory) {
   if (isContentLocation(path) || isContentLocation(directory)) return false;
-  final context = path.startsWith('/') ? p.posix : p.context;
-  return context.equals(path, directory) || context.isWithin(directory, path);
+  final normalizedPath = normalizeStorageLocation(path);
+  final normalizedDir = normalizeStorageLocation(directory);
+  final context = normalizedPath.startsWith('/') ? p.posix : p.context;
+  return context.equals(normalizedPath, normalizedDir) ||
+      context.isWithin(normalizedDir, normalizedPath);
 }

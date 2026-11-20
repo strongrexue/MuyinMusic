@@ -17,6 +17,7 @@ import '../../core/models/music_info.dart';
 import '../../core/music_sources/music_url_resolver.dart';
 import '../../core/services/app_logger.dart';
 import '../../core/services/local_audio_source.dart';
+import '../../core/services/network_type_service.dart';
 import '../../core/services/tagger.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
@@ -527,9 +528,11 @@ class PlayerController extends StateNotifier<PlayerState>
     _invalidateGrooveShift();
     _requestToken = token;
     _transportSuppressionToken = token;
-    final playbackPreference = _ref
-        .read(settingsProvider)
-        .onlinePlaybackQuality;
+    final settings = _ref.read(settingsProvider);
+    final isWiFi = _ref.read(networkTypeProvider);
+    final playbackPreference = isWiFi
+        ? settings.onlinePlaybackQualityWifi
+        : settings.onlinePlaybackQualityCellular;
     var selectedQuality =
         quality ??
         (music.meta.qualitys.isEmpty

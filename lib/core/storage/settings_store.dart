@@ -54,6 +54,12 @@ const String _kDiscoverySourceOrderKey = 'discovery_source_order';
 const String _kPlatformButtonOnLeftKey = 'platform_button_on_left';
 const String _kBottomBarBehaviorKey = 'bottom_bar_behavior';
 const String _kOnlinePlaybackQualityKey = 'online_playback_quality';
+// 在线播放音质按网络拆分：WiFi / 移动流量各一档。
+const String _kOnlinePlaybackQualityWifiKey = 'online_playback_quality_wifi';
+const String _kOnlinePlaybackQualityCellularKey =
+    'online_playback_quality_cellular';
+const String _kOnlinePlaybackQualitySplitKey =
+    'online_playback_quality_split_v1';
 const String _kBatchDownloadQualityKey = 'batch_download_quality';
 const String _kShowMiniLyricsKey = 'show_mini_lyrics';
 const String _kGrooveShiftEnabledKey = 'groove_shift_enabled';
@@ -111,7 +117,8 @@ class AppSettings {
     required this.discoverySourceOrder,
     this.platformButtonOnLeft = false,
     this.bottomBarBehavior = BottomBarBehavior.always,
-    required this.onlinePlaybackQuality,
+    required this.onlinePlaybackQualityWifi,
+    required this.onlinePlaybackQualityCellular,
     required this.batchDownloadQuality,
     required this.showMiniLyrics,
     this.grooveShiftEnabled = false,
@@ -166,8 +173,13 @@ class AppSettings {
 
   /// What the mini player and the floating dock do while a list scrolls.
   final BottomBarBehavior bottomBarBehavior;
-  final OnlinePlaybackQuality onlinePlaybackQuality;
+  final OnlinePlaybackQuality onlinePlaybackQualityWifi;
+  final OnlinePlaybackQuality onlinePlaybackQualityCellular;
   final OnlinePlaybackQuality batchDownloadQuality;
+
+  /// 兼容旧引用：代表默认（WiFi）网络下的在线播放音质。
+  /// 新代码应按当前网络类型选 wifi/cellular 字段，勿再依赖此 getter 做选档。
+  OnlinePlaybackQuality get onlinePlaybackQuality => onlinePlaybackQualityWifi;
   final bool showMiniLyrics;
 
   /// Whether playback should avoid taking exclusive audio focus so other apps
@@ -214,7 +226,8 @@ class AppSettings {
     List<MusicSource>? discoverySourceOrder,
     bool? platformButtonOnLeft,
     BottomBarBehavior? bottomBarBehavior,
-    OnlinePlaybackQuality? onlinePlaybackQuality,
+    OnlinePlaybackQuality? onlinePlaybackQualityWifi,
+    OnlinePlaybackQuality? onlinePlaybackQualityCellular,
     OnlinePlaybackQuality? batchDownloadQuality,
     bool? showMiniLyrics,
     bool? grooveShiftEnabled,
@@ -261,7 +274,10 @@ class AppSettings {
     discoverySourceOrder: discoverySourceOrder ?? this.discoverySourceOrder,
     platformButtonOnLeft: platformButtonOnLeft ?? this.platformButtonOnLeft,
     bottomBarBehavior: bottomBarBehavior ?? this.bottomBarBehavior,
-    onlinePlaybackQuality: onlinePlaybackQuality ?? this.onlinePlaybackQuality,
+    onlinePlaybackQualityWifi:
+        onlinePlaybackQualityWifi ?? this.onlinePlaybackQualityWifi,
+    onlinePlaybackQualityCellular:
+        onlinePlaybackQualityCellular ?? this.onlinePlaybackQualityCellular,
     batchDownloadQuality: batchDownloadQuality ?? this.batchDownloadQuality,
     showMiniLyrics: showMiniLyrics ?? this.showMiniLyrics,
     grooveShiftEnabled: grooveShiftEnabled ?? this.grooveShiftEnabled,
@@ -288,7 +304,8 @@ class AppSettings {
     enabledSearchSources: kDefaultEnabledSearchSources,
     replaceQueueOnSearchPlay: true,
     discoverySourceOrder: kDefaultDiscoverySourceOrder,
-    onlinePlaybackQuality: OnlinePlaybackQuality.highest,
+    onlinePlaybackQualityWifi: OnlinePlaybackQuality.highest,
+    onlinePlaybackQualityCellular: OnlinePlaybackQuality.highest,
     batchDownloadQuality: OnlinePlaybackQuality.highest,
     showMiniLyrics: true,
     allowMixWithOthers: false,
@@ -334,6 +351,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       defaultDownloadDir,
     );
     final downloadDir = defaults.downloadDir;
+    final onlineQuality = _migrateOnlinePlaybackQuality(_prefs);
     final enabledSearchSources = _migrateQsSearchSource(
       _prefs,
       decodeEnabledSearchSources(_prefs.getStringList(_kEnabledSearchSourcesKey)),
@@ -412,9 +430,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       bottomBarBehavior: BottomBarBehavior.fromCode(
         _prefs.getString(_kBottomBarBehaviorKey),
       ),
-      onlinePlaybackQuality: OnlinePlaybackQuality.fromCode(
-        _prefs.getString(_kOnlinePlaybackQualityKey),
-      ),
+      onlinePlaybackQualityWifi: onlineQuality.wifi,
+      onlinePlaybackQualityCellular: onlineQuality.cellular,
       batchDownloadQuality: OnlinePlaybackQuality.fromCode(
         _prefs.getString(_kBatchDownloadQualityKey),
       ),
@@ -896,10 +913,23 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await _prefs.setString(_kBottomBarBehaviorKey, behavior.code);
   }
 
-  Future<void> setOnlinePlaybackQuality(OnlinePlaybackQuality quality) async {
-    await _prefs.setString(_kOnlinePlaybackQualityKey, quality.code);
-    state = state.copyWith(onlinePlaybackQuality: quality);
+  Future<void> setOnlinePlaybackQualityWifi(
+    OnlinePlaybackQuality quality,
+  ) async {
+    await _prefs.setString(_kOnlinePlaybackQualityWifiKey, quality.code);
+    state = state.copyWith(onlinePlaybackQualityWifi: quality);
   }
+
+  Future<void> setOnlinePlaybackQualityCellular(
+    OnlinePlaybackQuality quality,
+  ) async {
+    await _prefs.setString(_kOnlinePlaybackQualityCellularKey, quality.code);
+    state = state.copyWith(onlinePlaybackQualityCellular: quality);
+  }
+
+  /// 兼容旧引用：等价于设置 WiFi 档。新代码按网络用上面两个方法。
+  Future<void> setOnlinePlaybackQuality(OnlinePlaybackQuality quality) =>
+      setOnlinePlaybackQualityWifi(quality);
 
   Future<void> setBatchDownloadQuality(OnlinePlaybackQuality quality) async {
     await _prefs.setString(_kBatchDownloadQualityKey, quality.code);
@@ -998,6 +1028,35 @@ Set<MusicSource> decodeEnabledSearchSources(List<String>? codes) {
     for (final source in kManageableSearchSources)
       if (decoded.contains(source)) source,
   });
+}
+
+/// 新旧在线播放音质设置的迁移结果（内存值），prefs 异步落盘。
+class _OnlineQuality {
+  const _OnlineQuality({required this.wifi, required this.cellular});
+  final OnlinePlaybackQuality wifi;
+  final OnlinePlaybackQuality cellular;
+}
+
+/// 旧版本只有一个在线播放音质 key。首次升级时把它里的值同时写进
+/// WiFi / 移动流量两个新 key，避免老用户设置丢失；随后删除旧 key。
+_OnlineQuality _migrateOnlinePlaybackQuality(SharedPreferences prefs) {
+  var wifi = prefs.getString(_kOnlinePlaybackQualityWifiKey);
+  var cellular = prefs.getString(_kOnlinePlaybackQualityCellularKey);
+  if (prefs.getBool(_kOnlinePlaybackQualitySplitKey) != true) {
+    final legacy = prefs.getString(_kOnlinePlaybackQualityKey);
+    if (legacy != null) {
+      wifi ??= legacy;
+      cellular ??= legacy;
+      unawaited(prefs.setString(_kOnlinePlaybackQualityWifiKey, legacy));
+      unawaited(prefs.setString(_kOnlinePlaybackQualityCellularKey, legacy));
+      unawaited(prefs.remove(_kOnlinePlaybackQualityKey));
+    }
+    unawaited(prefs.setBool(_kOnlinePlaybackQualitySplitKey, true));
+  }
+  return _OnlineQuality(
+    wifi: OnlinePlaybackQuality.fromCode(wifi),
+    cellular: OnlinePlaybackQuality.fromCode(cellular),
+  );
 }
 
 /// A saved list only ever contains the sources that existed when the user last

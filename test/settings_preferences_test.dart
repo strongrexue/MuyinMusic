@@ -36,6 +36,14 @@ void main() {
       expect(settings.enabledSearchSources, kDefaultEnabledSearchSources);
       expect(settings.enabledSearchSources, isNot(contains(MusicSource.mg)));
       expect(settings.onlinePlaybackQuality, OnlinePlaybackQuality.highest);
+      expect(
+        settings.onlinePlaybackQualityWifi,
+        OnlinePlaybackQuality.highest,
+      );
+      expect(
+        settings.onlinePlaybackQualityCellular,
+        OnlinePlaybackQuality.highest,
+      );
       expect(settings.batchDownloadQuality, OnlinePlaybackQuality.highest);
       expect(settings.showMiniLyrics, isTrue);
       expect(settings.allowMixWithOthers, isFalse);
@@ -49,12 +57,30 @@ void main() {
     },
   );
 
+  test('legacy single online quality migrates to both wifi and cellular', () async {
+    SharedPreferences.setMockInitialValues({
+      'online_playback_quality': 'flac',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final container = _settingsContainer(prefs);
+    addTearDown(container.dispose);
+
+    final settings = container.read(settingsProvider);
+    expect(settings.onlinePlaybackQualityWifi, OnlinePlaybackQuality.lossless);
+    expect(
+      settings.onlinePlaybackQualityCellular,
+      OnlinePlaybackQuality.lossless,
+    );
+    expect(prefs.getString('online_playback_quality_wifi'), 'flac');
+    expect(prefs.getString('online_playback_quality_cellular'), 'flac');
+  });
+
   test('WebDAV appearance restore changes only appearance settings', () async {
     final prefs = await SharedPreferences.getInstance();
     final container = _settingsContainer(prefs);
     addTearDown(container.dispose);
     final notifier = container.read(settingsProvider.notifier);
-    await notifier.setOnlinePlaybackQuality(OnlinePlaybackQuality.lossless);
+    await notifier.setOnlinePlaybackQualityWifi(OnlinePlaybackQuality.lossless);
 
     await notifier.applyAppearanceFromSync({
       'themeMode': 'dark',
@@ -65,6 +91,10 @@ void main() {
     expect(restored.themeMode, ThemeMode.dark);
     expect(restored.themeSeed.toARGB32(), 0xFF123456);
     expect(restored.onlinePlaybackQuality, OnlinePlaybackQuality.lossless);
+    expect(
+      restored.onlinePlaybackQualityWifi,
+      OnlinePlaybackQuality.lossless,
+    );
   });
 
   test(
@@ -429,7 +459,12 @@ void main() {
         await notifier.setSearchSourceEnabled(MusicSource.mg, true),
         isTrue,
       );
-      await notifier.setOnlinePlaybackQuality(OnlinePlaybackQuality.lossless);
+      await notifier.setOnlinePlaybackQualityWifi(
+        OnlinePlaybackQuality.lossless,
+      );
+      await notifier.setOnlinePlaybackQualityCellular(
+        OnlinePlaybackQuality.high,
+      );
       await notifier.setBatchDownloadQuality(OnlinePlaybackQuality.high);
       for (final source in [
         MusicSource.kg,
@@ -459,8 +494,12 @@ void main() {
         MusicSource.mg,
       });
       expect(
-        restored.read(settingsProvider).onlinePlaybackQuality,
+        restored.read(settingsProvider).onlinePlaybackQualityWifi,
         OnlinePlaybackQuality.lossless,
+      );
+      expect(
+        restored.read(settingsProvider).onlinePlaybackQualityCellular,
+        OnlinePlaybackQuality.high,
       );
       expect(
         restored.read(settingsProvider).batchDownloadQuality,
@@ -681,7 +720,7 @@ void main() {
     await tester.tap(find.text(OnlinePlaybackQuality.lossless.label));
     await tester.pumpAndSettle();
     expect(
-      container.read(settingsProvider).onlinePlaybackQuality,
+      container.read(settingsProvider).onlinePlaybackQualityWifi,
       OnlinePlaybackQuality.lossless,
     );
     expect(find.byType(prism.PopupMenu), findsNothing);

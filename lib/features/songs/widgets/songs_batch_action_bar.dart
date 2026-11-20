@@ -14,6 +14,7 @@ class SongsBatchActionBar extends StatelessWidget {
     required this.onPlaySelected,
     required this.onDownloadSelected,
     this.playlistMode = false,
+    this.likedMode = false,
   });
 
   final int selectedCount;
@@ -24,6 +25,7 @@ class SongsBatchActionBar extends StatelessWidget {
   /// Batches the selected online tracks into one download task.
   final VoidCallback? onDownloadSelected;
   final bool playlistMode;
+  final bool likedMode;
 
   @override
   Widget build(BuildContext context) {
@@ -45,10 +47,14 @@ class SongsBatchActionBar extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _SongsBatchAction(
-                      icon: playlistMode
+                      icon: likedMode
                           ? MusicActionGlyphs.playlistRemove
-                          : MusicActionGlyphs.trash,
-                      label: playlistMode ? '移出歌单' : '永久删除',
+                          : (playlistMode
+                              ? MusicActionGlyphs.playlistRemove
+                              : MusicActionGlyphs.trash),
+                      label: likedMode
+                          ? '取消喜欢'
+                          : (playlistMode ? '移出歌单' : '永久删除'),
                       onPressed: onDelete,
                       enabledColor: scheme.error,
                     ),

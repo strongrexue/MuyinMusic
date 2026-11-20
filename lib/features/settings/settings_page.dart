@@ -34,7 +34,6 @@ import 'widgets/discovery_source_order_sheet.dart';
 import 'widgets/settings_action.dart';
 import 'widgets/settings_menu.dart';
 import 'widgets/storage_permission_card.dart';
-import 'widgets/storage_folder_picker_sheet.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key, this.section});
@@ -229,8 +228,8 @@ class SettingsPage extends ConsumerWidget {
                               SettingsMenuAction(
                                 key: const ValueKey('online-quality-menu'),
                                 menuId: 'online-quality-menu',
-                                icon: Icons.high_quality_rounded,
-                                title: '在线播放音质',
+                                icon: Icons.wifi_rounded,
+                                title: '在线播放音质（WiFi）',
                                 options: [
                                   for (final quality
                                       in OnlinePlaybackQuality.values)
@@ -239,9 +238,32 @@ class SettingsPage extends ConsumerWidget {
                                       label: quality.label,
                                       selected:
                                           quality ==
-                                          settings.onlinePlaybackQuality,
+                                          settings.onlinePlaybackQualityWifi,
                                       onSelected: () =>
-                                          _setOnlinePlaybackQuality(
+                                          _setOnlinePlaybackQualityWifi(
+                                            context,
+                                            ref,
+                                            quality,
+                                          ),
+                                    ),
+                                ],
+                              ),
+                              SettingsMenuAction(
+                                menuId: 'online-quality-menu-cellular',
+                                icon: Icons.signal_cellular_alt_rounded,
+                                title: '在线播放音质（移动流量）',
+                                options: [
+                                  for (final quality
+                                      in OnlinePlaybackQuality.values)
+                                    SettingsMenuOption(
+                                      id: quality.code,
+                                      label: quality.label,
+                                      selected:
+                                          quality ==
+                                          settings
+                                              .onlinePlaybackQualityCellular,
+                                      onSelected: () =>
+                                          _setOnlinePlaybackQualityCellular(
                                             context,
                                             ref,
                                             quality,
@@ -414,23 +436,6 @@ class SettingsPage extends ConsumerWidget {
                                             shape: const StadiumBorder(),
                                           ),
                                         ),
-                                        FilledButton.tonalIcon(
-                                          onPressed: () =>
-                                              _browseDownloadDir(context, ref),
-                                          icon: const Icon(
-                                            Icons.storage_rounded,
-                                            size: 18,
-                                          ),
-                                          label: const Text('浏览U盘'),
-                                          style: FilledButton.styleFrom(
-                                            minimumSize: const Size(0, 40),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 20,
-                                              vertical: 10,
-                                            ),
-                                            shape: const StadiumBorder(),
-                                          ),
-                                        ),
                                       ],
                                     ),
                                   ),
@@ -504,25 +509,6 @@ class SettingsPage extends ConsumerWidget {
                                             size: 18,
                                           ),
                                           label: const Text('仅扫描下载位置'),
-                                          style: FilledButton.styleFrom(
-                                            minimumSize: const Size(0, 40),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 20,
-                                              vertical: 10,
-                                            ),
-                                            shape: const StadiumBorder(),
-                                          ),
-                                        ),
-                                        FilledButton.tonalIcon(
-                                          onPressed: () => _browseLocalMusicDir(
-                                            context,
-                                            ref,
-                                          ),
-                                          icon: const Icon(
-                                            Icons.storage_rounded,
-                                            size: 18,
-                                          ),
-                                          label: const Text('添加 U 盘文件夹'),
                                           style: FilledButton.styleFrom(
                                             minimumSize: const Size(0, 40),
                                             padding: const EdgeInsets.symmetric(
@@ -846,25 +832,6 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _browseDownloadDir(BuildContext context, WidgetRef ref) async {
-    final path = await _showStorageFolderPicker(
-      context,
-      ref,
-      title: '选择下载目录',
-      initialPath: ref.read(settingsProvider).downloadDir,
-    );
-    if (!context.mounted || path == null || path.isEmpty) return;
-
-    if (!await _validateWritableDirectory(context, path)) return;
-    await ref.read(settingsProvider.notifier).setDownloadDir(path);
-    if (!context.mounted) return;
-    showAppToast(
-      context,
-      '下载目录已切换到 ${SafStorage.label(path)}',
-      type: AppToastType.success,
-    );
-  }
-
   Future<void> _pickLocalMusicDir(
     BuildContext context,
     WidgetRef ref, {
@@ -906,18 +873,6 @@ class SettingsPage extends ConsumerWidget {
     }
 
     await _applyLocalMusicDir(context, ref, path, replacing: replacing);
-  }
-
-  Future<void> _browseLocalMusicDir(BuildContext context, WidgetRef ref) async {
-    final path = await _showStorageFolderPicker(
-      context,
-      ref,
-      title: '从U盘选择扫描文件夹',
-      initialPath: ref.read(settingsProvider).localMusicDirs.last,
-    );
-    if (!context.mounted || path == null || path.isEmpty) return;
-
-    await _applyLocalMusicDir(context, ref, path);
   }
 
   Future<void> _applyLocalMusicDir(
@@ -965,43 +920,6 @@ class SettingsPage extends ConsumerWidget {
     unawaited(scanCache.ensureScan(directories: directories));
     if (!context.mounted) return;
     showAppToast(context, '已移除扫描文件夹', type: AppToastType.success);
-  }
-
-  Future<String?> _showStorageFolderPicker(
-    BuildContext context,
-    WidgetRef ref, {
-    required String title,
-    required String initialPath,
-  }) async {
-    final allowed = await PermissionService.hasExternalStorageWrite();
-    if (!context.mounted) return null;
-    if (!allowed) {
-      showAppToast(context, '浏览完整存储或U盘，请先开启兼容存储访问', type: AppToastType.warning);
-      return null;
-    }
-    FocusManager.instance.primaryFocus?.unfocus();
-    var browsePath = isContentLocation(initialPath) ? '' : initialPath;
-    while (browsePath.isNotEmpty && !await Directory(browsePath).exists()) {
-      final parent = Directory(browsePath).parent.path;
-      if (parent == browsePath) {
-        browsePath = '';
-        break;
-      }
-      browsePath = parent;
-    }
-    if (!context.mounted) return null;
-    final toolbar = ref.read(shellToolbarVisibleProvider.notifier);
-    final wasToolbarVisible = ref.read(shellToolbarVisibleProvider);
-    toolbar.state = false;
-    try {
-      return await showStorageFolderPickerSheet(
-        context,
-        title: title,
-        initialPath: browsePath.isEmpty ? null : browsePath,
-      );
-    } finally {
-      if (toolbar.mounted) toolbar.state = wasToolbarVisible;
-    }
   }
 
   Future<void> _showDiscoverySourceOrderSheet(
@@ -1101,17 +1019,38 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
-  Future<void> _setOnlinePlaybackQuality(
+  Future<void> _setOnlinePlaybackQualityWifi(
     BuildContext context,
     WidgetRef ref,
     OnlinePlaybackQuality quality,
   ) async {
-    if (quality == ref.read(settingsProvider).onlinePlaybackQuality) return;
-    await ref.read(settingsProvider.notifier).setOnlinePlaybackQuality(quality);
+    if (quality == ref.read(settingsProvider).onlinePlaybackQualityWifi) return;
+    await ref
+        .read(settingsProvider.notifier)
+        .setOnlinePlaybackQualityWifi(quality);
     if (!context.mounted) return;
     showAppToast(
       context,
-      '在线播放音质已设为 ${quality.label}',
+      'WiFi 在线播放音质已设为 ${quality.label}',
+      type: AppToastType.success,
+    );
+  }
+
+  Future<void> _setOnlinePlaybackQualityCellular(
+    BuildContext context,
+    WidgetRef ref,
+    OnlinePlaybackQuality quality,
+  ) async {
+    if (quality == ref.read(settingsProvider).onlinePlaybackQualityCellular) {
+      return;
+    }
+    await ref
+        .read(settingsProvider.notifier)
+        .setOnlinePlaybackQualityCellular(quality);
+    if (!context.mounted) return;
+    showAppToast(
+      context,
+      '移动流量在线播放音质已设为 ${quality.label}',
       type: AppToastType.success,
     );
   }
