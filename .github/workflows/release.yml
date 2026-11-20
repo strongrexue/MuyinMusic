@@ -105,15 +105,15 @@ jobs:
             ${{ env.ARM64_APK_NAME }}
             ${{ env.V7A_APK_NAME }}
 
-      - name: Create or update draft GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$ARM64_APK_NAME" "$V7A_APK_NAME" --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false
           else
             gh release create "$GITHUB_REF_NAME" "$ARM64_APK_NAME" "$V7A_APK_NAME" \
-              --draft \
               --title "MuyinMusic ${APP_VERSION}" \
               --generate-notes
           fi

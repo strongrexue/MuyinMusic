@@ -185,8 +185,9 @@ jobs:
           cp build/MuyinMusic-unsigned.ipa "$IPA"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$IPA" --clobber
+            gh release edit "$TAG" --draft=false
           else
-            gh release create "$TAG" "$IPA" --draft \
+            gh release create "$TAG" "$IPA" \
               --title "MuyinMusic iOS ${TAG#ios-}" --generate-notes
           fi
           echo "未签名 IPA 已发布到 Release $TAG" >> "$GITHUB_STEP_SUMMARY"
