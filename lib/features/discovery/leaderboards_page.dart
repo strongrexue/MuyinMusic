@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -201,7 +203,11 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
               SliverLayoutBuilder(
                 builder: (context, constraints) {
                   final width = constraints.crossAxisExtent;
-                  final columns = carPadModeEnabled
+                  // Windows 大窗口按目标格宽动态加列，避免顶死少量列把封面撑大；
+                  // 手机端与车机模式保持原有分档不变。
+                  final columns = Platform.isWindows && !carPadModeEnabled
+                      ? (width / 260).floor().clamp(2, 10)
+                      : carPadModeEnabled
                       ? (width >= 1000
                             ? 5
                             : width >= 720

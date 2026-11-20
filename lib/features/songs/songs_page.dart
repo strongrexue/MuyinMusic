@@ -1360,8 +1360,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                         builder: (context, constraints) {
                           // 外层 SliverPadding 已保留左右各 12 的对称留白，这里按可用宽算列数。
                           final gridWidth = constraints.crossAxisExtent;
+                          // 与发现页封面网格一致：目标格宽 240，窗口越宽列数越多，
+                          // 避免大窗口下顶死少量列导致封面被撑得过大。
                           final columnCount =
-                              (gridWidth / 220).floor().clamp(2, 4);
+                              (gridWidth / 240).floor().clamp(2, 10);
                           const gap = 10.0;
                           final cellWidth =
                               (gridWidth - gap * (columnCount - 1)) /
