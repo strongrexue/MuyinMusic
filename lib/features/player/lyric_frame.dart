@@ -131,7 +131,7 @@ class LyricFrameAlgorithms {
     if (lyric.isEmpty) return const [];
     final chars = lyric.runes.toList();
 
-    final buildFrame = (int start, int end) {
+    String buildFrame(int start, int end) {
       // 过滤帧内的分隔符后返回文本；全是分隔符时返回空
       final buf = StringBuffer();
       for (var k = start; k < end; k++) {
@@ -140,7 +140,7 @@ class LyricFrameAlgorithms {
         }
       }
       return buf.toString();
-    };
+    }
 
     if (chars.length <= frameChars) {
       final text = buildFrame(0, chars.length);
