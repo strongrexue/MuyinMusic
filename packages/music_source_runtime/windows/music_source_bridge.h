@@ -81,6 +81,9 @@ class MusicSourceBridge {
                               JSValue* argv);
   static JSValue JsClearTimeout(JSContext* ctx, JSValue self, int argc,
                                 JSValue* argv);
+  // magic = index into {"log","info","warn","error","debug"}.
+  static JSValue JsConsoleLog(JSContext* ctx, JSValue self, int argc,
+                              JSValue* argv, int magic);
 
   // ---- Queue helpers ----
   void PostToScript(const std::string& action, const std::string& data);

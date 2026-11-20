@@ -419,6 +419,20 @@ void MusicSourceBridge::InstallNativeFunctions() {
     JS_SetPropertyStr(ctx, global, f.name,
                       JS_NewCFunction(ctx, f.fn, f.name, f.arity));
   }
+
+  // Some music sources call global `console.log(...)`. QuickJS has no console
+  // by default; install one that forwards to the same "log" event as iOS
+  // (MusicSourceRuntimePlugin.swift registerConsole). Otherwise the script
+  // throws `ReferenceError: console is not defined` and source ops fail.
+  JSValue console = JS_NewObject(ctx);
+  static const char* levels[] = {"log", "info", "warn", "error", "debug"};
+  for (int i = 0; i < 5; ++i) {
+    JS_SetPropertyStr(ctx, console, levels[i],
+                      JS_NewCFunctionMagic(ctx, JsConsoleLog, levels[i], 1,
+                                           JS_CFUNC_generic_magic, i));
+  }
+  JS_SetPropertyStr(ctx, global, "console", console);
+
   JS_FreeValue(ctx, global);
 }
 
@@ -556,6 +570,21 @@ JSValue MusicSourceBridge::JsNativeCall(JSContext* ctx, JSValue self,
     bridge->HandleScriptAction(JsArgString(ctx, argv[0]),
                                JsArgString(ctx, argv[1]));
   }
+  return JS_NULL;
+}
+
+JSValue MusicSourceBridge::JsConsoleLog(JSContext* ctx, JSValue self,
+                                        int argc, JSValue* argv, int magic) {
+  (void)self;
+  static const char* levels[] = {"log", "info", "warn", "error", "debug"};
+  const char* level = (magic >= 0 && magic < 5) ? levels[magic] : "log";
+  std::string text;
+  for (int i = 0; i < argc; ++i) {
+    if (i) text += " ";
+    text += JsArgString(ctx, argv[i]);
+  }
+  auto* bridge = static_cast<MusicSourceBridge*>(JS_GetContextOpaque(ctx));
+  if (bridge) bridge->SendLog(level, text);
   return JS_NULL;
 }
 
