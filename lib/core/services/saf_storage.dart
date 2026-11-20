@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'storage_location.dart';
 import 'storage_browser_service.dart';
 import 'local_audio_library_events.dart';
+import 'windows_folder_picker.dart';
 
 /// The stored location is either a legacy filesystem path or an opaque SAF URI.
 class SafStorage {
@@ -43,9 +43,9 @@ class SafStorage {
               Directory(candidate).existsSync()
           ? candidate
           : null;
-      final picked = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: '选择文件夹',
+      final picked = await pickWindowsFolder(
         initialDirectory: initialDir,
+        dialogTitle: '选择文件夹',
       );
       if (picked == null) return null;
       final name = p.basename(picked);

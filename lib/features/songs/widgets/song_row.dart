@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -106,57 +107,67 @@ class SongRow extends ConsumerWidget {
                   _SongCover(entry: entry, artworkVersion: artworkVersion),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            if (playing) ...[
-                              _PlayingEqualizer(
-                                key: ValueKey('song-playing-${entry.id}'),
-                                active: playingActive,
+                    child: Platform.isWindows
+                        ? _WindowsSongInfo(
+                            entry: entry,
+                            playing: playing,
+                            playingActive: playingActive,
+                            titleColor: titleColor,
+                            supportingColor: supportingColor,
+                          )
+                        : Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  if (playing) ...[
+                                    _PlayingEqualizer(
+                                      key: ValueKey(
+                                        'song-playing-${entry.id}',
+                                      ),
+                                      active: playingActive,
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      entry.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: titleColor,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        height: 1.1,
+                                        letterSpacing: 0,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  _QualityBadge(code: entry.qualityCode),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      subtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: supportingColor,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        height: 1.08,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
-                            Expanded(
-                              child: Text(
-                                entry.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: titleColor,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  height: 1.1,
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            _QualityBadge(code: entry.qualityCode),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                subtitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: supportingColor,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                  height: 1.08,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                          ),
                   ),
                   const SizedBox(width: 4),
                   if (onToggleLike != null && !batchMode)
@@ -242,6 +253,119 @@ class SongRow extends ConsumerWidget {
     final singer = entry.singer.trim().isEmpty ? '未知歌手' : entry.singer.trim();
     final album = entry.albumName.trim();
     return album.isEmpty ? singer : '$singer · $album';
+  }
+}
+
+/// Windows 桌面端专用的歌曲中间信息区：分栏填满 Expanded，避免大窗口下中间大片空白。
+class _WindowsSongInfo extends StatelessWidget {
+  const _WindowsSongInfo({
+    required this.entry,
+    required this.playing,
+    required this.playingActive,
+    required this.titleColor,
+    required this.supportingColor,
+  });
+
+  final DownloadHistoryEntry entry;
+  final bool playing;
+  final bool playingActive;
+  final Color titleColor;
+  final Color supportingColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final interval = entry.musicInfo?.interval?.trim();
+    final hasInterval = interval != null && interval.isNotEmpty;
+    final singer = entry.singer.trim().isEmpty ? '未知歌手' : entry.singer.trim();
+    final album = entry.albumName.trim();
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            if (playing) ...[
+              _PlayingEqualizer(
+                key: ValueKey('song-playing-${entry.id}'),
+                active: playingActive,
+              ),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                entry.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: titleColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  height: 1.1,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+            if (hasInterval) ...[
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  interval,
+                  maxLines: 1,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: supportingColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    height: 1.08,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 3),
+        Row(
+          children: [
+            _QualityBadge(code: entry.qualityCode),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                singer,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: supportingColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  height: 1.08,
+                ),
+              ),
+            ),
+            if (album.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  album,
+                  maxLines: 1,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: supportingColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    height: 1.08,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
   }
 }
 
