@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'storage_location.dart';
@@ -28,6 +30,24 @@ class SafStorage {
     required bool writable,
     String? initialLocation,
   }) async {
+    if (Platform.isWindows) {
+      // Windows：file_picker 纯 Dart 实现，弹原生目录选择框。
+      final initialDir = initialLocation != null && p.isAbsolute(initialLocation)
+          ? initialLocation
+          : null;
+      final picked = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择文件夹',
+        initialDirectory: initialDir,
+      );
+      if (picked == null) return null;
+      final name = p.basename(picked);
+      _labels[picked] = name;
+      await (await SharedPreferences.getInstance()).setString(
+        '$_labelPrefix$picked',
+        name,
+      );
+      return picked;
+    }
     if (!Platform.isAndroid) {
       // iOS：走 storage_browser 通道，弹出系统文档选择器并持久化 bookmark，
       // 返回沙盒外目录的绝对路径（会话内已持有 security scope）。

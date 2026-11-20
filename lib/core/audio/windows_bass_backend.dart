@@ -244,6 +244,11 @@ class WindowsBassBackend implements BassBackend {
         final args = arguments as Map<Object?, Object?>? ?? const {};
         final uri = args['uri']?.toString() ?? '';
         final isUrl = uri.startsWith('http://') || uri.startsWith('https://');
+        // 本地文件是 file:///C:/... 形式，必须转成裸路径再传给 CreateFileW
+        final uriObj = Uri.tryParse(uri);
+        final localPath = (uriObj != null && uriObj.scheme == 'file')
+            ? uriObj.toFilePath()
+            : uri;
         _freeCurrentStream();
         _sourceId = uri;
         _processingState = 'loading';
@@ -258,7 +263,7 @@ class WindowsBassBackend implements BassBackend {
             calloc.free(urlPtr);
           }
         } else {
-          final pathPtr = uri.toNativeUtf16();
+          final pathPtr = localPath.toNativeUtf16();
           try {
             handle = _streamCreateFile(
                 0, pathPtr.cast<ffi.Void>(), 0, 0, _bassUnicode);
