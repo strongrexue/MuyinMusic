@@ -813,6 +813,17 @@ class SettingsPage extends ConsumerWidget {
         );
       }
       return;
+    } catch (error) {
+      // Windows 下 file_picker 抛的是 WindowsException，不是 PlatformException，
+      // 旧代码只 catch PlatformException 会让异常逃逸，表现为点击后毫无反应。
+      if (context.mounted) {
+        showAppToast(
+          context,
+          '无法选择文件夹，请重试',
+          type: AppToastType.error,
+        );
+      }
+      return;
     }
     if (!context.mounted) return;
     if (path == null || path.isEmpty) return;
@@ -849,6 +860,17 @@ class SettingsPage extends ConsumerWidget {
         showAppToast(
           context,
           error.message ?? '无法打开系统目录选择器，请重试',
+          type: AppToastType.error,
+        );
+      }
+      return;
+    } catch (_) {
+      // Windows 下 file_picker 抛的是 WindowsException，不是 PlatformException，
+      // 补通用兜底避免异常逃逸导致点击后毫无反应。
+      if (context.mounted) {
+        showAppToast(
+          context,
+          '无法打开系统目录选择器，请重试',
           type: AppToastType.error,
         );
       }
