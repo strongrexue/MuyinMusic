@@ -55,9 +55,9 @@ Future<void> _startApp() async {
   final audioHandler = await initializePlayerAudioHandler(
     allowMixWithOthers: readAllowMixWithOthersPreference(prefs),
   );
-  // iOS 默认目录在运行时解析：扫描根目录 = Documents，下载目录 = Documents/MuyinMusic。
+  // iOS / Windows 默认目录在运行时解析：扫描根 = Documents，下载 = Documents/MuyinMusic。
   // Android 沿用 base_url.dart 的历史常量，保持既有行为。
-  final documentsDir = Platform.isIOS
+  final documentsDir = (Platform.isIOS || Platform.isWindows)
       ? (await getApplicationDocumentsDirectory()).path
       : null;
   final defaultScanDir = documentsDir ?? kDefaultDownloadDir;

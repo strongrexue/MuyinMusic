@@ -19,6 +19,9 @@ migration:
       create_revision: db50e20168db8fee486b9abf32fc912de3bc5b6a
       base_revision: db50e20168db8fee486b9abf32fc912de3bc5b6a
     - platform: ios
+      create_revision: db50e20168db8fee486b9abf32fc912de3bc5b6a
+      base_revision: db50e20168db8fee486b9abf32fc912de3bc5b6a
+    - platform: windows
       create_revision: c197ca5199e9ee5661e865596c9c07294dfab51c
       base_revision: c197ca5199e9ee5661e865596c9c07294dfab51c
 
