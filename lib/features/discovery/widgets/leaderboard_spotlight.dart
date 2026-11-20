@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -58,13 +59,21 @@ class LeaderboardSpotlight extends ConsumerWidget {
               onRetry: () => ref.invalidate(leaderboardBoardsProvider(source)),
             ),
             data: (items) {
-              final featured = items.take(4).toList(growable: false);
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final visibleCards = (constraints.maxWidth / 300)
-                      .floor()
-                      .clamp(1, 4);
-                  final cardWidth = CarDisplayLayout.enabledOf(context)
+                  final carDisplay = CarDisplayLayout.enabledOf(context);
+                  final windowsWide =
+                      Platform.isWindows && constraints.maxWidth >= 840;
+                  final expandedBoard = carDisplay || windowsWide;
+                  final maxCards = windowsWide ? 6 : 4;
+                  final featured = items
+                      .take(maxCards)
+                      .toList(growable: false);
+                  final visibleCards = math.min(
+                    (constraints.maxWidth / 300).floor().clamp(1, maxCards),
+                    featured.length,
+                  );
+                  final cardWidth = expandedBoard
                       ? (constraints.maxWidth - 4 - 10 * (visibleCards - 1)) /
                             visibleCards
                       : math.min(

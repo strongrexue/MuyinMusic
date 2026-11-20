@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -90,7 +91,9 @@ class _SliverMasonryPlaylistGridState
         final available = constraints.crossAxisExtent;
         final gridWidth = math.min(available, widget.maxWidth);
         final inset = (available - gridWidth) / 2;
-        final columnCount = carDisplay
+        final expandedGrid = carDisplay ||
+            (Platform.isWindows && gridWidth >= 840);
+        final columnCount = expandedGrid
             ? (gridWidth / 240).floor().clamp(2, 6)
             : carPadModeEnabled || gridWidth >= 700
             ? 3

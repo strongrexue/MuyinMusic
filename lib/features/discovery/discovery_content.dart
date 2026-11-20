@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -401,10 +403,12 @@ class _DiscoveryListState extends State<_DiscoveryList> {
 
   @override
   Widget build(BuildContext context) {
-    final constraints = CarDisplayLayout.contentConstraints(
-      context,
-      maxWidth: 960,
-    );
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final wideContent = CarDisplayLayout.enabledOf(context) ||
+        (Platform.isWindows && viewportWidth >= 840);
+    final constraints = wideContent
+        ? const BoxConstraints()
+        : const BoxConstraints(maxWidth: 960);
     return AppRefreshIndicator(
       onRefresh: widget.onRefresh,
       child: CustomScrollView(
