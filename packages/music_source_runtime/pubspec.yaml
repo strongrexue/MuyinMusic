@@ -19,5 +19,7 @@ flutter:
         pluginClass: MusicSourceRuntimePlugin
       ios:
         pluginClass: MusicSourceRuntimePlugin
+      windows:
+        pluginClass: MusicSourceRuntimePlugin
 
 
