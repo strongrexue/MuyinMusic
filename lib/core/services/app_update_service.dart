@@ -7,7 +7,7 @@ import '../api/dio_factory.dart';
 import '../storage/settings_store.dart';
 
 const _githubApiBaseUrl = 'https://api.github.com';
-const _latestReleasePath = '/repos/strongrexue/MuyinMusic/releases/latest';
+const _releasesPath = '/repos/strongrexue/MuyinMusic/releases';
 
 class AppRelease {
   const AppRelease({
@@ -29,28 +29,36 @@ class AppUpdateService {
   final Dio _dio;
 
   Future<AppRelease?> fetchLatestRelease() async {
-    final response = await _dio.get<Object?>(_latestReleasePath);
+    final response = await _dio.get<Object?>(_releasesPath);
     final data = response.data;
-    if (data is! Map) {
-      throw const FormatException('GitHub release response is not an object');
-    }
-    if (data['draft'] == true || data['prerelease'] == true) return null;
-
-    final tagName = data['tag_name']?.toString().trim() ?? '';
-    final pageValue = data['html_url']?.toString().trim() ?? '';
-    final version = parseAppVersion(tagName);
-    final pageUri = Uri.tryParse(pageValue);
-    if (version == null || !_isGithubReleaseUri(pageUri)) {
-      throw const FormatException('GitHub release fields are invalid');
+    if (data is! List) {
+      throw const FormatException('GitHub releases response is not a list');
     }
 
-    final name = data['name']?.toString().trim();
-    return AppRelease(
-      version: version,
-      tagName: tagName,
-      pageUri: pageUri!,
-      title: name == null || name.isEmpty ? tagName : name,
-    );
+    AppRelease? latest;
+    for (final item in data) {
+      if (item is! Map) continue;
+      if (item['draft'] == true || item['prerelease'] == true) continue;
+
+      final tagName = item['tag_name']?.toString().trim() ?? '';
+      // 只认安卓 v* tag，跳过 ios-* 等其它平台的 release。
+      if (!RegExp(r'^v\d').hasMatch(tagName)) continue;
+
+      final version = parseAppVersion(tagName);
+      final pageUri = Uri.tryParse(item['html_url']?.toString().trim() ?? '');
+      if (version == null || !_isGithubReleaseUri(pageUri)) continue;
+
+      if (latest == null || version > latest.version) {
+        final name = item['name']?.toString().trim();
+        latest = AppRelease(
+          version: version,
+          tagName: tagName,
+          pageUri: pageUri!,
+          title: name == null || name.isEmpty ? tagName : name,
+        );
+      }
+    }
+    return latest;
   }
 }
 

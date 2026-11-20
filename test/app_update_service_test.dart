@@ -49,25 +49,34 @@ void main() {
   });
 
   group('AppUpdateService', () {
-    test('parses a valid latest release response', () async {
-      final dio = _dioReturning({
-        'tag_name': 'v1.10.0',
-        'html_url':
-            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.10.0',
-        'name': 'MuyinMusic 1.10.0',
-        'draft': false,
-        'prerelease': false,
-      });
+    Map<String, Object?> release(
+      String tag, {
+      bool draft = false,
+      bool prerelease = false,
+      String? htmlUrl,
+    }) {
+      return {
+        'tag_name': tag,
+        'html_url': htmlUrl ??
+            'https://github.com/strongrexue/MuyinMusic/releases/tag/$tag',
+        'name': 'MuyinMusic $tag',
+        'draft': draft,
+        'prerelease': prerelease,
+      };
+    }
+
+    test('parses a valid release from the list', () async {
+      final dio = _dioReturning([release('v1.10.0')]);
       addTearDown(dio.close);
 
-      final release = await AppUpdateService(dio: dio).fetchLatestRelease();
+      final result = await AppUpdateService(dio: dio).fetchLatestRelease();
 
-      expect(release, isNotNull);
-      expect(release!.version, Version(1, 10, 0));
-      expect(release.tagName, 'v1.10.0');
-      expect(release.title, 'MuyinMusic 1.10.0');
+      expect(result, isNotNull);
+      expect(result!.version, Version(1, 10, 0));
+      expect(result.tagName, 'v1.10.0');
+      expect(result.title, 'MuyinMusic v1.10.0');
       expect(
-        release.pageUri,
+        result.pageUri,
         Uri.parse(
           'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.10.0',
         ),
@@ -76,20 +85,32 @@ void main() {
 
     for (final field in ['draft', 'prerelease']) {
       test('ignores a $field release', () async {
-        final dio = _dioReturning({
-          'tag_name': 'v2.0.0',
-          'html_url':
-              'https://github.com/strongrexue/MuyinMusic/releases/tag/v2.0.0',
-          field: true,
-        });
+        final dio = _dioReturning([
+          release('v2.0.0', draft: field == 'draft', prerelease: field == 'prerelease'),
+        ]);
         addTearDown(dio.close);
 
         expect(await AppUpdateService(dio: dio).fetchLatestRelease(), isNull);
       });
     }
 
-    test('rejects a response that is not a JSON object', () async {
-      final dio = _dioReturning(['v2.0.0']);
+    test('skips non-android tags and picks the highest android version', () async {
+      final dio = _dioReturning([
+        release('ios-2.0.9'),
+        release('v1.2.0'),
+        release('v1.3.1'),
+      ]);
+      addTearDown(dio.close);
+
+      final result = await AppUpdateService(dio: dio).fetchLatestRelease();
+
+      expect(result, isNotNull);
+      expect(result!.tagName, 'v1.3.1');
+      expect(result.version, Version(1, 3, 1));
+    });
+
+    test('rejects a response that is not a JSON list', () async {
+      final dio = _dioReturning({'tag_name': 'v2.0.0'});
       addTearDown(dio.close);
 
       await expectLater(
@@ -98,31 +119,20 @@ void main() {
       );
     });
 
-    test('rejects invalid release fields', () async {
-      final dio = _dioReturning({
-        'tag_name': 'invalid',
-        'html_url':
-            'https://github.com/strongrexue/MuyinMusic/releases/tag/invalid',
-      });
+    test('skips entries with invalid release fields', () async {
+      final dio = _dioReturning([release('invalid')]);
       addTearDown(dio.close);
 
-      await expectLater(
-        AppUpdateService(dio: dio).fetchLatestRelease(),
-        throwsA(isA<FormatException>()),
-      );
+      expect(await AppUpdateService(dio: dio).fetchLatestRelease(), isNull);
     });
 
-    test('rejects a release URL outside the project GitHub releases', () async {
-      final dio = _dioReturning({
-        'tag_name': 'v2.0.0',
-        'html_url': 'https://example.com/releases/tag/v2.0.0',
-      });
+    test('skips a release URL outside the project GitHub releases', () async {
+      final dio = _dioReturning([
+        release('v2.0.0', htmlUrl: 'https://example.com/releases/tag/v2.0.0'),
+      ]);
       addTearDown(dio.close);
 
-      await expectLater(
-        AppUpdateService(dio: dio).fetchLatestRelease(),
-        throwsA(isA<FormatException>()),
-      );
+      expect(await AppUpdateService(dio: dio).fetchLatestRelease(), isNull);
     });
   });
 }
@@ -146,7 +156,7 @@ class _FakeAdapter implements HttpClientAdapter {
     expect(
       options.uri,
       Uri.parse(
-        'https://api.github.com/repos/strongrexue/MuyinMusic/releases/latest',
+        'https://api.github.com/repos/strongrexue/MuyinMusic/releases',
       ),
     );
     return ResponseBody.fromString(
