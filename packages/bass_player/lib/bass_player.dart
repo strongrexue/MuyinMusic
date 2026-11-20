@@ -166,15 +166,28 @@ class BassPlayerException implements Exception {
   }
 }
 
-class BassPlayer {
-  BassPlayer({MethodChannel? methodChannel, EventChannel? eventChannel})
-    : _methods =
-          methodChannel ??
-          const MethodChannel('com.cyshine.music/bass_player/methods'),
-      _events =
-          eventChannel ??
-          const EventChannel('com.cyshine.music/bass_player/events');
+/// Desktop (Windows) BASS backend. Mobile keeps using the native
+/// MethodChannel/EventChannel pair; injecting a backend bypasses both.
+abstract class BassBackend {
+  Future<Object?> invokeMethod(String method, [Object? arguments]);
+  Stream<Object?> get eventStream;
+  Future<void> dispose();
+}
 
+class BassPlayer {
+  BassPlayer({
+    MethodChannel? methodChannel,
+    EventChannel? eventChannel,
+    BassBackend? backend,
+  })  : _backend = backend,
+        _methods =
+            methodChannel ??
+            const MethodChannel('com.cyshine.music/bass_player/methods'),
+        _events =
+            eventChannel ??
+            const EventChannel('com.cyshine.music/bass_player/events');
+
+  final BassBackend? _backend;
   final MethodChannel _methods;
   final EventChannel _events;
   final Stopwatch _clock = Stopwatch()..start();
@@ -301,17 +314,19 @@ class BassPlayer {
   }
 
   Future<BassEngineInfo> _initialize() async {
-    // iOS 端由 packages/bass_player/ios/BassPlayerPlugin.swift 提供等价实现，
-    // 因此 Android 与 iOS 均放行；其它平台（web/桌面）仍不支持。
-    if (kIsWeb ||
-        (defaultTargetPlatform != TargetPlatform.android &&
-            defaultTargetPlatform != TargetPlatform.iOS)) {
-      throw UnsupportedError('BASS playback is available on Android/iOS only');
+    // iOS/Android use the native plugin; an injected desktop backend (Windows
+    // dart:ffi) is also supported. Web and other desktops remain unsupported.
+    final isMobile =
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    if (kIsWeb || (!isMobile && _backend == null)) {
+      throw UnsupportedError(
+        'BASS playback is available on Android/iOS or with a desktop backend',
+      );
     }
-    _eventSubscription ??= _events.receiveBroadcastStream().listen(
-      _handleEvent,
-      onError: _handleStreamError,
-    );
+    _eventSubscription ??= (_backend?.eventStream ??
+            _events.receiveBroadcastStream())
+        .listen(_handleEvent, onError: _handleStreamError);
     await _sendDiagnosticRecording();
     final raw = await _invokeMap('initialize');
     if (_disposed) throw StateError('BassPlayer was disposed during startup');
@@ -412,7 +427,11 @@ class BassPlayer {
     _eventSubscription = null;
     if (_initialization != null) {
       try {
-        await _methods.invokeMethod<void>('dispose');
+        if (_backend != null) {
+          await _backend.dispose();
+        } else {
+          await _methods.invokeMethod<void>('dispose');
+        }
       } on MissingPluginException {
         // A unit test or a shutting-down Flutter engine may have no Android
         // plugin attached. The Dart resources still need to be released.
@@ -432,7 +451,9 @@ class BassPlayer {
     Object? arguments,
   ]) async {
     try {
-      final value = await _methods.invokeMethod<Object?>(method, arguments);
+      final value = _backend != null
+          ? await _backend.invokeMethod(method, arguments)
+          : await _methods.invokeMethod<Object?>(method, arguments);
       if (value is Map<Object?, Object?>) return value;
       if (value is Map) return Map<Object?, Object?>.from(value);
       return const {};

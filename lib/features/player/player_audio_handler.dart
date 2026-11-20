@@ -88,9 +88,13 @@ bool shouldActivatePlayerAudioSession({
 
 Future<PlayerAudioHandler> initializePlayerAudioHandler({
   bool allowMixWithOthers = false,
+  BassPlayer? player,
 }) async {
   final handler = await AudioService.init<PlayerAudioHandler>(
-    builder: () => PlayerAudioHandler(allowMixWithOthers: allowMixWithOthers),
+    builder: () => PlayerAudioHandler(
+      allowMixWithOthers: allowMixWithOthers,
+      player: player,
+    ),
     config: playerAudioServiceConfig,
   );
 

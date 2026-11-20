@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bass_player/bass_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/audio/windows_bass_backend.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/native_log_bridge.dart';
 import 'core/services/storage_browser_service.dart';
@@ -54,6 +56,7 @@ Future<void> _startApp() async {
   hydrateNetworkAdapterPreference(prefs);
   final audioHandler = await initializePlayerAudioHandler(
     allowMixWithOthers: readAllowMixWithOthersPreference(prefs),
+    player: Platform.isWindows ? BassPlayer(backend: WindowsBassBackend()) : null,
   );
   // iOS / Windows 默认目录在运行时解析：扫描根 = Documents，下载 = Documents/MuyinMusic。
   // Android 沿用 base_url.dart 的历史常量，保持既有行为。
