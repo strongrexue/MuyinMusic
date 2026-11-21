@@ -1253,11 +1253,12 @@ final class CyShineAppTaskChannel {
 
     var code: SecCode?
     var signingInfo: [String: Any] = [:]
-    if SecCodeCopySelf([], &code) == errSecSuccess, let selfCode = code {
+    if SecCodeCopySelf(kSecCSDefaultFlags, &code) == errSecSuccess,
+      let selfCode = code
+    {
       var info: CFDictionary?
-      // kSecCSSigningInformation = 1 << 2
       if SecCodeCopySigningInformation(
-        selfCode, SecCSFlags(rawValue: 1 << 2), &info
+        selfCode, kSecCSSigningInformation, &info
       ) == errSecSuccess, let dict = info as? [String: Any] {
         signingInfo = dict
       }
@@ -1293,14 +1294,15 @@ final class CyShineAppTaskChannel {
     return out
   }
 
-  /// mobileprovision 是 CMS 签名包裹的 plist，截取 XML 段再解析。
+  /// mobileprovision 是 CMS 签名包裹的 plist：先做有损文本解码
+  /// （二进制尾巴会被替换字符污染，但 XML 段是纯 ASCII 不受影响），
+  /// 截取 XML 段再解析。
   private static func plistSlice(in data: Data) -> Data? {
-    guard let start = data.range(of: Data("<?xml".utf8))?.lowerBound,
-      let end = data.range(
-        of: Data("</plist>".utf8), in: start..<data.count
-      )
+    let text = String(decoding: data, as: UTF8.self)
+    guard let start = text.range(of: "<?xml"),
+      let end = text.range(of: "</plist>")
     else { return nil }
-    return data[start..<end.upperBound]
+    return Data(text[start.lowerBound..<end.upperBound].utf8)
   }
 
   private static func notificationsEnabled() -> Bool {
