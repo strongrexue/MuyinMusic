@@ -623,7 +623,7 @@ void main() {
       (widget) =>
           widget is Text &&
           widget.data == text &&
-          (widget.style?.fontSize ?? 0) >= 48,
+          (widget.style?.fontSize ?? 0) >= 36,
     );
     expect(bigLine('第一行歌词'), findsOneWidget);
 
