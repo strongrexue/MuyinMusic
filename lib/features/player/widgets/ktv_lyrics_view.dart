@@ -11,42 +11,32 @@ import 'karaoke_line_text.dart';
 import 'player_layout.dart';
 import 'transport_bar.dart';
 
-/// The KTV player layout: track header, the dual-slot lyrics and the
-/// transport bar. Header and transport take part in the player page's
-/// immersive auto-hide (see [ImmersiveChrome]).
+/// The KTV player layout: the dual-slot lyrics fill the whole area and
+/// the slim transport bar floats over their bottom edge. The lyrics
+/// never move; the bar takes part in the player page's immersive
+/// auto-hide (see [ImmersiveChrome]) while the top chrome stays visible.
 class KtvPlayerLayout extends StatelessWidget {
-  const KtvPlayerLayout({super.key, this.title, this.artist});
-
-  final String? title;
-  final String? artist;
+  const KtvPlayerLayout({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        ImmersiveFade(
-          child: title == null
-              ? const SizedBox(height: 22)
-              : Text(
-                  artist == null ? title! : '$title · $artist',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.75),
-                  ),
+        const KtvLyricsPanel(),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: ImmersiveFade(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: playerWideTransportMaxWidth,
                 ),
-        ),
-        const Expanded(child: KtvLyricsPanel()),
-        ImmersiveFade(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: playerWideTransportMaxWidth,
+                child: const TransportBar(compact: true),
+              ),
             ),
-            child: const TransportBar(),
           ),
         ),
       ],
@@ -243,7 +233,12 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
                 accent: scheme.primary,
               ),
             ),
-            SizedBox(height: constraints.maxHeight * 0.06),
+            // Clearance for the floating transport bar: the slots keep
+            // this distance from the panel's bottom edge whether the bar
+            // is shown or faded, so the lyrics never shift.
+            SizedBox(
+              height: (constraints.maxHeight * 0.06).clamp(104.0, 150.0),
+            ),
           ],
         );
       },

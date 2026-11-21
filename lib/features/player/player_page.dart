@@ -55,6 +55,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final showEmpty = ref.watch(
       playerControllerProvider.select((s) => s.track == null && !s.loading),
     );
+    // In landscape KTV the top chrome (title, quality / timer / equalizer)
+    // stays on screen in immersive mode; only the transport bar fades.
+    final ktvChromePinned =
+        ref.watch(
+          settingsProvider.select((settings) => settings.ktvModeEnabled),
+        ) &&
+        MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
+    final topChromeRow = TopChromeRow(
+      onOpenEqualizer: () =>
+          widget.onDismissRequested('/settings/equalizer'),
+    );
 
     ref.listen<PlayerState>(playerControllerProvider, (prev, next) {
       // The page outlives the route, so without this guard a playback error
@@ -99,12 +110,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   key: const ValueKey('player-chrome'),
                   child: Column(
                     children: [
-                      ImmersiveFade(
-                        child: TopChromeRow(
-                          onOpenEqualizer: () =>
-                              widget.onDismissRequested('/settings/equalizer'),
-                        ),
-                      ),
+                      if (ktvChromePinned)
+                        topChromeRow
+                      else
+                        ImmersiveFade(child: topChromeRow),
                       Expanded(
                         child: showEmpty
                             ? const _EmptyPlayer()
@@ -234,7 +243,6 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((settings) => settings.ktvModeEnabled),
     );
-    final track = ref.watch(playerControllerProvider.select((s) => s.track));
     final mediaSize = MediaQuery.sizeOf(context);
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
       return Padding(
@@ -245,7 +253,7 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
           playerWideOuterInset,
           18,
         ),
-        child: KtvPlayerLayout(title: track?.title, artist: track?.artist),
+        child: const KtvPlayerLayout(),
       );
     }
     final carPadModeEnabled =

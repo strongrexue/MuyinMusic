@@ -13,7 +13,10 @@ import 'player_layout.dart';
 import 'player_slider_thumb_shape.dart';
 
 class TransportBar extends ConsumerStatefulWidget {
-  const TransportBar({super.key});
+  const TransportBar({super.key, this.compact = false});
+
+  /// Slimmer paddings, slider and buttons for overlay use (KTV layout).
+  final bool compact;
 
   @override
   ConsumerState<TransportBar> createState() => _TransportBarState();
@@ -71,7 +74,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             children: [
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 4,
+                  trackHeight: widget.compact ? 3 : 4,
                   trackShape: const RoundedRectSliderTrackShape(),
                   activeTrackColor: ink,
                   inactiveTrackColor: ink.withValues(alpha: 0.22),
@@ -80,8 +83,8 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   thumbShape: PlayerSliderThumbShape(
                     disableAnimations: MediaQuery.disableAnimationsOf(context),
                   ),
-                  overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 14,
+                  overlayShape: RoundSliderOverlayShape(
+                    overlayRadius: widget.compact ? 10 : 14,
                   ),
                   showValueIndicator: ShowValueIndicator.onDrag,
                   valueIndicatorShape:
@@ -94,7 +97,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   ),
                 ),
                 child: SizedBox(
-                  height: 28,
+                  height: widget.compact ? 18 : 28,
                   child: Slider(
                     key: ValueKey(vm.trackId),
                     padding: const EdgeInsets.symmetric(
@@ -156,7 +159,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: widget.compact ? 2 : 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -165,14 +168,20 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                     mode: vm.playbackMode,
                     enabled: vm.hasTrack,
                     onPressed: controller.cyclePlaybackMode,
+                    compact: widget.compact,
                   ),
                   IconButton(
                     tooltip: '上一首',
                     onPressed: canControl ? controller.playPrevious : null,
+                    style: widget.compact
+                        ? IconButton.styleFrom(
+                            fixedSize: const Size.square(40),
+                          )
+                        : null,
                     icon: Icon(
                       Icons.skip_previous_rounded,
                       color: controlColor,
-                      size: 38,
+                      size: widget.compact ? 30 : 38,
                     ),
                   ),
                   _PlayButton(
@@ -182,14 +191,20 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                     ended: vm.ended,
                     canControl: canControl,
                     controller: controller,
+                    compact: widget.compact,
                   ),
                   IconButton(
                     tooltip: '下一首',
                     onPressed: canControl ? controller.playNext : null,
+                    style: widget.compact
+                        ? IconButton.styleFrom(
+                            fixedSize: const Size.square(40),
+                          )
+                        : null,
                     icon: Icon(
                       Icons.skip_next_rounded,
                       color: controlColor,
-                      size: 38,
+                      size: widget.compact ? 30 : 38,
                     ),
                   ),
                   prism.PopupAnchor(
@@ -215,7 +230,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
   TextStyle _timeStyle(BuildContext context) {
     return TextStyle(
       color: playerMuted(context),
-      fontSize: 15,
+      fontSize: widget.compact ? 12 : 15,
       fontWeight: FontWeight.w500,
     );
   }
@@ -235,12 +250,14 @@ class _PlaybackModeButton extends StatelessWidget {
     required this.mode,
     required this.enabled,
     required this.onPressed,
+    this.compact = false,
   });
 
   final PlayerPlaybackMode mode;
   final Color color;
   final bool enabled;
   final VoidCallback onPressed;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +265,9 @@ class _PlaybackModeButton extends StatelessWidget {
     return IconButton(
       tooltip: mode.label,
       onPressed: enabled ? onPressed : null,
-      style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+      style: IconButton.styleFrom(
+        fixedSize: Size.square(compact ? 40 : 48),
+      ),
       icon: AnimatedSwitcher(
         duration: MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
@@ -269,7 +288,7 @@ class _PlaybackModeButton extends StatelessWidget {
           _playbackModeIcon(mode),
           key: ValueKey(mode),
           color: iconColor,
-          size: 25,
+          size: compact ? 21 : 25,
         ),
       ),
     );
@@ -292,6 +311,7 @@ class _PlayButton extends StatelessWidget {
     required this.ended,
     required this.canControl,
     required this.controller,
+    this.compact = false,
   });
 
   final bool playing;
@@ -300,6 +320,7 @@ class _PlayButton extends StatelessWidget {
   final bool ended;
   final bool canControl;
   final PlayerController controller;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -312,12 +333,12 @@ class _PlayButton extends StatelessWidget {
             ? (ended ? controller.replay : controller.toggle)
             : null,
         child: SizedBox(
-          width: 72,
-          height: 72,
+          width: compact ? 54 : 72,
+          height: compact ? 54 : 72,
           child: Center(
             child: showSpinner
                 ? SizedBox.square(
-                    dimension: 22,
+                    dimension: compact ? 18 : 22,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.6,
                       color: color,
@@ -329,7 +350,7 @@ class _PlayButton extends StatelessWidget {
                         : playing
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
-                    size: 56,
+                    size: compact ? 42 : 56,
                     color: canControl ? color : color.withValues(alpha: 0.22),
                   ),
           ),
