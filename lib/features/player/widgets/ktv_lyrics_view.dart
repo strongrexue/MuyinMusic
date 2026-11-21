@@ -41,10 +41,12 @@ class KtvPlayerLayout extends StatelessWidget {
                 ),
         ),
         const Expanded(child: KtvLyricsPanel()),
-        const ImmersiveFade(
+        ImmersiveFade(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: playerWideTransportMaxWidth),
-            child: TransportBar(),
+            constraints: const BoxConstraints(
+              maxWidth: playerWideTransportMaxWidth,
+            ),
+            child: const TransportBar(),
           ),
         ),
       ],

@@ -134,7 +134,7 @@ class SafStorage {
     'uri': tree,
     'source': source,
     'name': name,
-    if (subdirectory != null) 'subdirectory': subdirectory,
+    'subdirectory': ?subdirectory,
   }))!;
 
   static Future<bool> exists(String location) async {

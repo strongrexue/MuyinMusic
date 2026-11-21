@@ -179,6 +179,7 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
                                   SettingsMenuOption(
                                     id: preset.id,
                                     label: preset.label,
+                                    selected: false,
                                     onSelected: () =>
                                         _renameUserPreset(preset),
                                   ),

@@ -270,12 +270,12 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                   ),
                   const SizedBox(height: 4),
                   const ImmersiveFade(child: PlayerActionRow()),
-                  const ImmersiveFade(
+                  ImmersiveFade(
                     child: ConstrainedBox(
-                      constraints: BoxConstraints(
+                      constraints: const BoxConstraints(
                         maxWidth: playerWideTransportMaxWidth,
                       ),
-                      child: TransportBar(),
+                      child: const TransportBar(),
                     ),
                   ),
                 ],
