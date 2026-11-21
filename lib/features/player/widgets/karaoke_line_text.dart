@@ -26,6 +26,7 @@ class KaraokeLineText extends StatefulWidget {
     required this.buffering,
     required this.active,
     this.accent,
+    this.textAlign = TextAlign.start,
   });
 
   final KaraokeLyricLine line;
@@ -33,6 +34,10 @@ class KaraokeLineText extends StatefulWidget {
   final ValueListenable<bool> playing;
   final ValueListenable<bool> buffering;
   final bool active;
+
+  /// 段落内各视觉行的对齐方式。只影响字形在行内的落点，逐字扫光仍按
+  /// 阅读方向从左向右推进。
+  final TextAlign textAlign;
 
   /// 系统强调色，用于高亮当前正在唱的字；为 null 时不启用。
   final Color? accent;
@@ -221,6 +226,7 @@ class KaraokeLineTextState extends State<KaraokeLineText>
               paragraph.pixelRatio != pixelRatio ||
               paragraph.direction != direction ||
               paragraph.locale != locale ||
+              paragraph.textAlign != widget.textAlign ||
               paragraph.width != constraints.maxWidth) {
             paragraph?.dispose();
             paragraph = _paragraph = _LyricParagraph(
@@ -231,6 +237,7 @@ class KaraokeLineTextState extends State<KaraokeLineText>
               direction,
               locale,
               constraints.maxWidth,
+              widget.textAlign,
             );
           }
           if (!_reduceMotion) {
@@ -294,6 +301,7 @@ class _LyricParagraph {
     this.direction,
     this.locale,
     this.width,
+    this.textAlign,
   ) {
     final raw = line.words.map((word) => word.text).join();
     final content = raw.trim();
@@ -306,6 +314,7 @@ class _LyricParagraph {
       text: TextSpan(text: content, style: style),
       textDirection: direction,
       textScaler: scaler,
+      textAlign: textAlign,
       locale: locale,
     )..layout(maxWidth: width);
     var start = 0.0;
@@ -403,6 +412,7 @@ class _LyricParagraph {
   final TextDirection direction;
   final Locale? locale;
   final double width;
+  final TextAlign textAlign;
   late final TextPainter text;
   late final double lift;
   late final double feather;
@@ -585,6 +595,7 @@ class _LyricParagraph {
       ),
       textDirection: direction,
       textScaler: scaler,
+      textAlign: textAlign,
       locale: locale,
     )..layout(maxWidth: width);
   }

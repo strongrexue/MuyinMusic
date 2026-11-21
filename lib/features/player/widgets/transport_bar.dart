@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
+import '../../../core/ui/app_toast.dart';
 import '../../../theme/app_motion.dart';
+import '../../playlists/playlist_models.dart';
+import '../../songs/liked_songs_store.dart';
 import '../player_controller.dart';
 import 'playback_queue_sheet.dart';
 import 'player_palette.dart';
@@ -62,6 +65,34 @@ class _TransportBarState extends ConsumerState<TransportBar> {
       maxMs.toDouble(),
     );
     final canControl = vm.hasTrack && !vm.loading;
+    // Like state for the compact (KTV) bar's heart button, derived the
+    // same way as the player action row: the queue entry when there is
+    // one, otherwise an entry synthesized from the current music.
+    final queueEntry = ref.watch(
+      playerControllerProvider.select(
+        (s) => s.queueIndex >= 0 && s.queueIndex < s.queue.length
+            ? s.queue[s.queueIndex]
+            : null,
+      ),
+    );
+    final currentMusic = ref
+        .read(playerControllerProvider.notifier)
+        .currentMusic;
+    final likeEntry =
+        queueEntry ??
+        (currentMusic == null
+            ? null
+            : PlaylistTrack.fromMusicInfo(
+                currentMusic,
+              ).toQueueEntry(playlistId: 'player'));
+    final likeKey = likeEntry == null ? null : songIdentityKey(likeEntry);
+    final liked =
+        likeKey != null &&
+        ref.watch(
+          likedSongsProvider.select(
+            (items) => items.any((row) => songIdentityKey(row) == likeKey),
+          ),
+        );
     return PlayerControlColor(
       builder: (context, ink) {
         final controlColor = canControl ? ink : ink.withValues(alpha: 0.22);
@@ -139,20 +170,27 @@ class _TransportBarState extends ConsumerState<TransportBar> {
         }
 
         if (widget.compact) {
+          // Keep the end buttons clear of a side notch in landscape.
+          final viewPadding = MediaQuery.paddingOf(context);
           return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+            padding: EdgeInsets.fromLTRB(
+              math.max(16.0, viewPadding.left),
+              2,
+              math.max(16.0, viewPadding.right),
+              8,
+            ),
             child: Row(
               children: [
                 IconButton(
                   tooltip: '上一首',
                   onPressed: canControl ? controller.playPrevious : null,
                   style: IconButton.styleFrom(
-                    fixedSize: const Size.square(40),
+                    fixedSize: const Size.square(48),
                   ),
                   icon: Icon(
                     Icons.skip_previous_rounded,
                     color: controlColor,
-                    size: 28,
+                    size: 32,
                   ),
                 ),
                 _PlayButton(
@@ -168,15 +206,49 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   tooltip: '下一首',
                   onPressed: canControl ? controller.playNext : null,
                   style: IconButton.styleFrom(
-                    fixedSize: const Size.square(40),
+                    fixedSize: const Size.square(48),
                   ),
                   icon: Icon(
                     Icons.skip_next_rounded,
                     color: controlColor,
-                    size: 28,
+                    size: 32,
                   ),
                 ),
-                Expanded(child: slider(48, EdgeInsets.zero)),
+                IconButton(
+                  tooltip: liked ? '取消喜欢' : '喜欢',
+                  onPressed: likeEntry == null
+                      ? null
+                      : () {
+                          final nowLiked = ref
+                              .read(likedSongsProvider.notifier)
+                              .toggle(likeEntry);
+                          showAppToast(
+                            context,
+                            nowLiked ? '已加入我的喜欢' : '已取消喜欢',
+                            type: AppToastType.success,
+                          );
+                        },
+                  style: IconButton.styleFrom(
+                    fixedSize: const Size.square(48),
+                  ),
+                  icon: Icon(
+                    liked
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    size: 27,
+                    color: likeEntry == null
+                        ? ink.withValues(alpha: 0.22)
+                        : liked
+                        ? const Color(0xFFFF6382)
+                        : ink,
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: slider(56, EdgeInsets.zero),
+                  ),
+                ),
                 _PlaybackModeButton(
                   color: ink,
                   mode: vm.playbackMode,
@@ -320,9 +392,7 @@ class _PlaybackModeButton extends StatelessWidget {
     return IconButton(
       tooltip: mode.label,
       onPressed: enabled ? onPressed : null,
-      style: IconButton.styleFrom(
-        fixedSize: Size.square(compact ? 40 : 48),
-      ),
+      style: IconButton.styleFrom(fixedSize: const Size.square(48)),
       icon: AnimatedSwitcher(
         duration: MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
@@ -343,7 +413,7 @@ class _PlaybackModeButton extends StatelessWidget {
           _playbackModeIcon(mode),
           key: ValueKey(mode),
           color: iconColor,
-          size: compact ? 21 : 25,
+          size: compact ? 24 : 25,
         ),
       ),
     );
@@ -388,12 +458,12 @@ class _PlayButton extends StatelessWidget {
             ? (ended ? controller.replay : controller.toggle)
             : null,
         child: SizedBox(
-          width: compact ? 48 : 72,
-          height: compact ? 48 : 72,
+          width: compact ? 56 : 72,
+          height: compact ? 56 : 72,
           child: Center(
             child: showSpinner
                 ? SizedBox.square(
-                    dimension: compact ? 18 : 22,
+                    dimension: compact ? 20 : 22,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.6,
                       color: color,
@@ -405,7 +475,7 @@ class _PlayButton extends StatelessWidget {
                         : playing
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
-                    size: compact ? 36 : 56,
+                    size: compact ? 44 : 56,
                     color: canControl ? color : color.withValues(alpha: 0.22),
                   ),
           ),

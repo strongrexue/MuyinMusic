@@ -3,8 +3,11 @@ import 'widgets/settings_sheet.dart';
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
@@ -683,6 +686,45 @@ class SettingsPage extends ConsumerWidget {
                                     .setFlowingLightEnabled(value),
                               ),
                               const SizedBox(height: 4),
+                              SettingsMenuAction(
+                                menuId: 'ktv-background-style-menu',
+                                icon: Icons.wallpaper_rounded,
+                                title: 'KTV 背景',
+                                options: [
+                                  for (final style in KtvBackgroundStyle.values)
+                                    SettingsMenuOption(
+                                      id: style.code,
+                                      label: style.label,
+                                      selected:
+                                          settings.ktvBackgroundStyle == style,
+                                      onSelected: () => ref
+                                          .read(settingsProvider.notifier)
+                                          .setKtvBackgroundStyle(style),
+                                    ),
+                                ],
+                              ),
+                              if (settings.ktvBackgroundStyle ==
+                                  KtvBackgroundStyle.custom) ...[
+                                const SizedBox(height: 4),
+                                SettingsAction(
+                                  key: const ValueKey(
+                                    'ktv-background-image-setting',
+                                  ),
+                                  icon: Icons.image_rounded,
+                                  title: '选择背景图',
+                                  value:
+                                      settings.ktvBackgroundImagePath == null
+                                      ? '未选择'
+                                      : p.basename(
+                                          settings.ktvBackgroundImagePath!,
+                                        ),
+                                  trailing: Symbols.chevron_right,
+                                  onTap: () => unawaited(
+                                    _pickKtvBackgroundImage(context, ref),
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 4),
                             ],
                           ),
                         ],
@@ -738,6 +780,35 @@ class SettingsPage extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _pickKtvBackgroundImage(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || !context.mounted) return;
+    try {
+      final picked = result.files.single;
+      final sourcePath = picked.path;
+      if (sourcePath == null) {
+        throw const FormatException('无法读取所选图片');
+      }
+      var extension = p.extension(picked.name).toLowerCase();
+      if (extension.isEmpty) extension = '.jpg';
+      // 复制进应用文档目录，避免原图被移动/删除后背景失效。
+      final docs = await getApplicationDocumentsDirectory();
+      final target = File(p.join(docs.path, 'ktv_background$extension'));
+      await File(sourcePath).copy(target.path);
+      await ref
+          .read(settingsProvider.notifier)
+          .setKtvBackgroundImagePath(target.path);
+      if (!context.mounted) return;
+      showAppToast(context, 'KTV 背景图已更新', type: AppToastType.success);
+    } catch (error) {
+      if (!context.mounted) return;
+      showAppToast(context, '设置背景图失败：$error', type: AppToastType.error);
+    }
   }
 
   Future<void> _setBluetoothLyricEnabled(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -190,8 +191,16 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
     final slotA = slotIndex(0);
     final slotB = slotIndex(1);
     final chromeVisible = ImmersiveChromeScope.maybeOf(context);
+    // The panel stretches full-bleed, so on notched phones the side
+    // cutout would cover the lyric edges: keep at least the device
+    // safe-area inset on each side.
+    final viewPadding = MediaQuery.paddingOf(context);
+    final extraLeft = math.max(0.0, viewPadding.left - playerContentInset);
+    final extraRight = math.max(0.0, viewPadding.right - playerContentInset);
 
-    return LayoutBuilder(
+    return Padding(
+      padding: EdgeInsets.only(left: extraLeft, right: extraRight),
+      child: LayoutBuilder(
       builder: (context, constraints) {
         // Both lines share one fixed size, like mainstream KTV apps:
         // the singing line never grows and the waiting line never
@@ -206,7 +215,10 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
           104.0,
           170.0,
         );
-        final sunkClearance = (constraints.maxHeight * 0.17).clamp(48.0, 110.0);
+        // In immersive the block takes the transport bar's place: the
+        // bottom line ends at the screen's bottom edge, with only the
+        // bar's own small bottom inset below it — no reserved row.
+        final sunkClearance = (constraints.maxHeight * 0.045).clamp(14.0, 32.0);
         return Column(
           children: [
             const Spacer(),
@@ -253,6 +265,7 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
           ],
         );
       },
+      ),
     );
   }
 }

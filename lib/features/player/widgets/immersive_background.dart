@@ -5,6 +5,7 @@ import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_theme.dart';
 import '../player_controller.dart';
 import '../flowing_light_background.dart';
+import 'ktv_background.dart';
 import 'player_palette.dart';
 import 'player_control_color.dart';
 import 'track_change_switcher.dart';
@@ -29,13 +30,21 @@ class ImmersiveBackground extends ConsumerWidget {
     final flowingLightEnabled = ref.watch(
       settingsProvider.select((s) => s.flowingLightEnabled),
     );
+    final ktvModeEnabled = ref.watch(
+      settingsProvider.select((s) => s.ktvModeEnabled),
+    );
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
     final scheme = Theme.of(context).colorScheme;
     final baseSurface = hasTrack ? playerSurface(context) : scheme.appSurface;
     return Stack(
       fit: StackFit.expand,
       children: [
         ColoredBox(color: baseSurface),
-        TrackChangeSwitcher(
+        if (ktvModeEnabled && isLandscape)
+          const KtvBackground()
+        else
+          TrackChangeSwitcher(
           // Keyed on whether there is a cover at all, not on which cover. Track
           // changes are cross-faded inside FlowingLightBackground, so keying
           // per track would re-slot it, throw away its previous-frame history,

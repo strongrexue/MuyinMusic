@@ -21,6 +21,7 @@ class LyricSettingsPopup extends ConsumerWidget {
         (settings) => (
           miniLyrics: settings.showMiniLyrics,
           blurDisabled: settings.lyricViewBlurDisabled,
+          alignMode: settings.lyricAlignMode,
           weight: settings.lyricFontWeight,
           size: settings.lyricFontSize,
         ),
@@ -70,6 +71,13 @@ class LyricSettingsPopup extends ConsumerWidget {
               notifier.setLyricViewBlurDisabled(!options.blurDisabled),
             ),
           ),
+          const PlayerPopupDivider(),
+          for (final mode in LyricAlignMode.values)
+            PlayerPopupRow(
+              label: '歌词${mode.label}',
+              selected: options.alignMode == mode,
+              onTap: () => unawaited(notifier.setLyricAlignMode(mode)),
+            ),
           const PlayerPopupDivider(),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),

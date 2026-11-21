@@ -21,6 +21,8 @@ const String _kDownloadDirKey = 'download_dir';
 const String _kDownloadFileNameFormatKey = 'download_file_name_format';
 const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
 const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
+const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
+const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
 const String _kLocalMusicDirKey = 'local_music_dir';
 const String _kLocalMusicDirsKey = 'local_music_dirs';
 const String _kUseBuiltInSourceFilePickerKey =
@@ -34,6 +36,7 @@ const String _kPlaylistArtworkColorsEnabledKey =
     'playlist_artwork_colors_enabled';
 const String _kFlowingLightEnabledKey = 'flowing_light_enabled';
 const String _kLyricViewBlurDisabledKey = 'lyric_view_blur_disabled';
+const String _kLyricAlignModeKey = 'lyric_align_mode';
 const String _kSquareAlbumCoverEnabledKey = 'square_album_cover_enabled';
 const String _kLyricFontWeightKey = 'lyric_font_weight';
 const String _kLyricFontSizeKey = 'lyric_font_size';
@@ -89,6 +92,41 @@ double normalizeLyricFontWeight(double value) =>
 double normalizeLyricFontSize(double value) =>
     value.clamp(kLyricFontSizeMin, kLyricFontSizeMax).roundToDouble();
 
+/// 横屏 KTV 播放页的背景样式。
+enum KtvBackgroundStyle {
+  gradient('gradient', '流光渐变'),
+  cover('cover', '封面柔焦'),
+  custom('custom', '自定义图片');
+
+  const KtvBackgroundStyle(this.code, this.label);
+
+  final String code;
+  final String label;
+
+  static KtvBackgroundStyle fromCode(String? code) => values.firstWhere(
+    (style) => style.code == code,
+    orElse: () => gradient,
+  );
+}
+
+/// 竖屏歌词页的歌词对齐方式。
+enum LyricAlignMode {
+  left('left', '左对齐'),
+  center('center', '居中对齐');
+
+  const LyricAlignMode(this.code, this.label);
+
+  final String code;
+  final String label;
+
+  static LyricAlignMode fromCode(String? code) => values.firstWhere(
+    (mode) => mode.code == code,
+    orElse: () => left,
+  );
+}
+
+const Object _unsetValue = Object();
+
 @immutable
 class AppSettings {
   const AppSettings({
@@ -96,6 +134,8 @@ class AppSettings {
     this.downloadFileNameFormat = DownloadFileNameFormat.artistTitle,
     this.downloadGroupByArtist = false,
     this.ktvModeEnabled = false,
+    this.ktvBackgroundStyle = KtvBackgroundStyle.gradient,
+    this.ktvBackgroundImagePath,
     required this.localMusicDirs,
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
@@ -106,6 +146,7 @@ class AppSettings {
     this.playlistArtworkColorsEnabled = true,
     required this.flowingLightEnabled,
     this.lyricViewBlurDisabled = false,
+    this.lyricAlignMode = LyricAlignMode.left,
     this.squareAlbumCoverEnabled = false,
     this.lyricFontWeight = kLyricFontWeightDefault,
     this.lyricFontSize = kLyricFontSizeDefault,
@@ -139,6 +180,10 @@ class AppSettings {
   final DownloadFileNameFormat downloadFileNameFormat;
   final bool downloadGroupByArtist;
   final bool ktvModeEnabled;
+  final KtvBackgroundStyle ktvBackgroundStyle;
+
+  /// 自定义 KTV 背景图的本机文件路径。指向设备本地文件，不参与跨设备同步。
+  final String? ktvBackgroundImagePath;
   final List<String> localMusicDirs;
   String get localMusicDir => localMusicDirs.first;
   final bool useBuiltInSourceFilePicker;
@@ -154,6 +199,7 @@ class AppSettings {
   /// to the static blurred-artwork backdrop.
   final bool flowingLightEnabled;
   final bool lyricViewBlurDisabled;
+  final LyricAlignMode lyricAlignMode;
   final bool squareAlbumCoverEnabled;
   final double lyricFontWeight;
   final double lyricFontSize;
@@ -208,6 +254,8 @@ class AppSettings {
     DownloadFileNameFormat? downloadFileNameFormat,
     bool? downloadGroupByArtist,
     bool? ktvModeEnabled,
+    KtvBackgroundStyle? ktvBackgroundStyle,
+    Object? ktvBackgroundImagePath = _unsetValue,
     String? localMusicDir,
     List<String>? localMusicDirs,
     bool? useBuiltInSourceFilePicker,
@@ -219,6 +267,7 @@ class AppSettings {
     bool? playlistArtworkColorsEnabled,
     bool? flowingLightEnabled,
     bool? lyricViewBlurDisabled,
+    LyricAlignMode? lyricAlignMode,
     bool? squareAlbumCoverEnabled,
     double? lyricFontWeight,
     double? lyricFontSize,
@@ -252,6 +301,10 @@ class AppSettings {
         downloadFileNameFormat ?? this.downloadFileNameFormat,
     downloadGroupByArtist: downloadGroupByArtist ?? this.downloadGroupByArtist,
     ktvModeEnabled: ktvModeEnabled ?? this.ktvModeEnabled,
+    ktvBackgroundStyle: ktvBackgroundStyle ?? this.ktvBackgroundStyle,
+    ktvBackgroundImagePath: identical(ktvBackgroundImagePath, _unsetValue)
+        ? this.ktvBackgroundImagePath
+        : ktvBackgroundImagePath as String?,
     localMusicDirs:
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
@@ -266,6 +319,7 @@ class AppSettings {
         playlistArtworkColorsEnabled ?? this.playlistArtworkColorsEnabled,
     flowingLightEnabled: flowingLightEnabled ?? this.flowingLightEnabled,
     lyricViewBlurDisabled: lyricViewBlurDisabled ?? this.lyricViewBlurDisabled,
+    lyricAlignMode: lyricAlignMode ?? this.lyricAlignMode,
     squareAlbumCoverEnabled:
         squareAlbumCoverEnabled ?? this.squareAlbumCoverEnabled,
     lyricFontWeight: lyricFontWeight ?? this.lyricFontWeight,
@@ -378,6 +432,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
       downloadGroupByArtist:
           _prefs.getBool(_kDownloadGroupByArtistKey) ?? false,
       ktvModeEnabled: _prefs.getBool(_kKtvModeEnabledKey) ?? false,
+      ktvBackgroundStyle: KtvBackgroundStyle.fromCode(
+        _prefs.getString(_kKtvBackgroundStyleKey),
+      ),
+      ktvBackgroundImagePath: _prefs.getString(_kKtvBackgroundImageKey),
       localMusicDirs: _normalizeLocalMusicDirs(
         _prefs.getStringList(_kLocalMusicDirsKey) ??
             [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
@@ -409,6 +467,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       flowingLightEnabled: _prefs.getBool(_kFlowingLightEnabledKey) ?? true,
       lyricViewBlurDisabled:
           _prefs.getBool(_kLyricViewBlurDisabledKey) ?? false,
+      lyricAlignMode: LyricAlignMode.fromCode(
+        _prefs.getString(_kLyricAlignModeKey),
+      ),
       squareAlbumCoverEnabled:
           _prefs.getBool(_kSquareAlbumCoverEnabledKey) ?? false,
       lyricFontWeight: _validLyricFontWeight(_prefs.get(_kLyricFontWeightKey))
@@ -640,9 +701,28 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(flowingLightEnabled: value);
   }
 
+  Future<void> setKtvBackgroundStyle(KtvBackgroundStyle style) async {
+    await _prefs.setString(_kKtvBackgroundStyleKey, style.code);
+    state = state.copyWith(ktvBackgroundStyle: style);
+  }
+
+  Future<void> setKtvBackgroundImagePath(String? path) async {
+    if (path == null) {
+      await _prefs.remove(_kKtvBackgroundImageKey);
+    } else {
+      await _prefs.setString(_kKtvBackgroundImageKey, path);
+    }
+    state = state.copyWith(ktvBackgroundImagePath: path);
+  }
+
   Future<void> setLyricViewBlurDisabled(bool value) async {
     await _prefs.setBool(_kLyricViewBlurDisabledKey, value);
     state = state.copyWith(lyricViewBlurDisabled: value);
+  }
+
+  Future<void> setLyricAlignMode(LyricAlignMode mode) async {
+    await _prefs.setString(_kLyricAlignModeKey, mode.code);
+    state = state.copyWith(lyricAlignMode: mode);
   }
 
   Future<void> setSquareAlbumCoverEnabled(bool value) async {
@@ -725,7 +805,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     'liquidGlassMode': state.liquidGlassMode.code,
     'playlistArtworkColorsEnabled': state.playlistArtworkColorsEnabled,
     'flowingLightEnabled': state.flowingLightEnabled,
+    'ktvBackgroundStyle': state.ktvBackgroundStyle.code,
     'lyricViewBlurDisabled': state.lyricViewBlurDisabled,
+    'lyricAlignMode': state.lyricAlignMode.code,
     'squareAlbumCoverEnabled': state.squareAlbumCoverEnabled,
     'lyricFontWeight': state.lyricFontWeight,
     'lyricFontSize': state.lyricFontSize,
@@ -784,6 +866,29 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final syncedGlass = rawGlass == null
         ? state.liquidGlassMode
         : LiquidGlassMode.fromCode(rawGlass as String);
+    // ktvBackgroundStyle 同样是后加字段，缺失时保留本机选择；图片路径是本机
+    // 文件，不进同步。
+    final rawKtvBackground = json['ktvBackgroundStyle'];
+    if (rawKtvBackground != null &&
+        (rawKtvBackground is! String ||
+            !KtvBackgroundStyle.values.any(
+              (style) => style.code == rawKtvBackground,
+            ))) {
+      throw const FormatException('云端 KTV 背景设置无效');
+    }
+    final syncedKtvBackground = rawKtvBackground == null
+        ? state.ktvBackgroundStyle
+        : KtvBackgroundStyle.fromCode(rawKtvBackground as String);
+    // lyricAlignMode 同样是后加字段，缺失时保留本机选择。
+    final rawLyricAlign = json['lyricAlignMode'];
+    if (rawLyricAlign != null &&
+        (rawLyricAlign is! String ||
+            !LyricAlignMode.values.any((mode) => mode.code == rawLyricAlign))) {
+      throw const FormatException('云端歌词对齐设置无效');
+    }
+    final syncedLyricAlign = rawLyricAlign == null
+        ? state.lyricAlignMode
+        : LyricAlignMode.fromCode(rawLyricAlign as String);
     final rawPalette = json['themePalette'];
     if (rawPalette != null &&
         (rawPalette is! List ||
@@ -834,6 +939,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       liquidGlassMode: syncedGlass,
       playlistArtworkColorsEnabled: syncedPlaylistColors,
       flowingLightEnabled: syncedFlowingLight,
+      ktvBackgroundStyle: syncedKtvBackground,
+      lyricAlignMode: syncedLyricAlign,
       lyricViewBlurDisabled: rawLyricBlurDisabled as bool?,
       squareAlbumCoverEnabled: rawSquareCover as bool?,
       lyricFontWeight: syncedLyricWeight,
@@ -864,6 +971,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       await _prefs.setDouble(_kLyricFontSizeKey, syncedLyricSize);
     }
     await _prefs.setString(_kLiquidGlassModeKey, syncedGlass.code);
+    await _prefs.setString(_kKtvBackgroundStyleKey, syncedKtvBackground.code);
+    await _prefs.setString(_kLyricAlignModeKey, syncedLyricAlign.code);
     await _prefs.setBool(
       _kPlaylistArtworkColorsEnabledKey,
       syncedPlaylistColors,
