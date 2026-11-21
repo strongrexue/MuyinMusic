@@ -140,12 +140,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
 
         if (widget.compact) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(
-              playerProgressTrackInset,
-              2,
-              playerProgressTrackInset,
-              2,
-            ),
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
             child: Row(
               children: [
                 IconButton(

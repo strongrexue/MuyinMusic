@@ -30,16 +30,7 @@ class KtvPlayerLayout extends StatelessWidget {
           left: 0,
           right: 0,
           bottom: 0,
-          child: ImmersiveFade(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: playerWideTransportMaxWidth,
-                ),
-                child: const TransportBar(compact: true),
-              ),
-            ),
-          ),
+          child: ImmersiveFade(child: const TransportBar(compact: true)),
         ),
       ],
     );
