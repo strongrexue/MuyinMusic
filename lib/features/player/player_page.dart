@@ -106,22 +106,34 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               opacity: widget.progress.drive(const PlayerPhase(0.33, 0.86)),
               child: ImmersiveChrome(
                 active: widget.active,
-                child: SafeArea(
-                  key: const ValueKey('player-chrome'),
-                  child: Column(
-                    children: [
-                      if (ktvChromePinned)
-                        topChromeRow
-                      else
-                        ImmersiveFade(child: topChromeRow),
-                      Expanded(
-                        child: showEmpty
-                            ? const _EmptyPlayer()
-                            : const _NowPlayingBody(),
+                // Landscape KTV stretches full-bleed like mainstream KTV
+                // apps: only the top chrome keeps its safe-area insets,
+                // the body reaches every screen edge.
+                child: ktvChromePinned
+                    ? Column(
+                        key: const ValueKey('player-chrome'),
+                        children: [
+                          SafeArea(bottom: false, child: topChromeRow),
+                          Expanded(
+                            child: showEmpty
+                                ? const _EmptyPlayer()
+                                : const _NowPlayingBody(),
+                          ),
+                        ],
+                      )
+                    : SafeArea(
+                        key: const ValueKey('player-chrome'),
+                        child: Column(
+                          children: [
+                            ImmersiveFade(child: topChromeRow),
+                            Expanded(
+                              child: showEmpty
+                                  ? const _EmptyPlayer()
+                                  : const _NowPlayingBody(),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
-                ),
               ),
             ),
           ],
@@ -245,16 +257,7 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     );
     final mediaSize = MediaQuery.sizeOf(context);
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
-      return Padding(
-        key: const ValueKey('player-ktv-layout'),
-        padding: const EdgeInsets.fromLTRB(
-          playerWideOuterInset,
-          8,
-          playerWideOuterInset,
-          18,
-        ),
-        child: const KtvPlayerLayout(),
-      );
+      return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
     }
     final carPadModeEnabled =
         ref.watch(

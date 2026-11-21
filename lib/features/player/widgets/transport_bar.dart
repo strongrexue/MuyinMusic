@@ -15,7 +15,9 @@ import 'player_slider_thumb_shape.dart';
 class TransportBar extends ConsumerStatefulWidget {
   const TransportBar({super.key, this.compact = false});
 
-  /// Slimmer paddings, slider and buttons for overlay use (KTV layout).
+  /// Single-row overlay layout for the KTV landscape layout: transport
+  /// buttons on the left, the progress slider filling the middle and
+  /// the mode / queue buttons on the right, all in one slim row.
   final bool compact;
 
   @override
@@ -67,78 +69,144 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             ThemeData.estimateBrightnessForColor(ink) == Brightness.dark
             ? Colors.white
             : Colors.black;
+        Widget slider(double height, EdgeInsetsGeometry sliderPadding) {
+          return SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: widget.compact ? 3 : 4,
+              trackShape: const RoundedRectSliderTrackShape(),
+              activeTrackColor: ink,
+              inactiveTrackColor: ink.withValues(alpha: 0.22),
+              thumbColor: ink,
+              overlayColor: ink.withValues(alpha: 0.10),
+              thumbShape: PlayerSliderThumbShape(
+                disableAnimations: MediaQuery.disableAnimationsOf(context),
+              ),
+              overlayShape: RoundSliderOverlayShape(
+                overlayRadius: widget.compact ? 10 : 14,
+              ),
+              showValueIndicator: ShowValueIndicator.onDrag,
+              valueIndicatorShape:
+                  const RoundedRectSliderValueIndicatorShape(),
+              valueIndicatorColor: ink,
+              valueIndicatorTextStyle: TextStyle(
+                color: indicatorTextColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            child: SizedBox(
+              height: height,
+              child: Slider(
+                key: ValueKey(vm.trackId),
+                padding: sliderPadding,
+                value: shownMs,
+                max: maxMs.toDouble(),
+                label: _formatDuration(
+                  Duration(milliseconds: shownMs.round()),
+                ),
+                semanticFormatterCallback: (value) =>
+                    _formatDuration(Duration(milliseconds: value.round())),
+                onChangeStart: canControl
+                    ? (value) => setState(() {
+                        _interactionToken = Object();
+                        _dragMs = value;
+                      })
+                    : null,
+                onChanged: canControl
+                    ? (value) => setState(() => _dragMs = value)
+                    : null,
+                onChangeEnd: canControl
+                    ? (value) async {
+                        final token = _interactionToken;
+                        try {
+                          await controller.seek(
+                            Duration(milliseconds: value.round()),
+                          );
+                        } finally {
+                          // 旧 seek 结束不能清掉换曲或后一次拖动的状态。
+                          if (mounted && identical(_interactionToken, token)) {
+                            setState(() {
+                              _dragMs = null;
+                              _interactionToken = null;
+                            });
+                          }
+                        }
+                      }
+                    : null,
+              ),
+            ),
+          );
+        }
+
+        if (widget.compact) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: '上一首',
+                  onPressed: canControl ? controller.playPrevious : null,
+                  style: IconButton.styleFrom(
+                    fixedSize: const Size.square(40),
+                  ),
+                  icon: Icon(
+                    Icons.skip_previous_rounded,
+                    color: controlColor,
+                    size: 28,
+                  ),
+                ),
+                _PlayButton(
+                  color: ink,
+                  playing: vm.playing,
+                  showSpinner: vm.loading || vm.buffering,
+                  ended: vm.ended,
+                  canControl: canControl,
+                  controller: controller,
+                  compact: true,
+                ),
+                IconButton(
+                  tooltip: '下一首',
+                  onPressed: canControl ? controller.playNext : null,
+                  style: IconButton.styleFrom(
+                    fixedSize: const Size.square(40),
+                  ),
+                  icon: Icon(
+                    Icons.skip_next_rounded,
+                    color: controlColor,
+                    size: 28,
+                  ),
+                ),
+                Expanded(child: slider(48, EdgeInsets.zero)),
+                _PlaybackModeButton(
+                  color: ink,
+                  mode: vm.playbackMode,
+                  enabled: vm.hasTrack,
+                  onPressed: controller.cyclePlaybackMode,
+                  compact: true,
+                ),
+                prism.PopupAnchor(
+                  placement: prism.PopupPlacement.screenLowerTwoThirds,
+                  targetBuilder: (open) => PlaybackQueueButton(
+                    color: ink,
+                    count: vm.queueCount,
+                    enabled: vm.hasTrack,
+                    onPressed: open,
+                  ),
+                  popupBuilder: (_) => const PlaybackQueuePopup(),
+                ),
+              ],
+            ),
+          );
+        }
         return Padding(
           padding: const EdgeInsets.fromLTRB(0, 0, 0, 2),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: widget.compact ? 3 : 4,
-                  trackShape: const RoundedRectSliderTrackShape(),
-                  activeTrackColor: ink,
-                  inactiveTrackColor: ink.withValues(alpha: 0.22),
-                  thumbColor: ink,
-                  overlayColor: ink.withValues(alpha: 0.10),
-                  thumbShape: PlayerSliderThumbShape(
-                    disableAnimations: MediaQuery.disableAnimationsOf(context),
-                  ),
-                  overlayShape: RoundSliderOverlayShape(
-                    overlayRadius: widget.compact ? 10 : 14,
-                  ),
-                  showValueIndicator: ShowValueIndicator.onDrag,
-                  valueIndicatorShape:
-                      const RoundedRectSliderValueIndicatorShape(),
-                  valueIndicatorColor: ink,
-                  valueIndicatorTextStyle: TextStyle(
-                    color: indicatorTextColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                child: SizedBox(
-                  height: widget.compact ? 18 : 28,
-                  child: Slider(
-                    key: ValueKey(vm.trackId),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: playerProgressTrackInset,
-                    ),
-                    value: shownMs,
-                    max: maxMs.toDouble(),
-                    label: _formatDuration(
-                      Duration(milliseconds: shownMs.round()),
-                    ),
-                    semanticFormatterCallback: (value) =>
-                        _formatDuration(Duration(milliseconds: value.round())),
-                    onChangeStart: canControl
-                        ? (value) => setState(() {
-                            _interactionToken = Object();
-                            _dragMs = value;
-                          })
-                        : null,
-                    onChanged: canControl
-                        ? (value) => setState(() => _dragMs = value)
-                        : null,
-                    onChangeEnd: canControl
-                        ? (value) async {
-                            final token = _interactionToken;
-                            try {
-                              await controller.seek(
-                                Duration(milliseconds: value.round()),
-                              );
-                            } finally {
-                              // 旧 seek 结束不能清掉换曲或后一次拖动的状态。
-                              if (mounted &&
-                                  identical(_interactionToken, token)) {
-                                setState(() {
-                                  _dragMs = null;
-                                  _interactionToken = null;
-                                });
-                              }
-                            }
-                          }
-                        : null,
-                  ),
+              slider(
+                28,
+                const EdgeInsets.symmetric(
+                  horizontal: playerProgressTrackInset,
                 ),
               ),
               Padding(
@@ -159,7 +227,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   ],
                 ),
               ),
-              SizedBox(height: widget.compact ? 2 : 10),
+              const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -168,20 +236,14 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                     mode: vm.playbackMode,
                     enabled: vm.hasTrack,
                     onPressed: controller.cyclePlaybackMode,
-                    compact: widget.compact,
                   ),
                   IconButton(
                     tooltip: '上一首',
                     onPressed: canControl ? controller.playPrevious : null,
-                    style: widget.compact
-                        ? IconButton.styleFrom(
-                            fixedSize: const Size.square(40),
-                          )
-                        : null,
                     icon: Icon(
                       Icons.skip_previous_rounded,
                       color: controlColor,
-                      size: widget.compact ? 30 : 38,
+                      size: 38,
                     ),
                   ),
                   _PlayButton(
@@ -191,25 +253,18 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                     ended: vm.ended,
                     canControl: canControl,
                     controller: controller,
-                    compact: widget.compact,
                   ),
                   IconButton(
                     tooltip: '下一首',
                     onPressed: canControl ? controller.playNext : null,
-                    style: widget.compact
-                        ? IconButton.styleFrom(
-                            fixedSize: const Size.square(40),
-                          )
-                        : null,
                     icon: Icon(
                       Icons.skip_next_rounded,
                       color: controlColor,
-                      size: widget.compact ? 30 : 38,
+                      size: 38,
                     ),
                   ),
                   prism.PopupAnchor(
-                    placement:
-                        prism.PopupPlacement.screenLowerTwoThirds,
+                    placement: prism.PopupPlacement.screenLowerTwoThirds,
                     targetBuilder: (open) => PlaybackQueueButton(
                       color: ink,
                       count: vm.queueCount,
@@ -230,7 +285,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
   TextStyle _timeStyle(BuildContext context) {
     return TextStyle(
       color: playerMuted(context),
-      fontSize: widget.compact ? 12 : 15,
+      fontSize: 15,
       fontWeight: FontWeight.w500,
     );
   }
@@ -333,8 +388,8 @@ class _PlayButton extends StatelessWidget {
             ? (ended ? controller.replay : controller.toggle)
             : null,
         child: SizedBox(
-          width: compact ? 54 : 72,
-          height: compact ? 54 : 72,
+          width: compact ? 48 : 72,
+          height: compact ? 48 : 72,
           child: Center(
             child: showSpinner
                 ? SizedBox.square(
@@ -350,7 +405,7 @@ class _PlayButton extends StatelessWidget {
                         : playing
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
-                    size: compact ? 42 : 56,
+                    size: compact ? 36 : 56,
                     color: canControl ? color : color.withValues(alpha: 0.22),
                   ),
           ),

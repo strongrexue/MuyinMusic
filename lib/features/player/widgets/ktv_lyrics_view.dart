@@ -12,9 +12,11 @@ import 'player_layout.dart';
 import 'transport_bar.dart';
 
 /// The KTV player layout: the dual-slot lyrics fill the whole area and
-/// the slim transport bar floats over their bottom edge. The lyrics
-/// never move; the bar takes part in the player page's immersive
-/// auto-hide (see [ImmersiveChrome]) while the top chrome stays visible.
+/// the slim transport bar floats over their bottom edge. The bar takes
+/// part in the player page's immersive auto-hide (see
+/// [ImmersiveChrome]) while the top chrome stays visible; when the bar
+/// fades, the lyrics sink into the space it leaves (see
+/// [KtvLyricsView]).
 class KtvPlayerLayout extends StatelessWidget {
   const KtvPlayerLayout({super.key});
 
@@ -28,16 +30,7 @@ class KtvPlayerLayout extends StatelessWidget {
           left: 0,
           right: 0,
           bottom: 0,
-          child: ImmersiveFade(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: playerWideTransportMaxWidth,
-                ),
-                child: const TransportBar(compact: true),
-              ),
-            ),
-          ),
+          child: ImmersiveFade(child: const TransportBar(compact: true)),
         ),
       ],
     );
@@ -196,11 +189,24 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
 
     final slotA = slotIndex(0);
     final slotB = slotIndex(1);
+    final chromeVisible = ImmersiveChromeScope.maybeOf(context);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final activeSize = (constraints.maxHeight * 0.13).clamp(28.0, 50.0);
-        final slotHeight = activeSize * 1.35;
+        // Both lines share one fixed size, like mainstream KTV apps:
+        // the singing line never grows and the waiting line never
+        // shrinks, so a line change does not shift the block around.
+        final fontSize = (constraints.maxHeight * 0.095).clamp(24.0, 40.0);
+        final slotHeight = fontSize * 1.35;
+        // Bottom clearance of the lyric block. With the chrome shown
+        // the block floats above the transport bar; when the chrome
+        // fades (immersive), the block sinks by about the bar's height
+        // into the space the bar occupied.
+        final shownClearance = (constraints.maxHeight * 0.32).clamp(
+          104.0,
+          170.0,
+        );
+        final sunkClearance = (constraints.maxHeight * 0.17).clamp(48.0, 110.0);
         return Column(
           children: [
             const Spacer(),
@@ -213,12 +219,12 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
                 anchorMs: _anchorMs,
                 playing: _playing,
                 buffering: _buffering,
-                activeSize: activeSize,
+                fontSize: fontSize,
                 color: scheme.onSurface,
                 accent: scheme.primary,
               ),
             ),
-            SizedBox(height: activeSize * 0.35),
+            SizedBox(height: fontSize * 0.35),
             SizedBox(
               height: slotHeight,
               child: _KtvSlot(
@@ -228,17 +234,22 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
                 anchorMs: _anchorMs,
                 playing: _playing,
                 buffering: _buffering,
-                activeSize: activeSize,
+                fontSize: fontSize,
                 color: scheme.onSurface,
                 accent: scheme.primary,
               ),
             ),
-            // Clearance for the floating transport bar: the slots keep
-            // this distance from the panel's bottom edge whether the bar
-            // is shown or faded, so the lyrics never shift.
-            SizedBox(
-              height: (constraints.maxHeight * 0.06).clamp(104.0, 150.0),
-            ),
+            if (chromeVisible == null)
+              SizedBox(height: shownClearance)
+            else
+              ValueListenableBuilder<bool>(
+                valueListenable: chromeVisible,
+                builder: (context, isVisible, _) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  height: isVisible ? shownClearance : sunkClearance,
+                ),
+              ),
           ],
         );
       },
@@ -256,7 +267,7 @@ class _KtvSlot extends StatelessWidget {
     required this.anchorMs,
     required this.playing,
     required this.buffering,
-    required this.activeSize,
+    required this.fontSize,
     required this.color,
     required this.accent,
   });
@@ -267,7 +278,7 @@ class _KtvSlot extends StatelessWidget {
   final ValueListenable<int> anchorMs;
   final ValueListenable<bool> playing;
   final ValueListenable<bool> buffering;
-  final double activeSize;
+  final double fontSize;
   final Color color;
   final Color accent;
 
@@ -290,14 +301,14 @@ class _KtvSlot extends StatelessWidget {
                       anchorMs: anchorMs,
                       playing: playing,
                       buffering: buffering,
-                      fontSize: activeSize,
+                      fontSize: fontSize,
                       color: color,
                       accent: accent,
                       alignRight: alignRight,
                     )
                   : _KtvUpcomingLine(
                       text: current.text,
-                      fontSize: activeSize * 0.65,
+                      fontSize: fontSize,
                       color: color.withValues(alpha: 0.85),
                       alignRight: alignRight,
                     ),
