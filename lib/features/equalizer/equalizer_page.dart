@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/car_display_layout.dart';
 import '../../theme/app_theme.dart';
+import '../playlists/playlist_name_dialog.dart';
 import '../settings/widgets/settings_action.dart';
 import '../settings/widgets/settings_menu.dart';
 import '../settings/widgets/settings_sheet.dart';
@@ -32,10 +34,11 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
   Widget build(BuildContext context) {
     final settings = ref.watch(equalizerProvider);
     final notifier = ref.read(equalizerProvider.notifier);
+    final userPresets = ref.watch(userEqualizerPresetsProvider);
     final scheme = Theme.of(context).colorScheme;
-    final isCustom = !equalizerPresets.any(
-      (preset) => preset.id == settings.presetId,
-    );
+    final isCustom =
+        !equalizerPresets.any((preset) => preset.id == settings.presetId) &&
+        !userPresets.any((preset) => preset.id == settings.presetId);
 
     return Scaffold(
       backgroundColor: scheme.appSettingsSurface,
@@ -86,6 +89,14 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
                                   onSelected: () {},
                                 ),
                               for (final preset in equalizerPresets)
+                                SettingsMenuOption(
+                                  id: preset.id,
+                                  label: preset.label,
+                                  selected: settings.presetId == preset.id,
+                                  onSelected: () =>
+                                      notifier.applyPreset(preset),
+                                ),
+                              for (final preset in userPresets)
                                 SettingsMenuOption(
                                   id: preset.id,
                                   label: preset.label,
@@ -158,6 +169,30 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
                             trailing: Icons.chevron_right_rounded,
                             onTap: () => _exportSpeq(settings),
                           ),
+                          if (userPresets.isNotEmpty)
+                            SettingsMenuAction(
+                              menuId: 'equalizer-rename-imported',
+                              icon: Icons.drive_file_rename_outline_rounded,
+                              title: '重命名导入的预设',
+                              options: [
+                                for (final preset in userPresets)
+                                  SettingsMenuOption(
+                                    id: preset.id,
+                                    label: preset.label,
+                                    onSelected: () =>
+                                        _renameUserPreset(preset),
+                                  ),
+                              ],
+                            ),
+                          if (userPresets.isNotEmpty)
+                            SettingsAction(
+                              icon: Icons.delete_sweep_outlined,
+                              title: '清除导入的预设',
+                              value: '${userPresets.length} 个',
+                              onTap: () => ref
+                                  .read(userEqualizerPresetsProvider.notifier)
+                                  .clear(),
+                            ),
                           SettingsAction(
                             icon: Icons.restart_alt_rounded,
                             title: '恢复默认',
@@ -215,15 +250,21 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
   }
 
   Future<void> _importSpeq() async {
+    // .speq has no MIME type registered with Android, so filtering by
+    // custom extension leaves such files unselectable in the system
+    // picker. Pick any file and validate the extension here instead.
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: '导入均衡器配置',
-      type: FileType.custom,
-      allowedExtensions: const ['speq', 'json'],
+      type: FileType.any,
       withData: true,
     );
     if (result == null || !mounted) return;
     try {
       final picked = result.files.single;
+      final name = picked.name.toLowerCase();
+      if (!name.endsWith('.speq') && !name.endsWith('.json')) {
+        throw const FormatException('请选择 .speq 或 .json 配置文件');
+      }
       final value = picked.bytes != null
           ? utf8.decode(picked.bytes!)
           : await File(picked.path!).readAsString();
@@ -238,21 +279,44 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
 
   Future<void> _exportSpeq(EqualizerSettings settings) async {
     try {
-      var path = await FilePicker.platform.saveFile(
+      final content = settings.toSpeq();
+      // Android and iOS require the bytes up front: the plugin writes them
+      // itself and returns a content URI rather than a writable path.
+      // Desktop pickers only return a path, so write the file there.
+      final path = await FilePicker.platform.saveFile(
         dialogTitle: '导出均衡器配置',
         fileName: 'MuyinMusic.speq',
         type: FileType.custom,
         allowedExtensions: const ['speq'],
+        bytes: Uint8List.fromList(utf8.encode(content)),
       );
       if (path == null || !mounted) return;
-      if (!path.toLowerCase().endsWith('.speq')) path = '$path.speq';
-      await File(path).writeAsString(settings.toSpeq(), flush: true);
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        var target = path;
+        if (!target.toLowerCase().endsWith('.speq')) target = '$target.speq';
+        await File(target).writeAsString(content, flush: true);
+      }
       if (!mounted) return;
       showAppToast(context, '均衡器配置已导出', type: AppToastType.success);
     } catch (error) {
       if (!mounted) return;
       showAppToast(context, '无法导出配置：$error', type: AppToastType.error);
     }
+  }
+
+  Future<void> _renameUserPreset(EqualizerPreset preset) async {
+    final name = await _withHiddenToolbar(
+      () => showPlaylistNameDialog(
+        context,
+        title: '重命名预设',
+        actionLabel: '保存',
+        initialValue: preset.label,
+      ),
+    );
+    if (name == null || !mounted) return;
+    ref.read(userEqualizerPresetsProvider.notifier).rename(preset.id, name);
+    if (!mounted) return;
+    showAppToast(context, '预设名称已更新', type: AppToastType.success);
   }
 
   Future<void> _reset() async {

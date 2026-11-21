@@ -8,6 +8,8 @@ import '../shell/player_transition.dart';
 import 'player_controller.dart';
 import 'widgets/album_cluster.dart';
 import 'widgets/immersive_background.dart';
+import 'widgets/immersive_chrome.dart';
+import 'widgets/ktv_lyrics_view.dart';
 import 'widgets/lyrics_panel.dart';
 import 'widgets/player_action_row.dart';
 import 'widgets/player_layout.dart';
@@ -90,20 +92,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
             FadeTransition(
               opacity: widget.progress.drive(const PlayerPhase(0.33, 0.86)),
-              child: SafeArea(
-                key: const ValueKey('player-chrome'),
-                child: Column(
-                  children: [
-                    TopChromeRow(
-                      onOpenEqualizer: () =>
-                          widget.onDismissRequested('/settings/equalizer'),
-                    ),
-                    Expanded(
-                      child: showEmpty
-                          ? const _EmptyPlayer()
-                          : const _NowPlayingBody(),
-                    ),
-                  ],
+              child: ImmersiveChrome(
+                active: widget.active,
+                child: SafeArea(
+                  key: const ValueKey('player-chrome'),
+                  child: Column(
+                    children: [
+                      ImmersiveFade(
+                        child: TopChromeRow(
+                          onOpenEqualizer: () =>
+                              widget.onDismissRequested('/settings/equalizer'),
+                        ),
+                      ),
+                      Expanded(
+                        child: showEmpty
+                            ? const _EmptyPlayer()
+                            : const _NowPlayingBody(),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -218,6 +225,23 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
 
   @override
   Widget build(BuildContext context) {
+    final ktvModeEnabled = ref.watch(
+      settingsProvider.select((settings) => settings.ktvModeEnabled),
+    );
+    final track = ref.watch(playerControllerProvider.select((s) => s.track));
+    final mediaSize = MediaQuery.sizeOf(context);
+    if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
+      return Padding(
+        key: const ValueKey('player-ktv-layout'),
+        padding: const EdgeInsets.fromLTRB(
+          playerWideOuterInset,
+          8,
+          playerWideOuterInset,
+          18,
+        ),
+        child: KtvPlayerLayout(title: track?.title, artist: track?.artist),
+      );
+    }
     final carPadModeEnabled =
         ref.watch(
           settingsProvider.select((settings) => settings.carPadModeEnabled),
@@ -245,12 +269,14 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const PlayerActionRow(),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: playerWideTransportMaxWidth,
+                  const ImmersiveFade(child: PlayerActionRow()),
+                  const ImmersiveFade(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: playerWideTransportMaxWidth,
+                      ),
+                      child: TransportBar(),
                     ),
-                    child: const TransportBar(),
                   ),
                 ],
               ),
@@ -328,13 +354,17 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-            child: PlayerActionRow(),
+          const ImmersiveFade(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: playerContentInset),
+              child: PlayerActionRow(),
+            ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-            child: TransportBar(),
+          const ImmersiveFade(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: playerContentInset),
+              child: TransportBar(),
+            ),
           ),
         ],
       ),

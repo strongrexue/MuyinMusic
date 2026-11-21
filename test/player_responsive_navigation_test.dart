@@ -19,6 +19,7 @@ import 'package:cy_shine_music/features/player/sleep_timer_controller.dart';
 import 'package:cy_shine_music/features/player/widgets/album_cluster.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_line_text.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_lyrics_view.dart';
+import 'package:cy_shine_music/features/player/widgets/ktv_lyrics_view.dart';
 import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
 import 'package:cy_shine_music/features/shell/shell_route_utils.dart';
@@ -605,6 +606,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('ktv panel rolls to the active line as playback advances', (
+    tester,
+  ) async {
+    const lyrics = KaraokeLyrics([
+      KaraokeLyricLine(startMs: 0, endMs: 3000, text: '第一行歌词'),
+      KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '第二行歌词'),
+    ]);
+    final controller = await _pumpKtvPanel(
+      tester,
+      const PlayerState(lyrics: lyrics),
+    );
+
+    expect(find.byType(KtvLyricsView), findsOneWidget);
+    Finder bigLine(String text) => find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          widget.data == text &&
+          (widget.style?.fontSize ?? 0) >= 48,
+    );
+    expect(bigLine('第一行歌词'), findsOneWidget);
+
+    controller.setStateForTest(
+      const PlayerState(lyrics: lyrics, position: Duration(seconds: 4)),
+    );
+    await _pumpUi(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(bigLine('第二行歌词'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('late audio readiness does not remount loaded lyrics', (
     tester,
   ) async {
@@ -1060,6 +1092,37 @@ Future<_SeededPlayerController> _pumpLyricsPanel(
         builder: buildPrismTestEnvironment,
         theme: _theme(),
         home: const Scaffold(body: LyricsPanel()),
+      ),
+    ),
+  );
+  await _pumpUi(tester);
+  controller.setStateForTest(initialState);
+  await _pumpUi(tester);
+  return controller;
+}
+
+Future<_SeededPlayerController> _pumpKtvPanel(
+  WidgetTester tester,
+  PlayerState initialState,
+) async {
+  final preferences = await SharedPreferences.getInstance();
+  final audioHandler = PlayerAudioHandler();
+  addTearDown(() => unawaited(audioHandler.disposeHandler()));
+  late _SeededPlayerController controller;
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(preferences),
+        playerAudioHandlerProvider.overrideWithValue(audioHandler),
+        playerControllerProvider.overrideWith(
+          (ref) => controller = _SeededPlayerController(ref, initialState),
+        ),
+      ],
+      child: MaterialApp(
+        builder: buildPrismTestEnvironment,
+        theme: _theme(),
+        home: const Scaffold(body: KtvLyricsPanel()),
       ),
     ),
   );

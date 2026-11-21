@@ -132,6 +132,22 @@ class _IosMediaDiagnosticsCardState
         setState(() => _result = buffer.toString());
       });
 
+  Future<void> _signingIdentity() => _guarded(() async {
+        final data = await _taskChannel.invokeMapMethod<String, dynamic>(
+          'signingIdentity',
+        );
+        final buffer = StringBuffer('⑤ 签名身份（点卡回 App 的归属）:\n');
+        if (data == null) {
+          buffer.writeln('  返回 null（通道未实现？）');
+        } else {
+          data.forEach((key, value) => buffer.writeln('  $key = $value'));
+        }
+        buffer.writeln('\n判读：applicationIdentifier 应以本 App 的');
+        buffer.writeln('bundleId 结尾（appIdMatchesBundle = true）；');
+        buffer.writeln('显示（无）或指向别的 App，点卡就回不了沐音。');
+        setState(() => _result = buffer.toString());
+      });
+
   @override
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return const SizedBox.shrink();
@@ -169,6 +185,10 @@ class _IosMediaDiagnosticsCardState
                 ElevatedButton(
                   onPressed: _busy ? null : _exclusiveProbe,
                   child: const Text('④ 独占探针'),
+                ),
+                ElevatedButton(
+                  onPressed: _busy ? null : _signingIdentity,
+                  child: const Text('⑤ 签名身份'),
                 ),
               ],
             ),

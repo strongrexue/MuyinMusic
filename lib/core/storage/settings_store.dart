@@ -19,6 +19,8 @@ export 'base_url.dart';
 
 const String _kDownloadDirKey = 'download_dir';
 const String _kDownloadFileNameFormatKey = 'download_file_name_format';
+const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
+const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
 const String _kLocalMusicDirKey = 'local_music_dir';
 const String _kLocalMusicDirsKey = 'local_music_dirs';
 const String _kUseBuiltInSourceFilePickerKey =
@@ -92,6 +94,8 @@ class AppSettings {
   const AppSettings({
     required this.downloadDir,
     this.downloadFileNameFormat = DownloadFileNameFormat.artistTitle,
+    this.downloadGroupByArtist = false,
+    this.ktvModeEnabled = false,
     required this.localMusicDirs,
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
@@ -133,6 +137,8 @@ class AppSettings {
 
   final String downloadDir;
   final DownloadFileNameFormat downloadFileNameFormat;
+  final bool downloadGroupByArtist;
+  final bool ktvModeEnabled;
   final List<String> localMusicDirs;
   String get localMusicDir => localMusicDirs.first;
   final bool useBuiltInSourceFilePicker;
@@ -200,6 +206,8 @@ class AppSettings {
   AppSettings copyWith({
     String? downloadDir,
     DownloadFileNameFormat? downloadFileNameFormat,
+    bool? downloadGroupByArtist,
+    bool? ktvModeEnabled,
     String? localMusicDir,
     List<String>? localMusicDirs,
     bool? useBuiltInSourceFilePicker,
@@ -242,6 +250,8 @@ class AppSettings {
     downloadDir: downloadDir ?? this.downloadDir,
     downloadFileNameFormat:
         downloadFileNameFormat ?? this.downloadFileNameFormat,
+    downloadGroupByArtist: downloadGroupByArtist ?? this.downloadGroupByArtist,
+    ktvModeEnabled: ktvModeEnabled ?? this.ktvModeEnabled,
     localMusicDirs:
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
@@ -365,6 +375,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       downloadFileNameFormat: DownloadFileNameFormat.fromCode(
         _prefs.getString(_kDownloadFileNameFormatKey),
       ),
+      downloadGroupByArtist:
+          _prefs.getBool(_kDownloadGroupByArtistKey) ?? false,
+      ktvModeEnabled: _prefs.getBool(_kKtvModeEnabledKey) ?? false,
       localMusicDirs: _normalizeLocalMusicDirs(
         _prefs.getStringList(_kLocalMusicDirsKey) ??
             [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
@@ -484,6 +497,16 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> setDownloadFileNameFormat(DownloadFileNameFormat format) async {
     await _prefs.setString(_kDownloadFileNameFormatKey, format.code);
     state = state.copyWith(downloadFileNameFormat: format);
+  }
+
+  Future<void> setDownloadGroupByArtist(bool value) async {
+    await _prefs.setBool(_kDownloadGroupByArtistKey, value);
+    state = state.copyWith(downloadGroupByArtist: value);
+  }
+
+  Future<void> setKtvModeEnabled(bool value) async {
+    await _prefs.setBool(_kKtvModeEnabledKey, value);
+    state = state.copyWith(ktvModeEnabled: value);
   }
 
   Future<void> setLocalMusicDir(String value) => setLocalMusicDirs([value]);

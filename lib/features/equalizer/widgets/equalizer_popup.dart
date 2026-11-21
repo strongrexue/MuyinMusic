@@ -17,6 +17,7 @@ class PlayerEqualizerPopup extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(equalizerProvider);
     final notifier = ref.read(equalizerProvider.notifier);
+    final userPresets = ref.watch(userEqualizerPresetsProvider);
     final colorScheme = prism.Theme.of(context).colorScheme;
     return PlayerPopupCard(
       key: const ValueKey('player-equalizer-popup'),
@@ -46,6 +47,13 @@ class PlayerEqualizerPopup extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final preset in equalizerPresets)
+                      PlayerPopupRow(
+                        key: ValueKey('player-equalizer-preset-${preset.id}'),
+                        label: preset.label,
+                        selected: preset.id == settings.presetId,
+                        onTap: () => notifier.applyPreset(preset),
+                      ),
+                    for (final preset in userPresets)
                       PlayerPopupRow(
                         key: ValueKey('player-equalizer-preset-${preset.id}'),
                         label: preset.label,

@@ -397,6 +397,18 @@ class SettingsPage extends ConsumerWidget {
                                     ),
                                 ],
                               ),
+                              SettingsSwitchAction(
+                                key: const ValueKey(
+                                  'download-group-by-artist-switch',
+                                ),
+                                icon: Icons.create_new_folder_outlined,
+                                title: '按歌手分文件夹',
+                                subtitle: '文件保存到以歌手命名的子文件夹',
+                                value: settings.downloadGroupByArtist,
+                                onChanged: (value) => ref
+                                    .read(settingsProvider.notifier)
+                                    .setDownloadGroupByArtist(value),
+                              ),
                               SettingsAction(
                                 icon: Icons.folder_outlined,
                                 title: '下载位置',
@@ -615,6 +627,17 @@ class SettingsPage extends ConsumerWidget {
                                 onChanged: (value) => ref
                                     .read(settingsProvider.notifier)
                                     .setCarPadModeEnabled(value),
+                              ),
+                              const SizedBox(height: 4),
+                              SettingsSwitchAction(
+                                key: const ValueKey('ktv-mode-setting'),
+                                icon: Icons.mic_rounded,
+                                title: '横屏 KTV 模式',
+                                subtitle: '横屏播放时全屏大字逐字歌词',
+                                value: settings.ktvModeEnabled,
+                                onChanged: (value) => ref
+                                    .read(settingsProvider.notifier)
+                                    .setKtvModeEnabled(value),
                               ),
                               const SizedBox(height: 4),
                               SettingsSwitchAction(

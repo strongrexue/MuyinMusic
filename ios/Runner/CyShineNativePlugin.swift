@@ -19,6 +19,7 @@ import Flutter
 import Foundation
 import MediaPlayer
 import Network
+import Security
 import UIKit
 import UniformTypeIdentifiers
 import WidgetKit
@@ -972,6 +973,9 @@ final class CyShineAppTaskChannel {
     case "diagnostics":
       result(diagnostics())
 
+    case "signingIdentity":
+      result(signingIdentity())
+
     case "mediaSession":
       result(mediaSessionDiagnostics())
 
@@ -1232,6 +1236,71 @@ final class CyShineAppTaskChannel {
       "thermalState": Self.thermalState(processInfo.thermalState),
       "freeMemoryBytes": processInfo.physicalMemory,
     ]
+  }
+
+  /// ★ 读出本进程二进制实际携带的签名身份。
+  ///
+  ///   锁屏卡 / 灵动岛「点卡回 App」这一步，系统按应用的签名身份
+  ///   （application-identifier）找人，不是按桌面图标。CI 出的 IPA
+  ///   完全未签名、主二进制不带 entitlements，最终身份取决于安装
+  ///   方式：巨魔只能保留二进制里已有的（没有就没有），证书签则由
+  ///   描述文件盖入。这里把三样东西原样读出来对账：代码签名
+  ///   identifier、二进制 entitlements 里的 application-identifier、
+  ///   内嵌描述文件（仅证书签安装才有）声明的 App ID。
+  private func signingIdentity() -> [String: Any] {
+    let bundleId = Bundle.main.bundleIdentifier ?? "?"
+    var out: [String: Any] = ["bundleId": bundleId]
+
+    var code: SecCode?
+    var signingInfo: [String: Any] = [:]
+    if SecCodeCopySelf([], &code) == errSecSuccess, let selfCode = code {
+      var info: CFDictionary?
+      // kSecCSSigningInformation = 1 << 2
+      if SecCodeCopySigningInformation(
+        selfCode, SecCSFlags(rawValue: 1 << 2), &info
+      ) == errSecSuccess, let dict = info as? [String: Any] {
+        signingInfo = dict
+      }
+    }
+    out["codeIdentifier"] = signingInfo["identifier"] as? String ?? "?"
+    out["teamId"] = signingInfo["teamid"] as? String ?? "?"
+    let entitlements = signingInfo["entitlements-dict"] as? [String: Any]
+    let appId = entitlements?["application-identifier"] as? String ?? ""
+    out["applicationIdentifier"] = appId.isEmpty ? "（无）" : appId
+    out["appIdMatchesBundle"] = !appId.isEmpty && appId.hasSuffix("." + bundleId)
+
+    // 内嵌描述文件：巨魔安装没有，证书签安装才有。
+    if let url = Bundle.main.url(
+      forResource: "embedded", withExtension: "mobileprovision"
+    ), let data = try? Data(contentsOf: url),
+      let slice = Self.plistSlice(in: data),
+      let profile = try? PropertyListSerialization.propertyList(
+        from: slice, options: [], format: nil
+      ) as? [String: Any]
+    {
+      let profileEntitlements = profile["Entitlements"] as? [String: Any]
+      out["profileName"] = profile["Name"] as? String ?? "?"
+      out["profileAppId"] =
+        profileEntitlements?["application-identifier"] as? String ?? "?"
+      out["profileTeam"] =
+        (profile["TeamIdentifier"] as? [String])?.joined(separator: ",")
+        ?? "?"
+    } else {
+      out["profileName"] = "（无内嵌描述文件）"
+      out["profileAppId"] = "?"
+      out["profileTeam"] = "?"
+    }
+    return out
+  }
+
+  /// mobileprovision 是 CMS 签名包裹的 plist，截取 XML 段再解析。
+  private static func plistSlice(in data: Data) -> Data? {
+    guard let start = data.range(of: Data("<?xml".utf8))?.lowerBound,
+      let end = data.range(
+        of: Data("</plist>".utf8), in: start..<data.count
+      )
+    else { return nil }
+    return data[start..<end.upperBound]
   }
 
   private static func notificationsEnabled() -> Bool {

@@ -129,7 +129,8 @@ class SafStoragePlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
                     "metadata" -> metadata(uri)
                     "saveFile" -> saveFile(uri,
                         requireNotNull(call.argument<String>("source")),
-                        requireNotNull(call.argument<String>("name")))
+                        requireNotNull(call.argument<String>("name")),
+                        call.argument<String>("subdirectory"))
                     "exists" -> {
                         if (metadata(uri) == null) false else {
                             resolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -271,11 +272,25 @@ class SafStoragePlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
     }
 
     // A single worker serializes name selection and creation for concurrent downloads.
-    private fun saveFile(tree: Uri, source: String, name: String): String {
+    private fun findOrCreateDirectory(tree: Uri, name: String): Uri {
+        require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name)
+        val root = rootDocument(tree)
+        val existing = children(tree, DocumentsContract.getTreeDocumentId(tree))
+            .firstOrNull { it["fileName"] == name && it["mimeType"] == Document.MIME_TYPE_DIR }
+        if (existing != null) {
+            return DocumentsContract.buildDocumentUriUsingTree(tree, existing["id"] as String)
+        }
+        return DocumentsContract.createDocument(resolver, root, Document.MIME_TYPE_DIR, name)
+            ?: error("无法创建子文件夹，请重新选择下载目录")
+    }
+
+    private fun saveFile(tree: Uri, source: String, name: String, subdirectory: String?): String {
         require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name)
         val sourceFile = File(source)
         check(sourceFile.isFile && sourceFile.length() > 0) { "下载临时文件不存在或为空" }
-        val names = children(tree, DocumentsContract.getTreeDocumentId(tree)).map { it["fileName"] }.toSet()
+        val parent = if (subdirectory.isNullOrBlank()) rootDocument(tree)
+            else findOrCreateDirectory(tree, subdirectory)
+        val names = children(tree, DocumentsContract.getDocumentId(parent)).map { it["fileName"] }.toSet()
         val extension = name.substringAfterLast('.', "")
         val suffix = if (extension.isEmpty()) "" else ".$extension"
         val base = name.removeSuffix(suffix)
@@ -283,7 +298,7 @@ class SafStoragePlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
         var index = 1
         while (candidate in names) candidate = "$base (${index++})$suffix"
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "application/octet-stream"
-        val document = DocumentsContract.createDocument(resolver, rootDocument(tree), mime, candidate)
+        val document = DocumentsContract.createDocument(resolver, parent, mime, candidate)
             ?: error("无法创建音乐文件，请重新选择下载目录")
         try {
             val output = resolver.openOutputStream(document, "wt") ?: error("无法写入音乐文件")
