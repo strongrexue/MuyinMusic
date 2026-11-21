@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,10 @@ const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
 const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
 const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
 const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
+const String _kKtvBackgroundItemsKey = 'player_ktv_background_items';
+const String _kKtvBackgroundSelectedIdKey = 'player_ktv_background_selected_id';
+const String _kKtvBackgroundMigratedKey =
+    'player_ktv_background_items_migrated_v1';
 const String _kLocalMusicDirKey = 'local_music_dir';
 const String _kLocalMusicDirsKey = 'local_music_dirs';
 const String _kUseBuiltInSourceFilePickerKey =
@@ -92,10 +97,10 @@ double normalizeLyricFontWeight(double value) =>
 double normalizeLyricFontSize(double value) =>
     value.clamp(kLyricFontSizeMin, kLyricFontSizeMax).roundToDouble();
 
-/// 横屏 KTV 播放页的背景样式。
+/// 横屏 KTV 播放页的背景样式：内置动态图，或用户导入的自定义图片。
+/// 上一版的 gradient / cover 两档已经下线，存量值一律按 builtin 读。
 enum KtvBackgroundStyle {
-  gradient('gradient', '流光渐变'),
-  cover('cover', '封面柔焦'),
+  builtin('builtin', '内置动态'),
   custom('custom', '自定义图片');
 
   const KtvBackgroundStyle(this.code, this.label);
@@ -103,10 +108,69 @@ enum KtvBackgroundStyle {
   final String code;
   final String label;
 
-  static KtvBackgroundStyle fromCode(String? code) => values.firstWhere(
-    (style) => style.code == code,
-    orElse: () => gradient,
-  );
+  static KtvBackgroundStyle fromCode(String? code) =>
+      code == custom.code ? custom : builtin;
+}
+
+/// 用户导入的一张 KTV 自定义背景图。图片实体放在应用文档目录的
+/// ktv_backgrounds/ 子目录里，[fileName] 是其中的文件名。
+@immutable
+class KtvBackgroundItem {
+  const KtvBackgroundItem({
+    required this.id,
+    required this.name,
+    required this.fileName,
+  });
+
+  final String id;
+  final String name;
+  final String fileName;
+
+  KtvBackgroundItem copyWith({String? name}) =>
+      KtvBackgroundItem(id: id, name: name ?? this.name, fileName: fileName);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'fileName': fileName,
+  };
+
+  static KtvBackgroundItem? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final id = value['id'];
+    final name = value['name'];
+    final fileName = value['fileName'];
+    if (id is! String || id.isEmpty) return null;
+    if (fileName is! String || fileName.isEmpty) return null;
+    return KtvBackgroundItem(
+      id: id,
+      name: name is String && name.trim().isNotEmpty ? name : '自定义背景',
+      fileName: fileName,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is KtvBackgroundItem &&
+      other.id == id &&
+      other.name == name &&
+      other.fileName == fileName;
+
+  @override
+  int get hashCode => Object.hash(id, name, fileName);
+}
+
+List<KtvBackgroundItem> _decodeKtvBackgroundItems(String? encoded) {
+  if (encoded == null) return const [];
+  try {
+    final decoded = jsonDecode(encoded);
+    if (decoded is! List) return const [];
+    return List.unmodifiable(
+      decoded.map(KtvBackgroundItem.fromJson).whereType<KtvBackgroundItem>(),
+    );
+  } catch (_) {
+    return const [];
+  }
 }
 
 /// 竖屏歌词页的歌词对齐方式。
@@ -119,10 +183,8 @@ enum LyricAlignMode {
   final String code;
   final String label;
 
-  static LyricAlignMode fromCode(String? code) => values.firstWhere(
-    (mode) => mode.code == code,
-    orElse: () => left,
-  );
+  static LyricAlignMode fromCode(String? code) =>
+      values.firstWhere((mode) => mode.code == code, orElse: () => left);
 }
 
 const Object _unsetValue = Object();
@@ -134,8 +196,10 @@ class AppSettings {
     this.downloadFileNameFormat = DownloadFileNameFormat.artistTitle,
     this.downloadGroupByArtist = false,
     this.ktvModeEnabled = false,
-    this.ktvBackgroundStyle = KtvBackgroundStyle.gradient,
+    this.ktvBackgroundStyle = KtvBackgroundStyle.builtin,
     this.ktvBackgroundImagePath,
+    this.ktvBackgroundItems = const [],
+    this.ktvBackgroundSelectedId,
     required this.localMusicDirs,
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
@@ -182,8 +246,26 @@ class AppSettings {
   final bool ktvModeEnabled;
   final KtvBackgroundStyle ktvBackgroundStyle;
 
-  /// 自定义 KTV 背景图的本机文件路径。指向设备本地文件，不参与跨设备同步。
+  /// 旧版单张自定义 KTV 背景图的本机文件路径，仅用于一次性迁移到
+  /// [ktvBackgroundItems] 图库。指向设备本地文件，不参与跨设备同步。
   final String? ktvBackgroundImagePath;
+
+  /// 用户导入的 KTV 自定义背景图库。条目（名称/文件名）参与跨设备
+  /// 同步，图片实体是本机文件，不随同步迁移，缺失时回退内置背景。
+  final List<KtvBackgroundItem> ktvBackgroundItems;
+
+  /// 当前选中的自定义背景条目 id；为 null 或条目不存在时不生效。
+  final String? ktvBackgroundSelectedId;
+
+  /// 当前生效的自定义背景条目（样式为 custom 且选中条目存在时）。
+  KtvBackgroundItem? get selectedKtvBackgroundItem {
+    if (ktvBackgroundStyle != KtvBackgroundStyle.custom) return null;
+    for (final item in ktvBackgroundItems) {
+      if (item.id == ktvBackgroundSelectedId) return item;
+    }
+    return null;
+  }
+
   final List<String> localMusicDirs;
   String get localMusicDir => localMusicDirs.first;
   final bool useBuiltInSourceFilePicker;
@@ -256,6 +338,8 @@ class AppSettings {
     bool? ktvModeEnabled,
     KtvBackgroundStyle? ktvBackgroundStyle,
     Object? ktvBackgroundImagePath = _unsetValue,
+    List<KtvBackgroundItem>? ktvBackgroundItems,
+    Object? ktvBackgroundSelectedId = _unsetValue,
     String? localMusicDir,
     List<String>? localMusicDirs,
     bool? useBuiltInSourceFilePicker,
@@ -305,6 +389,10 @@ class AppSettings {
     ktvBackgroundImagePath: identical(ktvBackgroundImagePath, _unsetValue)
         ? this.ktvBackgroundImagePath
         : ktvBackgroundImagePath as String?,
+    ktvBackgroundItems: ktvBackgroundItems ?? this.ktvBackgroundItems,
+    ktvBackgroundSelectedId: identical(ktvBackgroundSelectedId, _unsetValue)
+        ? this.ktvBackgroundSelectedId
+        : ktvBackgroundSelectedId as String?,
     localMusicDirs:
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
@@ -419,7 +507,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final onlineQuality = _migrateOnlinePlaybackQuality(_prefs);
     final enabledSearchSources = _migrateQsSearchSource(
       _prefs,
-      decodeEnabledSearchSources(_prefs.getStringList(_kEnabledSearchSourcesKey)),
+      decodeEnabledSearchSources(
+        _prefs.getStringList(_kEnabledSearchSourcesKey),
+      ),
     );
     final defaultSearchSource = MusicSource.fromCode(
       _prefs.getString(_kDefaultSearchSourceKey) ?? 'all',
@@ -436,6 +526,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
         _prefs.getString(_kKtvBackgroundStyleKey),
       ),
       ktvBackgroundImagePath: _prefs.getString(_kKtvBackgroundImageKey),
+      ktvBackgroundItems: _decodeKtvBackgroundItems(
+        _prefs.getString(_kKtvBackgroundItemsKey),
+      ),
+      ktvBackgroundSelectedId: _prefs.getString(_kKtvBackgroundSelectedIdKey),
       localMusicDirs: _normalizeLocalMusicDirs(
         _prefs.getStringList(_kLocalMusicDirsKey) ??
             [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
@@ -715,6 +809,129 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(ktvBackgroundImagePath: path);
   }
 
+  Future<void> _persistKtvBackgroundItems() async {
+    await _prefs.setString(
+      _kKtvBackgroundItemsKey,
+      jsonEncode(
+        state.ktvBackgroundItems.map((item) => item.toJson()).toList(),
+      ),
+    );
+    final selectedId = state.ktvBackgroundSelectedId;
+    if (selectedId == null) {
+      await _prefs.remove(_kKtvBackgroundSelectedIdKey);
+    } else {
+      await _prefs.setString(_kKtvBackgroundSelectedIdKey, selectedId);
+    }
+  }
+
+  /// 选用内置动态背景。
+  Future<void> selectBuiltinKtvBackground() async {
+    state = state.copyWith(ktvBackgroundStyle: KtvBackgroundStyle.builtin);
+    await _prefs.setString(
+      _kKtvBackgroundStyleKey,
+      KtvBackgroundStyle.builtin.code,
+    );
+  }
+
+  /// 把一张已复制进 ktv_backgrounds/ 的图片登记进图库并立即选用。
+  Future<void> addKtvBackgroundItem(KtvBackgroundItem item) async {
+    state = state.copyWith(
+      ktvBackgroundItems: List.unmodifiable([
+        for (final current in state.ktvBackgroundItems)
+          if (current.id != item.id) current,
+        item,
+      ]),
+      ktvBackgroundSelectedId: item.id,
+      ktvBackgroundStyle: KtvBackgroundStyle.custom,
+    );
+    await _prefs.setString(
+      _kKtvBackgroundStyleKey,
+      KtvBackgroundStyle.custom.code,
+    );
+    await _persistKtvBackgroundItems();
+  }
+
+  /// 选用图库中的一张自定义背景。
+  Future<void> selectKtvBackgroundItem(String id) async {
+    if (!state.ktvBackgroundItems.any((item) => item.id == id)) return;
+    state = state.copyWith(
+      ktvBackgroundSelectedId: id,
+      ktvBackgroundStyle: KtvBackgroundStyle.custom,
+    );
+    await _prefs.setString(
+      _kKtvBackgroundStyleKey,
+      KtvBackgroundStyle.custom.code,
+    );
+    await _persistKtvBackgroundItems();
+  }
+
+  Future<void> renameKtvBackgroundItem(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    state = state.copyWith(
+      ktvBackgroundItems: List.unmodifiable([
+        for (final item in state.ktvBackgroundItems)
+          if (item.id == id) item.copyWith(name: trimmed) else item,
+      ]),
+    );
+    await _persistKtvBackgroundItems();
+  }
+
+  /// 删除图库条目；删掉的是当前选中时切回内置动态背景。
+  /// 返回被删条目，调用方负责删除它的图片文件。
+  Future<KtvBackgroundItem?> removeKtvBackgroundItem(String id) async {
+    KtvBackgroundItem? removed;
+    final remaining = <KtvBackgroundItem>[];
+    for (final item in state.ktvBackgroundItems) {
+      if (item.id == id) {
+        removed = item;
+      } else {
+        remaining.add(item);
+      }
+    }
+    if (removed == null) return null;
+    final wasSelected = state.ktvBackgroundSelectedId == id;
+    state = state.copyWith(
+      ktvBackgroundItems: List.unmodifiable(remaining),
+      ktvBackgroundSelectedId: wasSelected
+          ? null
+          : state.ktvBackgroundSelectedId,
+      ktvBackgroundStyle: wasSelected
+          ? KtvBackgroundStyle.builtin
+          : state.ktvBackgroundStyle,
+    );
+    if (wasSelected) {
+      await _prefs.setString(
+        _kKtvBackgroundStyleKey,
+        KtvBackgroundStyle.builtin.code,
+      );
+    }
+    await _persistKtvBackgroundItems();
+    return removed;
+  }
+
+  /// 一次性迁移：把旧版单张自定义背景图登记进图库。[copiedFileName] 是
+  /// 调用方已复制到 ktv_backgrounds/ 的文件名；旧图不存在时传 null，
+  /// 只落迁移标记。图库非空时不覆盖已有条目。
+  Future<void> migrateLegacyKtvBackground(String? copiedFileName) async {
+    if (_prefs.getBool(_kKtvBackgroundMigratedKey) ?? false) return;
+    await _prefs.setBool(_kKtvBackgroundMigratedKey, true);
+    if (copiedFileName == null || state.ktvBackgroundItems.isNotEmpty) return;
+    final item = KtvBackgroundItem(
+      id: 'legacy',
+      name: '自定义背景',
+      fileName: copiedFileName,
+    );
+    final wasCustom = state.ktvBackgroundStyle == KtvBackgroundStyle.custom;
+    state = state.copyWith(
+      ktvBackgroundItems: List.unmodifiable([item]),
+      ktvBackgroundSelectedId: wasCustom
+          ? item.id
+          : state.ktvBackgroundSelectedId,
+    );
+    await _persistKtvBackgroundItems();
+  }
+
   Future<void> setLyricViewBlurDisabled(bool value) async {
     await _prefs.setBool(_kLyricViewBlurDisabledKey, value);
     state = state.copyWith(lyricViewBlurDisabled: value);
@@ -806,6 +1023,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
     'playlistArtworkColorsEnabled': state.playlistArtworkColorsEnabled,
     'flowingLightEnabled': state.flowingLightEnabled,
     'ktvBackgroundStyle': state.ktvBackgroundStyle.code,
+    'ktvBackgroundItems': state.ktvBackgroundItems
+        .map((item) => item.toJson())
+        .toList(),
+    'ktvBackgroundSelectedId': state.ktvBackgroundSelectedId,
     'lyricViewBlurDisabled': state.lyricViewBlurDisabled,
     'lyricAlignMode': state.lyricAlignMode.code,
     'squareAlbumCoverEnabled': state.squareAlbumCoverEnabled,
@@ -869,16 +1090,39 @@ class SettingsNotifier extends Notifier<AppSettings> {
     // ktvBackgroundStyle 同样是后加字段，缺失时保留本机选择；图片路径是本机
     // 文件，不进同步。
     final rawKtvBackground = json['ktvBackgroundStyle'];
+    // gradient / cover 是已下线的旧档位，fromCode 会把它们读成 builtin。
     if (rawKtvBackground != null &&
         (rawKtvBackground is! String ||
-            !KtvBackgroundStyle.values.any(
-              (style) => style.code == rawKtvBackground,
-            ))) {
+            (rawKtvBackground != 'gradient' &&
+                rawKtvBackground != 'cover' &&
+                !KtvBackgroundStyle.values.any(
+                  (style) => style.code == rawKtvBackground,
+                )))) {
       throw const FormatException('云端 KTV 背景设置无效');
     }
     final syncedKtvBackground = rawKtvBackground == null
         ? state.ktvBackgroundStyle
         : KtvBackgroundStyle.fromCode(rawKtvBackground as String);
+    // 图库条目同样是后加字段，缺失时保留本机图库；条目里的文件名是相对
+    // 名，图片实体不随同步迁移，目标设备缺图时背景回退内置动态。
+    final rawKtvItems = json['ktvBackgroundItems'];
+    if (rawKtvItems != null && rawKtvItems is! List) {
+      throw const FormatException('云端 KTV 背景图库无效');
+    }
+    final syncedKtvItems = rawKtvItems == null
+        ? state.ktvBackgroundItems
+        : List<KtvBackgroundItem>.unmodifiable(
+            (rawKtvItems as List)
+                .map(KtvBackgroundItem.fromJson)
+                .whereType<KtvBackgroundItem>(),
+          );
+    final rawKtvSelectedId = json['ktvBackgroundSelectedId'];
+    if (rawKtvSelectedId != null && rawKtvSelectedId is! String) {
+      throw const FormatException('云端 KTV 背景选择无效');
+    }
+    final syncedKtvSelectedId = json.containsKey('ktvBackgroundSelectedId')
+        ? rawKtvSelectedId as String?
+        : state.ktvBackgroundSelectedId;
     // lyricAlignMode 同样是后加字段，缺失时保留本机选择。
     final rawLyricAlign = json['lyricAlignMode'];
     if (rawLyricAlign != null &&
@@ -940,6 +1184,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       playlistArtworkColorsEnabled: syncedPlaylistColors,
       flowingLightEnabled: syncedFlowingLight,
       ktvBackgroundStyle: syncedKtvBackground,
+      ktvBackgroundItems: syncedKtvItems,
+      ktvBackgroundSelectedId: syncedKtvSelectedId,
       lyricAlignMode: syncedLyricAlign,
       lyricViewBlurDisabled: rawLyricBlurDisabled as bool?,
       squareAlbumCoverEnabled: rawSquareCover as bool?,
@@ -972,6 +1218,15 @@ class SettingsNotifier extends Notifier<AppSettings> {
     }
     await _prefs.setString(_kLiquidGlassModeKey, syncedGlass.code);
     await _prefs.setString(_kKtvBackgroundStyleKey, syncedKtvBackground.code);
+    await _prefs.setString(
+      _kKtvBackgroundItemsKey,
+      jsonEncode(syncedKtvItems.map((item) => item.toJson()).toList()),
+    );
+    if (syncedKtvSelectedId == null) {
+      await _prefs.remove(_kKtvBackgroundSelectedIdKey);
+    } else {
+      await _prefs.setString(_kKtvBackgroundSelectedIdKey, syncedKtvSelectedId);
+    }
     await _prefs.setString(_kLyricAlignModeKey, syncedLyricAlign.code);
     await _prefs.setBool(
       _kPlaylistArtworkColorsEnabledKey,
@@ -1204,10 +1459,12 @@ Set<MusicSource> _migrateQsSearchSource(
     for (final source in kManageableSearchSources)
       if (current.contains(source) || source == MusicSource.qs) source,
   });
-  unawaited(prefs.setStringList(
-    _kEnabledSearchSourcesKey,
-    merged.map((source) => source.code).toList(growable: false),
-  ));
+  unawaited(
+    prefs.setStringList(
+      _kEnabledSearchSourcesKey,
+      merged.map((source) => source.code).toList(growable: false),
+    ),
+  );
   unawaited(prefs.setBool(_kQsSearchAddedKey, true));
   return merged;
 }
@@ -1304,7 +1561,9 @@ _IosDirectories _migrateIosDirectories(
         ? defaultScanDir
         : (scanDirs?.first ?? defaultScanDir);
     final derived = p.join(scanRoot, 'MuyinMusic');
-    if (downloadDir == null || isAndroidPath(downloadDir) || stale(downloadDir)) {
+    if (downloadDir == null ||
+        isAndroidPath(downloadDir) ||
+        stale(downloadDir)) {
       downloadDir = derived;
     } else {
       final dl = normalizeStorageLocation(downloadDir);

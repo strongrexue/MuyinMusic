@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
+import '../../../core/storage/settings_store.dart';
 import '../../equalizer/widgets/equalizer_popup.dart';
 import '../../shell/player_pull_scope.dart';
 import '../player_controller.dart';
 import '../sleep_timer_controller.dart';
+import 'ktv_background_panel.dart';
 import 'player_palette.dart';
 import 'player_quality_sheet.dart';
 import 'player_sleep_timer_sheet.dart';
@@ -26,6 +28,10 @@ class TopChromeRow extends ConsumerWidget {
             (id: s.track?.id, title: s.track?.title, artist: s.track?.artist),
       ),
     );
+    // The KTV background picker only exists on the landscape KTV page.
+    final showKtvBackgroundButton =
+        ref.watch(settingsProvider.select((s) => s.ktvModeEnabled)) &&
+        MediaQuery.orientationOf(context) == Orientation.landscape;
     return PlayerPullHandle(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(28, 8, 12, 4),
@@ -92,6 +98,10 @@ class TopChromeRow extends ConsumerWidget {
             ),
             const SizedBox(width: 4),
             const _SleepTimerButton(),
+            if (showKtvBackgroundButton) ...[
+              const SizedBox(width: 4),
+              const _KtvBackgroundButton(),
+            ],
             const SizedBox(width: 8),
             prism.PopupAnchor(
               targetBuilder: (open) => _ChromeIconButton(
@@ -165,6 +175,24 @@ class _QualityEntry extends ConsumerWidget {
     return prism.PopupAnchor(
       targetBuilder: (open) => target(enabled ? open : null),
       popupBuilder: (_) => PlaybackQualityPopup(track: track),
+    );
+  }
+}
+
+/// Opens the KTV background picker (built-in animation / imported images).
+class _KtvBackgroundButton extends StatelessWidget {
+  const _KtvBackgroundButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return prism.PopupAnchor(
+      targetBuilder: (open) => _ChromeIconButton(
+        key: const ValueKey('player-ktv-background-button'),
+        icon: Icons.image_outlined,
+        tooltip: 'KTV 背景',
+        onPressed: open,
+      ),
+      popupBuilder: (_) => const KtvBackgroundPopup(),
     );
   }
 }
