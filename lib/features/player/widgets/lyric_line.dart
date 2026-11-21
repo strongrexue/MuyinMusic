@@ -172,6 +172,12 @@ class LyricLineTile extends ConsumerWidget {
     final blurDisabled = ref.watch(
       settingsProvider.select((settings) => settings.lyricViewBlurDisabled),
     );
+    final centered = ref.watch(
+      settingsProvider.select(
+        (settings) => settings.lyricAlignMode == LyricAlignMode.center,
+      ),
+    );
+    final textAlign = centered ? TextAlign.center : TextAlign.start;
     final secondaryWeight = lyricSecondaryFontWeight(font.weight);
     final ink = Theme.of(context).brightness == Brightness.dark
         ? Colors.white
@@ -210,14 +216,16 @@ class LyricLineTile extends ConsumerWidget {
         ? Duration.zero
         : const Duration(milliseconds: 700);
     final lineContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: centered
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
       children: [
         _LyricTextStyle(
           duration: colorDuration,
           curve: _kLyricFocusCurve,
           style: mainStyle,
-          textAlign: TextAlign.start,
-          child: RepaintBoundary(child: _mainText(context)),
+          textAlign: textAlign,
+          child: RepaintBoundary(child: _mainText(context, textAlign)),
         ),
         if (hasTranslationLine)
           TweenAnimationBuilder<double>(
@@ -230,13 +238,15 @@ class LyricLineTile extends ConsumerWidget {
                 duration: colorDuration,
                 curve: _kLyricFocusCurve,
                 style: subStyle,
-                child: Text(translation, textAlign: TextAlign.start),
+                child: Text(translation, textAlign: textAlign),
               ),
             ),
             builder: (context, value, child) {
               return ClipRect(
                 child: Align(
-                  alignment: Alignment.topLeft,
+                  alignment: centered
+                      ? Alignment.topCenter
+                      : Alignment.topLeft,
                   heightFactor: value,
                   child: Opacity(
                     opacity: value,
@@ -262,13 +272,15 @@ class LyricLineTile extends ConsumerWidget {
                 style: subStyle.copyWith(
                   fontSize: lyricRomanFontSize(font.size),
                 ),
-                child: Text(roman, textAlign: TextAlign.start),
+                child: Text(roman, textAlign: textAlign),
               ),
             ),
             builder: (context, value, child) {
               return ClipRect(
                 child: Align(
-                  alignment: Alignment.topLeft,
+                  alignment: centered
+                      ? Alignment.topCenter
+                      : Alignment.topLeft,
                   heightFactor: value,
                   child: Opacity(
                     opacity: value,
@@ -291,6 +303,7 @@ class LyricLineTile extends ConsumerWidget {
       lineStartMs: line.startMs,
       active: active,
       disableAnimations: MediaQuery.disableAnimationsOf(context),
+      alignment: centered ? Alignment.center : Alignment.centerLeft,
       child: RepaintBoundary(child: lineContent),
     );
 
@@ -306,7 +319,7 @@ class LyricLineTile extends ConsumerWidget {
           horizontal: selected ? _kLyricSelectionHorizontalPadding : 0,
           vertical: 11,
         ),
-        alignment: Alignment.centerLeft,
+        alignment: centered ? Alignment.center : Alignment.centerLeft,
         decoration: BoxDecoration(
           color: selected
               ? playerInk(context).withValues(alpha: 0.075)
@@ -358,11 +371,11 @@ class LyricLineTile extends ConsumerWidget {
     );
   }
 
-  Widget _mainText(BuildContext context) {
+  Widget _mainText(BuildContext context, TextAlign textAlign) {
     if (!line.hasWordTiming) {
       // No explicit style: the text inherits the AnimatedDefaultTextStyle
       // above, so color can transition without changing layout metrics.
-      return Text(line.text, textAlign: TextAlign.start);
+      return Text(line.text, textAlign: textAlign);
     }
     return KaraokeLineText(
       line: line,
@@ -370,6 +383,7 @@ class LyricLineTile extends ConsumerWidget {
       playing: playing,
       buffering: buffering,
       active: active,
+      textAlign: textAlign,
       // 当前正在唱的字跟随系统强调色（动态色/自定义 accent/seed 都写进 primary）。
       accent: Theme.of(context).colorScheme.primary,
     );
@@ -412,12 +426,16 @@ class _LyricFocusScale extends StatefulWidget {
     required this.lineStartMs,
     required this.active,
     required this.disableAnimations,
+    required this.alignment,
     required this.child,
   });
 
   final int lineStartMs;
   final bool active;
   final bool disableAnimations;
+
+  /// 焦点缩放的锚点，跟随歌词对齐方式（左对齐=centerLeft，居中=center）。
+  final Alignment alignment;
   final Widget child;
 
   @override
@@ -498,7 +516,7 @@ class _LyricFocusScaleState extends State<_LyricFocusScale>
         return Transform.scale(
           key: ValueKey('lyric-focus-scale-${widget.lineStartMs}'),
           scale: scale,
-          alignment: Alignment.centerLeft,
+          alignment: widget.alignment,
           child: child,
         );
       },
