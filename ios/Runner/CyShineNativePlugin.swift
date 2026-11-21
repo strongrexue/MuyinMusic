@@ -19,7 +19,6 @@ import Flutter
 import Foundation
 import MediaPlayer
 import Network
-import Security
 import UIKit
 import UniformTypeIdentifiers
 import WidgetKit
@@ -1251,22 +1250,13 @@ final class CyShineAppTaskChannel {
     let bundleId = Bundle.main.bundleIdentifier ?? "?"
     var out: [String: Any] = ["bundleId": bundleId]
 
-    var code: SecCode?
-    var signingInfo: [String: Any] = [:]
-    if SecCodeCopySelf(kSecCSDefaultFlags, &code) == errSecSuccess,
-      let selfCode = code
-    {
-      var info: CFDictionary?
-      if SecCodeCopySigningInformation(
-        selfCode, kSecCSSigningInformation, &info
-      ) == errSecSuccess, let dict = info as? [String: Any] {
-        signingInfo = dict
-      }
-    }
-    out["codeIdentifier"] = signingInfo["identifier"] as? String ?? "?"
-    out["teamId"] = signingInfo["teamid"] as? String ?? "?"
-    let entitlements = signingInfo["entitlements-dict"] as? [String: Any]
-    let appId = entitlements?["application-identifier"] as? String ?? ""
+    // SecCode* 是 macOS 专属 API、iOS SDK 里不存在，改直接解析主
+    // 可执行文件代码签名 superblob 里的 CodeDirectory 与 entitlements。
+    let signature = Self.codeSignatureInfo()
+    out["codeIdentifier"] = signature.ident
+    out["teamId"] = signature.teamId
+    let appId =
+      signature.entitlements?["application-identifier"] as? String ?? ""
     out["applicationIdentifier"] = appId.isEmpty ? "（无）" : appId
     out["appIdMatchesBundle"] = !appId.isEmpty && appId.hasSuffix("." + bundleId)
 
@@ -1303,6 +1293,115 @@ final class CyShineAppTaskChannel {
       let end = text.range(of: "</plist>")
     else { return nil }
     return Data(text[start.lowerBound..<end.upperBound].utf8)
+  }
+
+  /// 解析主可执行文件的代码签名：读 Mach-O 的 LC_CODE_SIGNATURE，
+  /// 在 superblob 里取 CodeDirectory 的 ident/team 与 XML 形式的
+  /// entitlements。全程只做带边界检查的字节读取，任何一步对不上
+  /// 都返回空，诊断本身绝不让 App 崩。
+  private static func codeSignatureInfo()
+    -> (ident: String, teamId: String, entitlements: [String: Any]?)
+  {
+    guard let url = Bundle.main.executableURL,
+      let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+      data.count > 32
+    else { return ("?", "?", nil) }
+
+    func be32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return (Int(data[i]) << 24) | (Int(data[i + 1]) << 16)
+        | (Int(data[i + 2]) << 8) | Int(data[i + 3])
+    }
+    func le32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return Int(data[i]) | (Int(data[i + 1]) << 8)
+        | (Int(data[i + 2]) << 16) | (Int(data[i + 3]) << 24)
+    }
+
+    // FAT 先定位 arm64 切片，thin 直接从 0 开始。
+    var base = 0
+    if be32(0, 0) == 0xcafebabe {
+      let archCount = be32(0, 4)
+      var found = false
+      for index in 0..<min(archCount, 8) {
+        let entry = 8 + index * 20
+        if be32(entry, 0) == 0x0100_000c {
+          base = be32(entry, 8)
+          found = true
+          break
+        }
+      }
+      if !found, archCount > 0 { base = be32(8, 8) }
+    }
+    guard base + 32 <= data.count, le32(base, 0) == 0xfeed_facf else {
+      return ("?", "?", nil)
+    }
+
+    // 遍历 load commands 找 LC_CODE_SIGNATURE(0x1d)。
+    let commandCount = le32(base, 16)
+    var cursor = base + 32
+    var signatureOffset = 0
+    for _ in 0..<min(commandCount, 64) {
+      guard cursor + 8 <= data.count else { break }
+      let command = le32(cursor, 0)
+      let size = le32(cursor, 4)
+      if command == 0x1d {
+        signatureOffset = le32(cursor, 8)
+        break
+      }
+      if size <= 0 { break }
+      cursor += size
+    }
+    guard signatureOffset > 0 else { return ("?", "?", nil) }
+    let superblob = base + signatureOffset
+    guard be32(superblob, 0) == 0xfade_0cc0 else { return ("?", "?", nil) }
+    let blobCount = be32(superblob, 8)
+
+    var ident = "?"
+    var teamId = "?"
+    var entitlements: [String: Any]?
+    for index in 0..<min(blobCount, 16) {
+      let entry = superblob + 12 + index * 8
+      let slot = be32(entry, 0)
+      let blob = superblob + be32(entry, 4)
+      guard blob + 8 <= data.count else { continue }
+      if slot == 0, be32(blob, 0) == 0xfade_0c02 {
+        // CodeDirectory：ident/team 是偏移指向的 C 字符串。
+        let version = be32(blob, 8)
+        let identOffset = be32(blob, 20)
+        if identOffset > 0 {
+          ident = cString(data, blob + identOffset) ?? "?"
+        }
+        if version >= 0x20100 {
+          let teamOffset = be32(blob, 48)
+          if teamOffset > 0 {
+            teamId = cString(data, blob + teamOffset) ?? "?"
+          }
+        }
+      } else if slot == 5, be32(blob, 0) == 0xfade_7171 {
+        // XML entitlements：8 字节头之后就是 plist 文本。
+        let length = be32(blob, 4)
+        if length > 8, blob + length <= data.count,
+          let parsed = try? PropertyListSerialization.propertyList(
+            from: data[(blob + 8)..<(blob + length)],
+            options: [], format: nil
+          ) as? [String: Any]
+        {
+          entitlements = parsed
+        }
+      }
+    }
+    return (ident, teamId, entitlements)
+  }
+
+  private static func cString(_ data: Data, _ start: Int) -> String? {
+    guard start >= 0, start < data.count else { return nil }
+    var end = start
+    while end < data.count, data[end] != 0, end - start < 256 { end += 1 }
+    guard end > start else { return nil }
+    return String(decoding: data[start..<end], as: UTF8.self)
   }
 
   private static func notificationsEnabled() -> Bool {
