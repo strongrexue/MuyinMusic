@@ -23,6 +23,14 @@ class FileNaming {
     return '$trimmed.$extension';
   }
 
+  /// Folder name used when downloads are grouped by artist. The singer
+  /// string is kept whole (duets stay in one folder); an empty singer
+  /// falls back to a placeholder instead of the download root.
+  static String artistFolder(MusicInfo info) {
+    if (info.singer.trim().isEmpty) return '未知歌手';
+    return sanitize(info.singer);
+  }
+
   static String resolvedOrBuild(
     MusicInfo info,
     String extension,

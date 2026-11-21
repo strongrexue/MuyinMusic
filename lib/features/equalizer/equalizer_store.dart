@@ -274,7 +274,9 @@ class EqualizerSettings {
 
   String toSpeq() {
     final preset = EqualizerPreset(
-      id: presetId ?? 'muyin.custom',
+      // Custom settings carry no preset id; give each export a unique one
+      // so that importing several exports does not replace one with the next.
+      id: presetId ?? 'muyin.custom.${DateTime.now().millisecondsSinceEpoch}',
       label:
           equalizerPresets
               .where((candidate) => candidate.id == presetId)
@@ -311,14 +313,7 @@ class EqualizerSettings {
     if (decoded is! Map) throw const FormatException('均衡器文件不是有效对象');
     final root = Map<String, dynamic>.from(decoded);
     if (root['format'] == 'speq.equalizer-presets') {
-      if (root['version'] != 1 || root['presets'] is! List) {
-        throw const FormatException('不支持的 .speq 格式');
-      }
-      final presets = root['presets'] as List;
-      if (presets.isEmpty) throw const FormatException('.speq 中没有预设');
-      final preset = EqualizerPreset.fromJson(
-        Map<String, dynamic>.from(presets.first as Map),
-      );
+      final preset = presetFromSpeq(value);
       return EqualizerSettings(
         enabled: true,
         inputGainDb: preset.inputGainDb,
@@ -327,6 +322,33 @@ class EqualizerSettings {
       ).sanitized();
     }
     return EqualizerSettings.fromJson(root);
+  }
+
+  /// Parses the first preset out of a .speq bundle. A bare settings document
+  /// (the persisted format) is wrapped into a preset instead, so an import
+  /// always yields a preset that can be kept in the user's preset list.
+  static EqualizerPreset presetFromSpeq(String value) {
+    final decoded = jsonDecode(value);
+    if (decoded is! Map) throw const FormatException('均衡器文件不是有效对象');
+    final root = Map<String, dynamic>.from(decoded);
+    if (root['format'] == 'speq.equalizer-presets') {
+      if (root['version'] != 1 || root['presets'] is! List) {
+        throw const FormatException('不支持的 .speq 格式');
+      }
+      final presets = root['presets'] as List;
+      if (presets.isEmpty) throw const FormatException('.speq 中没有预设');
+      return EqualizerPreset.fromJson(
+        Map<String, dynamic>.from(presets.first as Map),
+      );
+    }
+    final settings = EqualizerSettings.fromJson(root);
+    return EqualizerPreset(
+      id: settings.presetId ?? 'imported.custom',
+      label: '导入的配置',
+      inputGainDb: settings.inputGainDb,
+      outputGainDb: settings.outputGainDb,
+      bands: settings.bands,
+    );
   }
 
   static const fallback = EqualizerSettings(
@@ -358,217 +380,219 @@ EqualizerPreset _preset(
   String id,
   String label,
   double inputGain,
-  List<EqualizerBandSetting> bands,
-) {
+  List<EqualizerBandSetting> bands, [
+  double outputGain = 0,
+]) {
   return EqualizerPreset(
     id: id,
     label: label,
     inputGainDb: inputGain,
+    outputGainDb: outputGain,
     bands: List.unmodifiable(bands),
   );
 }
 
 final equalizerPresets = List<EqualizerPreset>.unmodifiable([
   const EqualizerPreset(id: 'builtin.original', label: '原声'),
-  _preset('builtin.studio_reference', '录音室参考', -2, [
-    _band('reference.foundation', EqualizerFilterType.lowShelf, 90, 1.5),
-    _band('reference.mud', EqualizerFilterType.peaking, 320, -1.2, 1.1),
-    _band('reference.presence', EqualizerFilterType.peaking, 3200, 1.5, 1),
-    _band('reference.air', EqualizerFilterType.highShelf, 10000, 1.8),
-  ]),
+  _preset('builtin.studio_reference', '录音室参考', -2.5, [
+    _band('reference.foundation', EqualizerFilterType.lowShelf, 90, 2, 0.8),
+    _band('reference.mud', EqualizerFilterType.peaking, 320, -1.5, 1.1),
+    _band('reference.presence', EqualizerFilterType.peaking, 3200, 2, 1),
+    _band('reference.air', EqualizerFilterType.highShelf, 10000, 2.5),
+  ], 1),
   _preset('builtin.mix_translation', '混音校准', -2, [
-    _band('translation.sub', EqualizerFilterType.lowShelf, 75, -0.8),
-    _band('translation.mud', EqualizerFilterType.peaking, 250, -1.2, 1.1),
-    _band('translation.box', EqualizerFilterType.peaking, 850, -0.7, 1.2),
-    _band('translation.presence', EqualizerFilterType.peaking, 3000, 1.2, 1),
-    _band('translation.air', EqualizerFilterType.highShelf, 11000, 1.5),
-  ]),
+    _band('translation.sub', EqualizerFilterType.lowShelf, 75, -1),
+    _band('translation.mud', EqualizerFilterType.peaking, 250, -1.5, 1.1),
+    _band('translation.box', EqualizerFilterType.peaking, 850, -1, 1.2),
+    _band('translation.presence', EqualizerFilterType.peaking, 3000, 1.5, 1),
+    _band('translation.air', EqualizerFilterType.highShelf, 11000, 2),
+  ], 2),
   _preset('builtin.low_mid_cleanup', '低中频清理', -1.5, [
-    _band('cleanup.warmth', EqualizerFilterType.peaking, 180, -1.2, 1),
-    _band('cleanup.mud', EqualizerFilterType.peaking, 320, -3, 1.1),
-    _band('cleanup.box', EqualizerFilterType.peaking, 650, -1.5, 1.2),
-    _band('cleanup.focus', EqualizerFilterType.peaking, 2500, 1, 1),
-  ]),
-  _preset('builtin.smooth_treble', '柔顺高频', -1, [
-    _band('smooth.balance', EqualizerFilterType.lowShelf, 120, 1),
-    _band('smooth.presence', EqualizerFilterType.peaking, 3200, -1, 1.1),
-    _band('smooth.sibilance', EqualizerFilterType.peaking, 5800, -2.5, 1.4),
-    _band('smooth.top', EqualizerFilterType.highShelf, 10000, -1.5),
-  ]),
-  _preset('builtin.air_and_detail', '空气感与细节', -3, [
-    _band('detail.clean', EqualizerFilterType.peaking, 420, -1, 1),
-    _band('detail.presence', EqualizerFilterType.peaking, 2800, 1.2, 1),
-    _band('detail.texture', EqualizerFilterType.peaking, 5800, 1.5, 1.1),
-    _band('detail.air', EqualizerFilterType.highShelf, 10500, 3),
-  ]),
-  _preset('builtin.sub_bass_extension', '超低频延伸', -5, [
-    _band('subextension.depth', EqualizerFilterType.lowShelf, 45, 4.5, 0.65),
-    _band('subextension.weight', EqualizerFilterType.peaking, 72, 2, 0.9),
-    _band('subextension.transition', EqualizerFilterType.peaking, 155, -1.2, 1),
-    _band('subextension.clean', EqualizerFilterType.peaking, 320, -1.3, 1.1),
-  ]),
-  _preset('builtin.bass_boost', '低频解析', -4, [
-    _band('bass.foundation', EqualizerFilterType.lowShelf, 78, 3.2),
-    _band('bass.punch', EqualizerFilterType.peaking, 145, 2, 0.9),
-    _band('bass.mud', EqualizerFilterType.peaking, 310, -1.8, 1.1),
-    _band('bass.box', EqualizerFilterType.peaking, 720, -1.2, 1.2),
-    _band('bass.definition', EqualizerFilterType.peaking, 2400, 0.8, 1),
-  ]),
-  _preset('builtin.vinyl', '黑胶', -2.5, [
-    _band('vinyl.weight', EqualizerFilterType.lowShelf, 120, 3),
-    _band('vinyl.body', EqualizerFilterType.peaking, 420, 1.8, 0.9),
-    _band('vinyl.edge', EqualizerFilterType.peaking, 3200, -2.5, 1),
-    _band('vinyl.rolloff', EqualizerFilterType.highShelf, 8500, -5),
+    _band('cleanup.warmth', EqualizerFilterType.peaking, 180, -2, 1),
+    _band('cleanup.mud', EqualizerFilterType.peaking, 320, -4.5, 1.1),
+    _band('cleanup.box', EqualizerFilterType.peaking, 650, -2.5, 1.2),
+    _band('cleanup.focus', EqualizerFilterType.peaking, 2500, 1.5, 1),
+  ], 3),
+  _preset('builtin.smooth_treble', '柔顺高频', -1.5, [
+    _band('smooth.balance', EqualizerFilterType.lowShelf, 120, 1.5),
+    _band('smooth.presence', EqualizerFilterType.peaking, 3200, -1.5, 1.1),
+    _band('smooth.sibilance', EqualizerFilterType.peaking, 5800, -4, 1.4),
+    _band('smooth.top', EqualizerFilterType.highShelf, 10000, -3),
+  ], 3),
+  _preset('builtin.air_and_detail', '空气感与细节', -5, [
+    _band('detail.clean', EqualizerFilterType.peaking, 420, -1.5, 1),
+    _band('detail.presence', EqualizerFilterType.peaking, 2800, 2, 1),
+    _band('detail.texture', EqualizerFilterType.peaking, 5800, 2.5, 1.1),
+    _band('detail.air', EqualizerFilterType.highShelf, 10500, 5),
+  ], 3),
+  _preset('builtin.sub_bass_extension', '超低频延伸', -7, [
+    _band('subextension.depth', EqualizerFilterType.lowShelf, 45, 7, 0.9),
+    _band('subextension.weight', EqualizerFilterType.peaking, 72, 3, 0.9),
+    _band('subextension.transition', EqualizerFilterType.peaking, 155, -1.5, 1),
+    _band('subextension.clean', EqualizerFilterType.peaking, 320, -2, 1.1),
+  ], 3),
+  _preset('builtin.bass_boost', '低频解析', -5, [
+    _band('bass.foundation', EqualizerFilterType.lowShelf, 78, 5, 0.9),
+    _band('bass.punch', EqualizerFilterType.peaking, 145, 3, 0.9),
+    _band('bass.mud', EqualizerFilterType.peaking, 310, -3, 1.1),
+    _band('bass.box', EqualizerFilterType.peaking, 720, -2, 1.2),
+    _band('bass.definition', EqualizerFilterType.peaking, 2400, 1.5, 1),
+  ], 3),
+  _preset('builtin.vinyl', '黑胶', -4, [
+    _band('vinyl.weight', EqualizerFilterType.lowShelf, 120, 4),
+    _band('vinyl.body', EqualizerFilterType.peaking, 420, 2.5, 0.9),
+    _band('vinyl.edge', EqualizerFilterType.peaking, 3200, -3.5, 1),
+    _band('vinyl.rolloff', EqualizerFilterType.highShelf, 8500, -7),
     _band('vinyl.ceiling', EqualizerFilterType.lowPass, 16000, 0),
-  ]),
-  _preset('builtin.clear_vocals', '清澈人声', -4.5, [
-    _band('vocal.rumble', EqualizerFilterType.lowShelf, 110, -2),
-    _band('vocal.mud', EqualizerFilterType.peaking, 260, -3, 1),
-    _band('vocal.box', EqualizerFilterType.peaking, 650, -1.5, 1.2),
-    _band('vocal.presence', EqualizerFilterType.peaking, 2800, 5, 1),
-    _band('vocal.air', EqualizerFilterType.highShelf, 9000, 3.5),
-  ]),
-  _preset('builtin.female_vocals', '女声', -4.5, [
-    _band('female.rumble', EqualizerFilterType.lowShelf, 100, -2.5),
-    _band('female.warmth', EqualizerFilterType.peaking, 280, -2, 1),
-    _band('female.focus', EqualizerFilterType.peaking, 3200, 4.8, 1),
-    _band('female.detail', EqualizerFilterType.peaking, 7000, 2.5, 1.1),
-    _band('female.air', EqualizerFilterType.highShelf, 11000, 2.5),
-  ]),
-  _preset('builtin.male_vocals', '男声', -4, [
-    _band('male.foundation', EqualizerFilterType.lowShelf, 110, 2.5),
-    _band('male.chest', EqualizerFilterType.peaking, 280, 3, 0.9),
-    _band('male.nasal', EqualizerFilterType.peaking, 900, -2, 1.2),
-    _band('male.focus', EqualizerFilterType.peaking, 2200, 4.5, 1),
-    _band('male.air', EqualizerFilterType.highShelf, 9000, 1.5),
-  ]),
-  _preset('builtin.acoustic', '原声乐器', -4, [
-    _band('acoustic.body', EqualizerFilterType.lowShelf, 110, 2.5),
-    _band('acoustic.mud', EqualizerFilterType.peaking, 300, -2.5, 1),
-    _band('acoustic.wood', EqualizerFilterType.peaking, 1600, 2, 1),
-    _band('acoustic.attack', EqualizerFilterType.peaking, 4500, 3.8, 1),
-    _band('acoustic.air', EqualizerFilterType.highShelf, 10000, 2.5),
-  ]),
+  ], 3),
+  _preset('builtin.clear_vocals', '清澈人声', -6.5, [
+    _band('vocal.rumble', EqualizerFilterType.lowShelf, 110, -3),
+    _band('vocal.mud', EqualizerFilterType.peaking, 260, -4, 1),
+    _band('vocal.box', EqualizerFilterType.peaking, 650, -2, 1.2),
+    _band('vocal.presence', EqualizerFilterType.peaking, 2800, 6.5, 1),
+    _band('vocal.air', EqualizerFilterType.highShelf, 9000, 4.5),
+  ], 3),
+  _preset('builtin.female_vocals', '女声', -6, [
+    _band('female.rumble', EqualizerFilterType.lowShelf, 100, -3),
+    _band('female.warmth', EqualizerFilterType.peaking, 280, -2.5, 1),
+    _band('female.focus', EqualizerFilterType.peaking, 3200, 6, 1),
+    _band('female.detail', EqualizerFilterType.peaking, 7000, 3.5, 1.1),
+    _band('female.air', EqualizerFilterType.highShelf, 11000, 3.5),
+  ], 3),
+  _preset('builtin.male_vocals', '男声', -5.5, [
+    _band('male.foundation', EqualizerFilterType.lowShelf, 110, 3.5),
+    _band('male.chest', EqualizerFilterType.peaking, 280, 4, 0.9),
+    _band('male.nasal', EqualizerFilterType.peaking, 900, -2.5, 1.2),
+    _band('male.focus', EqualizerFilterType.peaking, 2200, 5.5, 1),
+    _band('male.air', EqualizerFilterType.highShelf, 9000, 2),
+  ], 3),
+  _preset('builtin.acoustic', '原声乐器', -5, [
+    _band('acoustic.body', EqualizerFilterType.lowShelf, 110, 3.5),
+    _band('acoustic.mud', EqualizerFilterType.peaking, 300, -3, 1),
+    _band('acoustic.wood', EqualizerFilterType.peaking, 1600, 2.5, 1),
+    _band('acoustic.attack', EqualizerFilterType.peaking, 4500, 5, 1),
+    _band('acoustic.air', EqualizerFilterType.highShelf, 10000, 3.5),
+  ], 2.5),
   _preset('builtin.live_folk', '现场民谣', -5, [
-    _band('folk.floor', EqualizerFilterType.lowShelf, 90, 3.5),
-    _band('folk.wood', EqualizerFilterType.peaking, 260, 2.5, 0.9),
-    _band('folk.hollow', EqualizerFilterType.peaking, 720, -2.5, 1.1),
-    _band('folk.voice', EqualizerFilterType.peaking, 2500, 3.8, 1),
-    _band('folk.strings', EqualizerFilterType.peaking, 7000, 3, 1),
-    _band('folk.air', EqualizerFilterType.highShelf, 11000, 2),
-  ]),
-  _preset('builtin.ancient_style_stereo', '古风立体声', -5.5, [
-    _band('ancient.depth', EqualizerFilterType.lowShelf, 90, 2.5),
-    _band('ancient.warmth', EqualizerFilterType.peaking, 190, 3.5, 0.9),
-    _band('ancient.space', EqualizerFilterType.peaking, 520, -3.5, 1),
-    _band('ancient.pluck', EqualizerFilterType.peaking, 1800, 3, 1),
-    _band('ancient.detail', EqualizerFilterType.peaking, 5200, 4.5, 1),
-    _band('ancient.air', EqualizerFilterType.highShelf, 10000, 3.5),
-  ]),
-  _preset('builtin.concert', '演唱会', -6.5, [
-    _band('concert.sub', EqualizerFilterType.lowShelf, 75, 5),
-    _band('concert.body', EqualizerFilterType.peaking, 240, 2.5, 0.9),
-    _band('concert.clean', EqualizerFilterType.peaking, 650, -3.5, 1),
-    _band('concert.presence', EqualizerFilterType.peaking, 2600, 3.5, 1),
-    _band('concert.energy', EqualizerFilterType.peaking, 7500, 4.5, 1),
-    _band('concert.air', EqualizerFilterType.highShelf, 12000, 2.5),
-  ]),
-  _preset('builtin.music_hall', '音乐厅', -5, [
-    _band('hall.floor', EqualizerFilterType.lowShelf, 85, 3),
-    _band('hall.body', EqualizerFilterType.peaking, 300, 3.2, 0.9),
-    _band('hall.space', EqualizerFilterType.peaking, 850, -3, 1),
-    _band('hall.presence', EqualizerFilterType.peaking, 2800, 2.5, 1),
-    _band('hall.air', EqualizerFilterType.highShelf, 9500, 3.5),
-  ]),
-  _preset('builtin.classical', '古典', -4, [
-    _band('classical.depth', EqualizerFilterType.lowShelf, 90, 2.5),
-    _band('classical.clean', EqualizerFilterType.peaking, 300, -1.5, 1),
-    _band('classical.strings', EqualizerFilterType.peaking, 1800, 2, 1),
-    _band('classical.detail', EqualizerFilterType.peaking, 4500, 2.8, 1),
-    _band('classical.air', EqualizerFilterType.highShelf, 10000, 3.5),
-  ]),
-  _preset('builtin.jazz', '爵士', -4.5, [
-    _band('jazz.bass', EqualizerFilterType.lowShelf, 100, 3.5),
-    _band('jazz.body', EqualizerFilterType.peaking, 320, 2.5, 0.9),
-    _band('jazz.clean', EqualizerFilterType.peaking, 850, -2.5, 1),
-    _band('jazz.brass', EqualizerFilterType.peaking, 3000, 2.5, 1),
-    _band('jazz.cymbal', EqualizerFilterType.highShelf, 8500, 3.5),
-  ]),
-  _preset('builtin.cinematic', '影院', -7.5, [
-    _band('cinematic.sub', EqualizerFilterType.lowShelf, 65, 7),
-    _band('cinematic.weight', EqualizerFilterType.peaking, 180, 3, 0.9),
-    _band('cinematic.space', EqualizerFilterType.peaking, 700, -3.5, 1),
-    _band('cinematic.dialog', EqualizerFilterType.peaking, 2400, 2.5, 1),
-    _band('cinematic.impact', EqualizerFilterType.peaking, 6000, 3.5, 1),
-    _band('cinematic.air', EqualizerFilterType.highShelf, 11000, 4),
-  ]),
-  _preset('builtin.acg', 'ACG', -5.5, [
-    _band('acg.bass', EqualizerFilterType.lowShelf, 85, 3.5),
-    _band('acg.clean', EqualizerFilterType.peaking, 320, -2.5, 1),
-    _band('acg.space', EqualizerFilterType.peaking, 1100, -1.5, 1),
-    _band('acg.vocal', EqualizerFilterType.peaking, 3400, 5.5, 1),
-    _band('acg.sparkle', EqualizerFilterType.peaking, 7500, 3.5, 1),
-    _band('acg.air', EqualizerFilterType.highShelf, 11000, 2.5),
-  ]),
-  _preset('builtin.hip_hop', '嘻哈', -7.5, [
-    _band('hiphop.sub', EqualizerFilterType.lowShelf, 70, 7.5),
-    _band('hiphop.punch', EqualizerFilterType.peaking, 160, 4, 0.9),
-    _band('hiphop.clean', EqualizerFilterType.peaking, 500, -3.5, 1),
-    _band('hiphop.voice', EqualizerFilterType.peaking, 2200, 3, 1),
-    _band('hiphop.snap', EqualizerFilterType.highShelf, 8500, 4),
-  ]),
-  _preset('builtin.electronic', '电子', -6.5, [
-    _band('electronic.sub', EqualizerFilterType.lowShelf, 70, 6),
-    _band('electronic.clean', EqualizerFilterType.peaking, 280, -2.5, 1),
-    _band('electronic.space', EqualizerFilterType.peaking, 1000, -2.5, 1),
-    _band('electronic.lead', EqualizerFilterType.peaking, 4000, 4.5, 1),
-    _band('electronic.air', EqualizerFilterType.highShelf, 9000, 4.5),
-  ]),
-  _preset('builtin.dance', '舞曲', -6.5, [
-    _band('dance.sub', EqualizerFilterType.lowShelf, 75, 6),
-    _band('dance.kick', EqualizerFilterType.peaking, 170, 3, 0.9),
-    _band('dance.clean', EqualizerFilterType.peaking, 520, -3.5, 1),
-    _band('dance.lead', EqualizerFilterType.peaking, 2800, 3.5, 1),
-    _band('dance.sparkle', EqualizerFilterType.highShelf, 8500, 4.5),
-  ]),
-  _preset('builtin.rock', '摇滚', -5.5, [
-    _band('rock.kick', EqualizerFilterType.lowShelf, 90, 4),
-    _band('rock.body', EqualizerFilterType.peaking, 200, 2.5, 0.9),
-    _band('rock.mud', EqualizerFilterType.peaking, 450, -3.5, 1),
-    _band('rock.guitar', EqualizerFilterType.peaking, 1800, 3.5, 1),
-    _band('rock.attack', EqualizerFilterType.peaking, 4200, 4.5, 1),
-    _band('rock.air', EqualizerFilterType.highShelf, 10000, 2),
-  ]),
-  _preset('builtin.metal', '金属', -6.5, [
-    _band('metal.kick', EqualizerFilterType.lowShelf, 85, 5),
-    _band('metal.mud', EqualizerFilterType.peaking, 280, -3.5, 1),
-    _band('metal.box', EqualizerFilterType.peaking, 800, -2.5, 1),
-    _band('metal.guitar', EqualizerFilterType.peaking, 2200, 4.5, 1),
-    _band('metal.attack', EqualizerFilterType.peaking, 5000, 5.5, 1),
-    _band('metal.air', EqualizerFilterType.highShelf, 11000, 2.5),
-  ]),
-  _preset('builtin.warm', '温暖', -1.5, [
-    _band('warm.low_shelf', EqualizerFilterType.lowShelf, 140, 3),
-    _band('warm.edge', EqualizerFilterType.peaking, 3500, -1.5, 1),
-    _band('warm.high_shelf', EqualizerFilterType.highShelf, 10000, -2),
-  ]),
-  _preset('builtin.bright', '明亮', -2, [
-    _band('bright.presence', EqualizerFilterType.peaking, 4000, 2, 1),
-    _band('bright.high_shelf', EqualizerFilterType.highShelf, 9500, 3.5),
-  ]),
-  _preset('builtin.lo_fi', 'Lo-Fi', -3.5, [
+    _band('folk.floor', EqualizerFilterType.lowShelf, 90, 5),
+    _band('folk.wood', EqualizerFilterType.peaking, 260, 3.5, 0.9),
+    _band('folk.hollow', EqualizerFilterType.peaking, 720, -3, 1.1),
+    _band('folk.voice', EqualizerFilterType.peaking, 2500, 5, 1),
+    _band('folk.strings', EqualizerFilterType.peaking, 7000, 4, 1),
+    _band('folk.air', EqualizerFilterType.highShelf, 11000, 3),
+  ], 3),
+  _preset('builtin.ancient_style_stereo', '古风立体声', -6, [
+    _band('ancient.depth', EqualizerFilterType.lowShelf, 90, 3.5),
+    _band('ancient.warmth', EqualizerFilterType.peaking, 190, 4.5, 0.9),
+    _band('ancient.space', EqualizerFilterType.peaking, 520, -4.5, 1),
+    _band('ancient.pluck', EqualizerFilterType.peaking, 1800, 4, 1),
+    _band('ancient.detail', EqualizerFilterType.peaking, 5200, 6, 1),
+    _band('ancient.air', EqualizerFilterType.highShelf, 10000, 4.5),
+  ], 3),
+  _preset('builtin.concert', '演唱会', -7.5, [
+    _band('concert.sub', EqualizerFilterType.lowShelf, 75, 7.5, 0.9),
+    _band('concert.body', EqualizerFilterType.peaking, 240, 3.5, 0.9),
+    _band('concert.clean', EqualizerFilterType.peaking, 650, -4, 1),
+    _band('concert.presence', EqualizerFilterType.peaking, 2600, 4.5, 1),
+    _band('concert.energy', EqualizerFilterType.peaking, 7500, 5.5, 1),
+    _band('concert.air', EqualizerFilterType.highShelf, 12000, 3.5),
+  ], 3),
+  _preset('builtin.music_hall', '音乐厅', -4.5, [
+    _band('hall.floor', EqualizerFilterType.lowShelf, 85, 4.5),
+    _band('hall.body', EqualizerFilterType.peaking, 300, 4, 0.9),
+    _band('hall.space', EqualizerFilterType.peaking, 850, -3.5, 1),
+    _band('hall.presence', EqualizerFilterType.peaking, 2800, 3.5, 1),
+    _band('hall.air', EqualizerFilterType.highShelf, 9500, 4.5),
+  ], 2.5),
+  _preset('builtin.classical', '古典', -4.5, [
+    _band('classical.depth', EqualizerFilterType.lowShelf, 90, 3.5),
+    _band('classical.clean', EqualizerFilterType.peaking, 300, -2, 1),
+    _band('classical.strings', EqualizerFilterType.peaking, 1800, 2.5, 1),
+    _band('classical.detail', EqualizerFilterType.peaking, 4500, 3.5, 1),
+    _band('classical.air', EqualizerFilterType.highShelf, 10000, 4.5),
+  ], 2),
+  _preset('builtin.jazz', '爵士', -5, [
+    _band('jazz.bass', EqualizerFilterType.lowShelf, 100, 5),
+    _band('jazz.body', EqualizerFilterType.peaking, 320, 3.5, 0.9),
+    _band('jazz.clean', EqualizerFilterType.peaking, 850, -3, 1),
+    _band('jazz.brass', EqualizerFilterType.peaking, 3000, 3.5, 1),
+    _band('jazz.cymbal', EqualizerFilterType.highShelf, 8500, 4.5),
+  ], 2.5),
+  _preset('builtin.cinematic', '影院', -9, [
+    _band('cinematic.sub', EqualizerFilterType.lowShelf, 65, 9, 0.9),
+    _band('cinematic.weight', EqualizerFilterType.peaking, 180, 4, 0.9),
+    _band('cinematic.space', EqualizerFilterType.peaking, 700, -4, 1),
+    _band('cinematic.dialog', EqualizerFilterType.peaking, 2400, 3.5, 1),
+    _band('cinematic.impact', EqualizerFilterType.peaking, 6000, 4.5, 1),
+    _band('cinematic.air', EqualizerFilterType.highShelf, 11000, 5),
+  ], 3),
+  _preset('builtin.acg', 'ACG', -7, [
+    _band('acg.bass', EqualizerFilterType.lowShelf, 85, 4.5),
+    _band('acg.clean', EqualizerFilterType.peaking, 320, -3, 1),
+    _band('acg.space', EqualizerFilterType.peaking, 1100, -2, 1),
+    _band('acg.vocal', EqualizerFilterType.peaking, 3400, 7, 1),
+    _band('acg.sparkle', EqualizerFilterType.peaking, 7500, 4.5, 1),
+    _band('acg.air', EqualizerFilterType.highShelf, 11000, 3.5),
+  ], 3),
+  _preset('builtin.hip_hop', '嘻哈', -9.5, [
+    _band('hiphop.sub', EqualizerFilterType.lowShelf, 70, 9.5, 0.95),
+    _band('hiphop.punch', EqualizerFilterType.peaking, 160, 5, 0.9),
+    _band('hiphop.clean', EqualizerFilterType.peaking, 500, -4, 1),
+    _band('hiphop.voice', EqualizerFilterType.peaking, 2200, 3.5, 1),
+    _band('hiphop.snap', EqualizerFilterType.highShelf, 8500, 5),
+  ], 3),
+  _preset('builtin.electronic', '电子', -8, [
+    _band('electronic.sub', EqualizerFilterType.lowShelf, 70, 8, 0.9),
+    _band('electronic.clean', EqualizerFilterType.peaking, 280, -3, 1),
+    _band('electronic.space', EqualizerFilterType.peaking, 1000, -3, 1),
+    _band('electronic.lead', EqualizerFilterType.peaking, 4000, 5.5, 1),
+    _band('electronic.air', EqualizerFilterType.highShelf, 9000, 5.5),
+  ], 3),
+  _preset('builtin.dance', '舞曲', -8, [
+    _band('dance.sub', EqualizerFilterType.lowShelf, 75, 8, 0.9),
+    _band('dance.kick', EqualizerFilterType.peaking, 170, 4, 0.9),
+    _band('dance.clean', EqualizerFilterType.peaking, 520, -4, 1),
+    _band('dance.lead', EqualizerFilterType.peaking, 2800, 4.5, 1),
+    _band('dance.sparkle', EqualizerFilterType.highShelf, 8500, 5.5),
+  ], 3),
+  _preset('builtin.rock', '摇滚', -6, [
+    _band('rock.kick', EqualizerFilterType.lowShelf, 90, 6, 0.9),
+    _band('rock.body', EqualizerFilterType.peaking, 200, 3, 0.9),
+    _band('rock.mud', EqualizerFilterType.peaking, 450, -4.5, 1),
+    _band('rock.guitar', EqualizerFilterType.peaking, 1800, 4.5, 1),
+    _band('rock.attack', EqualizerFilterType.peaking, 4200, 6, 1),
+    _band('rock.air', EqualizerFilterType.highShelf, 10000, 3),
+  ], 3),
+  _preset('builtin.metal', '金属', -7, [
+    _band('metal.kick', EqualizerFilterType.lowShelf, 85, 7, 0.9),
+    _band('metal.mud', EqualizerFilterType.peaking, 280, -4.5, 1),
+    _band('metal.box', EqualizerFilterType.peaking, 800, -3, 1),
+    _band('metal.guitar', EqualizerFilterType.peaking, 2200, 5.5, 1),
+    _band('metal.attack', EqualizerFilterType.peaking, 5000, 7, 1),
+    _band('metal.air', EqualizerFilterType.highShelf, 11000, 3.5),
+  ], 3),
+  _preset('builtin.warm', '温暖', -5, [
+    _band('warm.low_shelf', EqualizerFilterType.lowShelf, 140, 5, 0.85),
+    _band('warm.edge', EqualizerFilterType.peaking, 3500, -2.5, 1),
+    _band('warm.high_shelf', EqualizerFilterType.highShelf, 10000, -3.5),
+  ], 3),
+  _preset('builtin.bright', '明亮', -6, [
+    _band('bright.presence', EqualizerFilterType.peaking, 4000, 3.5, 1),
+    _band('bright.high_shelf', EqualizerFilterType.highShelf, 9500, 6),
+  ], 1),
+  _preset('builtin.lo_fi', 'Lo-Fi', -5, [
     _band('lofi.floor', EqualizerFilterType.highPass, 65, 0),
-    _band('lofi.weight', EqualizerFilterType.lowShelf, 160, 3.5),
-    _band('lofi.box', EqualizerFilterType.peaking, 450, 3, 1),
-    _band('lofi.presence', EqualizerFilterType.peaking, 2500, -3.5, 1),
-    _band('lofi.ceiling', EqualizerFilterType.lowPass, 9000, 0),
-  ]),
-  _preset('builtin.late_night', '深夜', -4.5, [
-    _band('night.bass', EqualizerFilterType.lowShelf, 100, 4.5),
-    _band('night.warmth', EqualizerFilterType.peaking, 320, 2.5, 0.9),
-    _band('night.presence', EqualizerFilterType.peaking, 2800, -2.5, 1),
-    _band('night.soft', EqualizerFilterType.highShelf, 7500, -5),
-  ]),
+    _band('lofi.weight', EqualizerFilterType.lowShelf, 160, 5),
+    _band('lofi.box', EqualizerFilterType.peaking, 450, 4, 1),
+    _band('lofi.presence', EqualizerFilterType.peaking, 2500, -5, 1),
+    _band('lofi.ceiling', EqualizerFilterType.lowPass, 7500, 0),
+  ], 3),
+  _preset('builtin.late_night', '深夜', -6, [
+    _band('night.bass', EqualizerFilterType.lowShelf, 100, 6, 0.9),
+    _band('night.warmth', EqualizerFilterType.peaking, 320, 3, 0.9),
+    _band('night.presence', EqualizerFilterType.peaking, 2800, -3.5, 1),
+    _band('night.soft', EqualizerFilterType.highShelf, 7500, -7),
+  ], 3),
 ]);
 
 List<EqualizerBandSetting> defaultEqualizerBands([List<double>? gains]) {
@@ -673,9 +697,11 @@ class EqualizerNotifier extends Notifier<EqualizerSettings> {
   }
 
   void applyPreset(EqualizerPreset preset) {
+    // Picking a preset is an explicit request to hear it: enable the EQ
+    // instead of silently applying values behind a switched-off toggle.
     _update(
       EqualizerSettings(
-        enabled: state.enabled,
+        enabled: true,
         inputGainDb: preset.inputGainDb,
         outputGainDb: preset.outputGainDb,
         bands: List.unmodifiable(preset.bands),
@@ -687,8 +713,19 @@ class EqualizerNotifier extends Notifier<EqualizerSettings> {
   void reset() => _update(EqualizerSettings.fallback);
 
   void importSpeq(String value) {
-    final imported = EqualizerSettings.fromSpeq(value);
-    _update(imported.copyWith(enabled: state.enabled));
+    final preset = EqualizerSettings.presetFromSpeq(value);
+    final stored = ref
+        .read(userEqualizerPresetsProvider.notifier)
+        .addOrReplace(preset);
+    _update(
+      EqualizerSettings(
+        enabled: true,
+        inputGainDb: stored.inputGainDb,
+        outputGainDb: stored.outputGainDb,
+        bands: List.unmodifiable(stored.bands),
+        presetId: stored.id,
+      ),
+    );
   }
 
   void _replaceBand(
@@ -722,6 +759,95 @@ class EqualizerNotifier extends Notifier<EqualizerSettings> {
 final equalizerProvider =
     NotifierProvider<EqualizerNotifier, EqualizerSettings>(
       EqualizerNotifier.new,
+    );
+
+const _userPresetsStorageKey = 'bass_equalizer_user_presets_v1';
+
+/// Presets imported from .speq files. Built-in presets live in
+/// [equalizerPresets]; imported ones are kept here so that switching to
+/// another preset does not silently discard them.
+class UserEqualizerPresetsNotifier extends Notifier<List<EqualizerPreset>> {
+  late SharedPreferences _preferences;
+
+  @override
+  List<EqualizerPreset> build() {
+    _preferences = ref.read(sharedPreferencesProvider);
+    final encoded = _preferences.getString(_userPresetsStorageKey);
+    if (encoded == null) return const [];
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! List) throw const FormatException();
+      return List.unmodifiable(
+        decoded.map(
+          (value) => EqualizerPreset.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      );
+    } catch (_) {
+      unawaited(_preferences.remove(_userPresetsStorageKey));
+      return const [];
+    }
+  }
+
+  /// Stores [preset], replacing an imported preset with the same id, and
+  /// returns the preset as stored. Its id is namespaced when it would
+  /// collide with a built-in preset id.
+  EqualizerPreset addOrReplace(EqualizerPreset preset) {
+    var stored = preset;
+    if (equalizerPresets.any((builtin) => builtin.id == stored.id)) {
+      stored = EqualizerPreset(
+        id: 'imported.${stored.id}',
+        label: stored.label,
+        inputGainDb: stored.inputGainDb,
+        outputGainDb: stored.outputGainDb,
+        bands: stored.bands,
+      );
+    }
+    state = List.unmodifiable([
+      for (final current in state)
+        if (current.id != stored.id) current,
+      stored,
+    ]);
+    unawaited(_persist());
+    return stored;
+  }
+
+  void rename(String id, String label) {
+    final trimmed = label.trim();
+    if (trimmed.isEmpty) return;
+    state = List.unmodifiable([
+      for (final current in state)
+        if (current.id == id)
+          EqualizerPreset(
+            id: current.id,
+            label: trimmed,
+            inputGainDb: current.inputGainDb,
+            outputGainDb: current.outputGainDb,
+            bands: current.bands,
+          )
+        else
+          current,
+    ]);
+    unawaited(_persist());
+  }
+
+  void clear() {
+    state = const [];
+    unawaited(_preferences.remove(_userPresetsStorageKey));
+  }
+
+  Future<void> _persist() {
+    return _preferences.setString(
+      _userPresetsStorageKey,
+      jsonEncode(state.map((preset) => preset.toJson()).toList()),
+    );
+  }
+}
+
+final userEqualizerPresetsProvider =
+    NotifierProvider<UserEqualizerPresetsNotifier, List<EqualizerPreset>>(
+      UserEqualizerPresetsNotifier.new,
     );
 
 List<EqualizerBandSetting> _decodeBands(List<dynamic> rawBands) {

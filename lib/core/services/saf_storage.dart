@@ -156,11 +156,13 @@ class SafStorage {
   static Future<String> saveFile(
     String tree,
     String source,
-    String name,
-  ) async => (await _channel.invokeMethod<String>('saveFile', {
+    String name, {
+    String? subdirectory,
+  }) async => (await _channel.invokeMethod<String>('saveFile', {
     'uri': tree,
     'source': source,
     'name': name,
+    'subdirectory': ?subdirectory,
   }))!;
 
   static Future<bool> exists(String location) async {

@@ -972,6 +972,9 @@ final class CyShineAppTaskChannel {
     case "diagnostics":
       result(diagnostics())
 
+    case "signingIdentity":
+      result(signingIdentity())
+
     case "mediaSession":
       result(mediaSessionDiagnostics())
 
@@ -1232,6 +1235,173 @@ final class CyShineAppTaskChannel {
       "thermalState": Self.thermalState(processInfo.thermalState),
       "freeMemoryBytes": processInfo.physicalMemory,
     ]
+  }
+
+  /// ★ 读出本进程二进制实际携带的签名身份。
+  ///
+  ///   锁屏卡 / 灵动岛「点卡回 App」这一步，系统按应用的签名身份
+  ///   （application-identifier）找人，不是按桌面图标。CI 出的 IPA
+  ///   完全未签名、主二进制不带 entitlements，最终身份取决于安装
+  ///   方式：巨魔只能保留二进制里已有的（没有就没有），证书签则由
+  ///   描述文件盖入。这里把三样东西原样读出来对账：代码签名
+  ///   identifier、二进制 entitlements 里的 application-identifier、
+  ///   内嵌描述文件（仅证书签安装才有）声明的 App ID。
+  private func signingIdentity() -> [String: Any] {
+    let bundleId = Bundle.main.bundleIdentifier ?? "?"
+    var out: [String: Any] = ["bundleId": bundleId]
+
+    // SecCode* 是 macOS 专属 API、iOS SDK 里不存在，改直接解析主
+    // 可执行文件代码签名 superblob 里的 CodeDirectory 与 entitlements。
+    let signature = Self.codeSignatureInfo()
+    out["codeIdentifier"] = signature.ident
+    out["teamId"] = signature.teamId
+    let appId =
+      signature.entitlements?["application-identifier"] as? String ?? ""
+    out["applicationIdentifier"] = appId.isEmpty ? "（无）" : appId
+    out["appIdMatchesBundle"] = !appId.isEmpty && appId.hasSuffix("." + bundleId)
+
+    // 内嵌描述文件：巨魔安装没有，证书签安装才有。
+    if let url = Bundle.main.url(
+      forResource: "embedded", withExtension: "mobileprovision"
+    ), let data = try? Data(contentsOf: url),
+      let slice = Self.plistSlice(in: data),
+      let profile = try? PropertyListSerialization.propertyList(
+        from: slice, options: [], format: nil
+      ) as? [String: Any]
+    {
+      let profileEntitlements = profile["Entitlements"] as? [String: Any]
+      out["profileName"] = profile["Name"] as? String ?? "?"
+      out["profileAppId"] =
+        profileEntitlements?["application-identifier"] as? String ?? "?"
+      out["profileTeam"] =
+        (profile["TeamIdentifier"] as? [String])?.joined(separator: ",")
+        ?? "?"
+    } else {
+      out["profileName"] = "（无内嵌描述文件）"
+      out["profileAppId"] = "?"
+      out["profileTeam"] = "?"
+    }
+    return out
+  }
+
+  /// mobileprovision 是 CMS 签名包裹的 plist：先做有损文本解码
+  /// （二进制尾巴会被替换字符污染，但 XML 段是纯 ASCII 不受影响），
+  /// 截取 XML 段再解析。
+  private static func plistSlice(in data: Data) -> Data? {
+    let text = String(decoding: data, as: UTF8.self)
+    guard let start = text.range(of: "<?xml"),
+      let end = text.range(of: "</plist>")
+    else { return nil }
+    return Data(text[start.lowerBound..<end.upperBound].utf8)
+  }
+
+  /// 解析主可执行文件的代码签名：读 Mach-O 的 LC_CODE_SIGNATURE，
+  /// 在 superblob 里取 CodeDirectory 的 ident/team 与 XML 形式的
+  /// entitlements。全程只做带边界检查的字节读取，任何一步对不上
+  /// 都返回空，诊断本身绝不让 App 崩。
+  private static func codeSignatureInfo()
+    -> (ident: String, teamId: String, entitlements: [String: Any]?)
+  {
+    guard let url = Bundle.main.executableURL,
+      let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+      data.count > 32
+    else { return ("?", "?", nil) }
+
+    func be32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return (Int(data[i]) << 24) | (Int(data[i + 1]) << 16)
+        | (Int(data[i + 2]) << 8) | Int(data[i + 3])
+    }
+    func le32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return Int(data[i]) | (Int(data[i + 1]) << 8)
+        | (Int(data[i + 2]) << 16) | (Int(data[i + 3]) << 24)
+    }
+
+    // FAT 先定位 arm64 切片，thin 直接从 0 开始。
+    var base = 0
+    if be32(0, 0) == 0xcafebabe {
+      let archCount = be32(0, 4)
+      var found = false
+      for index in 0..<min(archCount, 8) {
+        let entry = 8 + index * 20
+        if be32(entry, 0) == 0x0100_000c {
+          base = be32(entry, 8)
+          found = true
+          break
+        }
+      }
+      if !found, archCount > 0 { base = be32(8, 8) }
+    }
+    guard base + 32 <= data.count, le32(base, 0) == 0xfeed_facf else {
+      return ("?", "?", nil)
+    }
+
+    // 遍历 load commands 找 LC_CODE_SIGNATURE(0x1d)。
+    let commandCount = le32(base, 16)
+    var cursor = base + 32
+    var signatureOffset = 0
+    for _ in 0..<min(commandCount, 64) {
+      guard cursor + 8 <= data.count else { break }
+      let command = le32(cursor, 0)
+      let size = le32(cursor, 4)
+      if command == 0x1d {
+        signatureOffset = le32(cursor, 8)
+        break
+      }
+      if size <= 0 { break }
+      cursor += size
+    }
+    guard signatureOffset > 0 else { return ("?", "?", nil) }
+    let superblob = base + signatureOffset
+    guard be32(superblob, 0) == 0xfade_0cc0 else { return ("?", "?", nil) }
+    let blobCount = be32(superblob, 8)
+
+    var ident = "?"
+    var teamId = "?"
+    var entitlements: [String: Any]?
+    for index in 0..<min(blobCount, 16) {
+      let entry = superblob + 12 + index * 8
+      let slot = be32(entry, 0)
+      let blob = superblob + be32(entry, 4)
+      guard blob + 8 <= data.count else { continue }
+      if slot == 0, be32(blob, 0) == 0xfade_0c02 {
+        // CodeDirectory：ident/team 是偏移指向的 C 字符串。
+        let version = be32(blob, 8)
+        let identOffset = be32(blob, 20)
+        if identOffset > 0 {
+          ident = cString(data, blob + identOffset) ?? "?"
+        }
+        if version >= 0x20100 {
+          let teamOffset = be32(blob, 48)
+          if teamOffset > 0 {
+            teamId = cString(data, blob + teamOffset) ?? "?"
+          }
+        }
+      } else if slot == 5, be32(blob, 0) == 0xfade_7171 {
+        // XML entitlements：8 字节头之后就是 plist 文本。
+        let length = be32(blob, 4)
+        if length > 8, blob + length <= data.count,
+          let parsed = try? PropertyListSerialization.propertyList(
+            from: data[(blob + 8)..<(blob + length)],
+            options: [], format: nil
+          ) as? [String: Any]
+        {
+          entitlements = parsed
+        }
+      }
+    }
+    return (ident, teamId, entitlements)
+  }
+
+  private static func cString(_ data: Data, _ start: Int) -> String? {
+    guard start >= 0, start < data.count else { return nil }
+    var end = start
+    while end < data.count, data[end] != 0, end - start < 256 { end += 1 }
+    guard end > start else { return nil }
+    return String(decoding: data[start..<end], as: UTF8.self)
   }
 
   private static func notificationsEnabled() -> Bool {

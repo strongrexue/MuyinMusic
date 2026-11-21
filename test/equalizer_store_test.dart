@@ -22,6 +22,23 @@ void main() {
     expect(settings.bands, isEmpty);
   });
 
+  test('built-in presets are staged so their curves stay audible', () {
+    for (final preset in equalizerPresets) {
+      if (preset.id == 'builtin.original') continue;
+      final maxBoost = preset.bands
+          .map((band) => band.gainDb)
+          .reduce((a, b) => a > b ? a : b);
+      // The negative preamp must not cancel the curve: after the output
+      // compensation the loudest boost still lands above unity, while
+      // the combined peak stays within a few dB of full scale.
+      expect(
+        preset.inputGainDb + preset.outputGainDb + maxBoost,
+        inInclusiveRange(0, 3.5),
+        reason: preset.id,
+      );
+    }
+  });
+
   test('preset and custom values persist as a speq document', () async {
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
@@ -90,6 +107,103 @@ void main() {
     expect(decoded.inputGainDb, -3);
     expect(decoded.outputGainDb, 1);
     expect(decoded.bands.single.frequencyHz, 2800);
+  });
+
+  test('presetFromSpeq reads the first preset of a bundle', () {
+    const settings = EqualizerSettings(
+      enabled: true,
+      inputGainDb: -6.3,
+      outputGainDb: 0,
+      bands: [
+        EqualizerBandSetting(id: 'b1', frequencyHz: 105, gainDb: 5, q: 0.71),
+      ],
+      presetId: 'autoeq.example',
+    );
+
+    final preset = EqualizerSettings.presetFromSpeq(settings.toSpeq());
+    expect(preset.id, 'autoeq.example');
+    expect(preset.inputGainDb, -6.3);
+    expect(preset.bands.single.frequencyHz, 105);
+  });
+
+  test('imported presets stay selectable after switching presets', () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(equalizerProvider.notifier);
+
+    notifier.importSpeq(
+      const EqualizerSettings(
+        enabled: true,
+        inputGainDb: -6.3,
+        outputGainDb: 0,
+        bands: [
+          EqualizerBandSetting(id: 'b1', frequencyHz: 105, gainDb: 5, q: 0.71),
+        ],
+        presetId: 'autoeq.example',
+      ).toSpeq(),
+    );
+
+    var settings = container.read(equalizerProvider);
+    expect(settings.enabled, isTrue);
+    expect(settings.presetId, 'autoeq.example');
+    expect(settings.bands.single.frequencyHz, 105);
+    expect(
+      container.read(userEqualizerPresetsProvider).single.id,
+      'autoeq.example',
+    );
+
+    notifier.applyPreset(
+      equalizerPresets.firstWhere((item) => item.id == 'builtin.rock'),
+    );
+    expect(container.read(equalizerProvider).presetId, 'builtin.rock');
+
+    final imported = container.read(userEqualizerPresetsProvider).single;
+    notifier.applyPreset(imported);
+    settings = container.read(equalizerProvider);
+    expect(settings.presetId, 'autoeq.example');
+    expect(settings.bands.single.frequencyHz, 105);
+  });
+
+  test('imports accumulate under distinct ids and can be renamed', () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(equalizerProvider.notifier);
+
+    String bundle(String id) => EqualizerSettings(
+      enabled: true,
+      inputGainDb: 0,
+      outputGainDb: 0,
+      bands: const [
+        EqualizerBandSetting(id: 'b1', frequencyHz: 100, gainDb: 2),
+      ],
+      presetId: id,
+    ).toSpeq();
+
+    notifier.importSpeq(bundle('autoeq.one'));
+    notifier.importSpeq(bundle('autoeq.two'));
+    expect(container.read(userEqualizerPresetsProvider).map((p) => p.id), [
+      'autoeq.one',
+      'autoeq.two',
+    ]);
+
+    container
+        .read(userEqualizerPresetsProvider.notifier)
+        .rename('autoeq.one', '我的耳机');
+    expect(
+      container
+          .read(userEqualizerPresetsProvider)
+          .firstWhere((p) => p.id == 'autoeq.one')
+          .label,
+      '我的耳机',
+    );
   });
 
   test('legacy unsupported filters migrate to peaking and clamp ranges', () {

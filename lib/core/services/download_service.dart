@@ -330,6 +330,21 @@ class DownloadService {
           ? p.join(normalizeStorageLocation(settings.localMusicDir), 'MuyinMusic')
           : settings.downloadDir;
       final destDir = await _resolveDestinationDir(downloadRoot, log);
+      // 按歌手分文件夹：普通目录直接拼子目录（MediaStore 保存时会自动建），
+      // SAF 授权目录则把子目录名交给保存层在授权树内查找/新建。
+      var effectiveDestDir = destDir;
+      String? artistSubdir;
+      if (settings.downloadGroupByArtist) {
+        final folder = FileNaming.artistFolder(music);
+        if (isContentLocation(destDir)) {
+          artistSubdir = folder;
+        } else {
+          effectiveDestDir = p.join(destDir, folder);
+          if (!await MediaLibrary.canSave(effectiveDestDir)) {
+            await Directory(effectiveDestDir).create(recursive: true);
+          }
+        }
+      }
       final cacheRoot = await getTemporaryDirectory();
       taskCacheDir = await cacheRoot.createTemp('muyin-download-');
       ensureActive();
@@ -368,7 +383,7 @@ class DownloadService {
               'step1 OK source=${source.name} url.len=${musicUrl.url.length} '
               'type=${musicUrl.type}',
             );
-            log('step2 destDir=$destDir fileName=$fileName');
+            log('step2 destDir=$effectiveDestDir fileName=$fileName');
             log('step3 GET source=${source.name} ${_shortUrl(musicUrl.url)}');
             try {
               await dio.download(
@@ -531,7 +546,12 @@ class DownloadService {
       // Once committing starts, finish recording this file even if paused.
       ensureActive();
       progress.updateStage(taskId, DownloadStage.finishing);
-      final finalPath = await _moveToTarget(tmpPath, destDir, fileName);
+      final finalPath = await _moveToTarget(
+        tmpPath,
+        effectiveDestDir,
+        fileName,
+        subdirectory: artistSubdir,
+      );
       await _scanMedia(finalPath);
       await LocalAudioLibraryEvents.saved(
         finalPath,
@@ -724,10 +744,16 @@ class DownloadService {
   Future<String> _moveToTarget(
     String tmpPath,
     String destination,
-    String fileName,
-  ) async {
+    String fileName, {
+    String? subdirectory,
+  }) async {
     if (isContentLocation(destination)) {
-      return SafStorage.saveFile(destination, tmpPath, fileName);
+      return SafStorage.saveFile(
+        destination,
+        tmpPath,
+        fileName,
+        subdirectory: subdirectory,
+      );
     }
     if (await MediaLibrary.canSave(destination)) {
       return MediaLibrary.save(destination, tmpPath, fileName);
