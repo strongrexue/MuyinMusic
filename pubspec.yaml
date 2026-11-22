@@ -1,7 +1,7 @@
 name: cy_shine_music
 description: "娌愰煶 - Android music client with custom source support."
 publish_to: 'none'
-version: 1.3.3+26
+version: 1.3.4+27
 
 environment:
   sdk: ^3.11.4
