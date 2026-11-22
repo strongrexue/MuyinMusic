@@ -19,11 +19,9 @@ on:
         required: false
         default: ''
   push:
-    # iOS 分支停用后，推送与发版构建统一走 main。
+    # 发版构建已并入 release.yml，ios.yml 只保留推 main 时的日常构建。
     branches:
       - main
-    tags:
-      - 'ios-*'
     # 文档/截图等改动没必要跑 10 分钟的 macOS 构建。
     paths-ignore:
       - '**/*.md'
@@ -171,26 +169,6 @@ jobs:
           name: MuyinMusic-unsigned-ipa
           path: build/MuyinMusic-unsigned.ipa
           retention-days: 14
-
-      # tag 触发的构建把未签名 IPA 挂到 GitHub Release（与 Android 发版一致）。
-      # 未签名包仍需用户用 AltStore / Sideloadly 以自有 Apple ID 重签安装。
-      - name: Publish unsigned IPA to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/ios-')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          TAG="${GITHUB_REF_NAME}"
-          IPA="MuyinMusic-${TAG#ios-}-unsigned.ipa"
-          cp build/MuyinMusic-unsigned.ipa "$IPA"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$IPA" --clobber
-            gh release edit "$TAG" --draft=false
-          else
-            gh release create "$TAG" "$IPA" \
-              --title "MuyinMusic iOS ${TAG#ios-}" --generate-notes
-          fi
-          echo "未签名 IPA 已发布到 Release $TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build logs on failure
         if: failure()
