@@ -14,7 +14,6 @@ import 'widgets/ktv_lyrics_view.dart';
 import 'widgets/lyrics_panel.dart';
 import 'widgets/player_action_row.dart';
 import 'widgets/player_layout.dart';
-import 'widgets/player_palette.dart';
 import 'widgets/top_chrome_row.dart';
 import 'widgets/transport_bar.dart';
 
@@ -178,7 +177,6 @@ class _NowPlayingBody extends ConsumerStatefulWidget {
 
 class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
   late final PageController _pageController;
-  int _currentPage = 0;
   int? _compactPagerPointer;
   Offset _compactPagerPointerDelta = Offset.zero;
   bool _compactPagerHorizontalDrag = false;
@@ -213,8 +211,6 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
   }
 
   void _openLyricsPage() => _goToPage(1);
-
-  void _openAlbumPage() => _goToPage(0);
 
   bool _handleCompactPagerScroll(ScrollNotification notification) {
     if (notification.depth != 0) return false;
@@ -370,8 +366,7 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                       PageView(
                         key: const ValueKey('player-compact-pager'),
                         controller: _pageController,
-                        onPageChanged: (page) =>
-                            setState(() => _currentPage = page),
+                        onPageChanged: (_) => setState(() {}),
                         clipBehavior: Clip.hardEdge,
                         children: [
                           ClipRect(
@@ -395,16 +390,6 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                           ),
                         ],
                       ),
-                      Positioned(
-                        right: 8,
-                        bottom: 6,
-                        child: _LyricsToggleButton(
-                          showLyrics: _currentPage == 0,
-                          onTap: _currentPage == 0
-                              ? _openLyricsPage
-                              : _openAlbumPage,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -420,57 +405,6 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
             child: TransportBar(),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _LyricsToggleButton extends StatelessWidget {
-  const _LyricsToggleButton({
-    required this.showLyrics,
-    required this.onTap,
-  });
-
-  /// True when currently on the album page (so the button offers lyrics).
-  final bool showLyrics;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = showLyrics ? '查看歌词' : '返回封面';
-    final icon = showLyrics ? Icons.lyrics_rounded : Icons.album_rounded;
-    return Semantics(
-      button: true,
-      label: label,
-      child: Tooltip(
-        message: label,
-        child: Material(
-          color: playerInk(context).withValues(alpha: 0.10),
-          shape: const StadiumBorder(),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 15, color: playerInk(context)),
-                  const SizedBox(width: 5),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: playerInk(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      height: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
