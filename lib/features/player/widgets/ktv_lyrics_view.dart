@@ -77,14 +77,14 @@ class _KtvStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Text(
         text,
         style: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w600,
-          color: scheme.onSurface.withValues(alpha: 0.55),
+          // KTV 背景恒为深色画面，提示文字固定白色系，不随主题亮度变化。
+          color: Colors.white.withValues(alpha: 0.75),
         ),
       ),
     );
@@ -229,12 +229,15 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
           // available width, so short lines (or a wide screen) do not
           // leave the middle feeling empty. Stacks on top of the
           // safe-area compensation of the outer padding.
-          final slotInset = constraints.maxWidth * 0.12;
+          final slotInset = constraints.maxWidth * 0.06;
           return Padding(
             padding: EdgeInsets.symmetric(horizontal: slotInset),
             child: Column(
               children: [
                 const Spacer(),
+                // KTV lyrics always render white, like the dark theme:
+                // they sit on the full-bleed background image, so the
+                // light theme's dark onSurface would be unreadable.
                 SizedBox(
                   height: slotHeight,
                   child: _KtvSlot(
@@ -245,7 +248,7 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
                     playing: _playing,
                     buffering: _buffering,
                     fontSize: fontSize,
-                    color: scheme.onSurface,
+                    color: Colors.white,
                     accent: scheme.primary,
                   ),
                 ),
@@ -260,7 +263,7 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
                     playing: _playing,
                     buffering: _buffering,
                     fontSize: fontSize,
-                    color: scheme.onSurface,
+                    color: Colors.white,
                     accent: scheme.primary,
                   ),
                 ),
@@ -336,7 +339,7 @@ class _KtvSlot extends StatelessWidget {
                   : _KtvUpcomingLine(
                       text: current.text,
                       fontSize: fontSize,
-                      color: color.withValues(alpha: 0.85),
+                      color: color,
                       alignRight: alignRight,
                     ),
             ),
