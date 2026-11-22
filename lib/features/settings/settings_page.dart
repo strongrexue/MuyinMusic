@@ -641,17 +641,6 @@ class SettingsPage extends ConsumerWidget {
                               ),
                               const SizedBox(height: 4),
                               SettingsSwitchAction(
-                                key: const ValueKey('ktv-mode-setting'),
-                                icon: Icons.mic_rounded,
-                                title: '横屏 KTV 模式',
-                                subtitle: '横屏播放时全屏大字逐字歌词',
-                                value: settings.ktvModeEnabled,
-                                onChanged: (value) => ref
-                                    .read(settingsProvider.notifier)
-                                    .setKtvModeEnabled(value),
-                              ),
-                              const SizedBox(height: 4),
-                              SettingsSwitchAction(
                                 key: const ValueKey('car-display-setting'),
                                 icon: Icons.display_settings_rounded,
                                 title: '车机显示适配',

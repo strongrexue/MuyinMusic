@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'player_palette.dart';
 import 'player_control_color.dart';
 import 'player_layout.dart';
 import 'player_slider_thumb_shape.dart';
+import 'player_volume_card.dart';
 
 class TransportBar extends ConsumerStatefulWidget {
   const TransportBar({super.key, this.compact = false});
@@ -266,6 +268,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
                   ),
                   popupBuilder: (_) => const PlaybackQueuePopup(),
                 ),
+                _VolumeButton(color: ink),
               ],
             ),
           );
@@ -368,6 +371,42 @@ class _TransportBarState extends ConsumerState<TransportBar> {
     final minutes = safe.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = safe.inSeconds.remainder(60).toString().padLeft(2, '0');
     return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+}
+
+/// Volume entry for the compact (KTV) bar: opens the same anchored
+/// [PlayerVolumeCard] as the portrait action row's volume button, sized
+/// to this bar's 48dp button tier.
+class _VolumeButton extends StatefulWidget {
+  const _VolumeButton({required this.color});
+
+  final Color color;
+
+  @override
+  State<_VolumeButton> createState() => _VolumeButtonState();
+}
+
+class _VolumeButtonState extends State<_VolumeButton> {
+  final _targetKey = GlobalKey();
+
+  void _open() {
+    final box = _targetKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final origin = box.localToGlobal(Offset.zero);
+    unawaited(showVolumeCard(context, anchor: origin & box.size));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyedSubtree(
+      key: _targetKey,
+      child: IconButton(
+        tooltip: '音量',
+        onPressed: _open,
+        style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+        icon: Icon(Icons.volume_up_outlined, size: 26, color: widget.color),
+      ),
+    );
   }
 }
 
