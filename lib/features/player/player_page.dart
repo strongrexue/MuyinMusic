@@ -150,7 +150,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         key: const ValueKey('player-chrome'),
                         child: Column(
                           children: [
-                            ImmersiveFade(child: topChromeRow),
+                            topChromeRow,
                             Expanded(
                               child: showEmpty
                                   ? const _EmptyPlayer()
@@ -306,14 +306,12 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const ImmersiveFade(child: PlayerActionRow()),
-                  ImmersiveFade(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: playerWideTransportMaxWidth,
-                      ),
-                      child: const TransportBar(),
+                  const PlayerActionRow(),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: playerWideTransportMaxWidth,
                     ),
+                    child: const TransportBar(),
                   ),
                 ],
               ),
@@ -391,17 +389,13 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
               ),
             ),
           ),
-          const ImmersiveFade(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-              child: PlayerActionRow(),
-            ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
+            child: PlayerActionRow(),
           ),
-          const ImmersiveFade(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-              child: TransportBar(),
-            ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
+            child: TransportBar(),
           ),
         ],
       ),
