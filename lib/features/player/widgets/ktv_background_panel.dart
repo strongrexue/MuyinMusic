@@ -92,7 +92,13 @@ class KtvBackgroundPopup extends ConsumerWidget {
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    // 用扩展名白名单而非 FileType.image：各平台「图片」类别对 GIF /
+    // 动态 WebP 的过滤不稳定（选不到或返回静态副本），按扩展名放行才可靠。
+    // 渲染侧 Image+FileImage 原生支持动图多帧播放，无需特殊处理。
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    );
     if (result == null) return;
     try {
       final picked = result.files.single;

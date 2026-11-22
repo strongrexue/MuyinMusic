@@ -28,9 +28,12 @@ class TopChromeRow extends ConsumerWidget {
             (id: s.track?.id, title: s.track?.title, artist: s.track?.artist),
       ),
     );
+    final ktvModeEnabled = ref.watch(
+      settingsProvider.select((s) => s.ktvModeEnabled),
+    );
     // The KTV background picker only exists on the landscape KTV page.
     final showKtvBackgroundButton =
-        ref.watch(settingsProvider.select((s) => s.ktvModeEnabled)) &&
+        ktvModeEnabled &&
         MediaQuery.orientationOf(context) == Orientation.landscape;
     // The built-in KTV background is a bright photo at the top, so the
     // chrome switches to dark foreground colors while it is showing.
@@ -108,6 +111,14 @@ class TopChromeRow extends ConsumerWidget {
             ),
             const SizedBox(width: 4),
             _SleepTimerButton(darkForeground: darkForeground),
+            const SizedBox(width: 4),
+            _KtvModeButton(
+              enabled: ktvModeEnabled,
+              darkForeground: darkForeground,
+              onPressed: () => ref
+                  .read(settingsProvider.notifier)
+                  .setKtvModeEnabled(!ktvModeEnabled),
+            ),
             if (showKtvBackgroundButton) ...[
               const SizedBox(width: 4),
               _KtvBackgroundButton(darkForeground: darkForeground),
@@ -192,6 +203,32 @@ class _QualityEntry extends ConsumerWidget {
     return prism.PopupAnchor(
       targetBuilder: (open) => target(enabled ? open : null),
       popupBuilder: (_) => PlaybackQualityPopup(track: track),
+    );
+  }
+}
+
+/// Toggles landscape KTV mode; filled with the theme's active container
+/// color while the mode is on (same treatment as the running sleep timer).
+class _KtvModeButton extends StatelessWidget {
+  const _KtvModeButton({
+    required this.enabled,
+    required this.onPressed,
+    this.darkForeground = false,
+  });
+
+  final bool enabled;
+  final VoidCallback onPressed;
+  final bool darkForeground;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ChromeIconButton(
+      key: const ValueKey('player-ktv-mode-button'),
+      icon: Icons.screen_rotation_rounded,
+      tooltip: '横屏 KTV 模式',
+      onPressed: onPressed,
+      darkForeground: darkForeground,
+      active: enabled,
     );
   }
 }
@@ -286,15 +323,18 @@ class _ChromeIconButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.darkForeground = false,
+    this.active = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
   final bool darkForeground;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     // Prism's button, not Material's: a popup can only anchor to a
     // PressSurface or PressRegion, and only the prism button is one.
     return Tooltip(
@@ -304,11 +344,15 @@ class _ChromeIconButton extends StatelessWidget {
         style: prism.ButtonStyle.from(
           fixedSize: const Size.square(36),
           shape: const CircleBorder(),
-          backgroundColor: Colors.white.withValues(alpha: 0.28),
+          backgroundColor: active
+              ? scheme.primaryContainer
+              : Colors.white.withValues(alpha: 0.28),
         ),
         icon: Icon(
           icon,
-          color: darkForeground ? Colors.black87 : playerInk(context),
+          color: active
+              ? scheme.onPrimaryContainer
+              : (darkForeground ? Colors.black87 : playerInk(context)),
           size: 20,
         ),
       ),

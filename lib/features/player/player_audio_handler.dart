@@ -568,8 +568,33 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     );
   }
 
+  bool _iosNowPlayingSuppressed = false;
+
+  /// iOS「启用灵动岛」关闭时抑制 mediaItem 发布。
+  ///
+  /// audio_service 的 iOS 插件会凭 mediaItem 往 MPNowPlayingInfoCenter
+  /// 合并写入（album/时长/封面/速率），只关自研 now_playing 通道不够。
+  /// 这里只停信息发布：内部 [_currentMediaItem] 照常更新，playbackState
+  /// 照常广播，耳机线控不受影响；非 iOS 调用无效。
+  ///
+  /// 插件会缓存最后一次 mediaItem 且吞掉 null，所以进入抑制时先喂一个
+  /// 空白条目把它的缓存字段清掉，再恢复时重发当前条目。
+  void setIosNowPlayingSuppressed(bool suppressed) {
+    if (!Platform.isIOS || _iosNowPlayingSuppressed == suppressed) return;
+    _iosNowPlayingSuppressed = suppressed;
+    if (suppressed) {
+      if (mediaItem.value != null) {
+        mediaItem.add(const MediaItem(id: '', title: ''));
+      }
+    } else {
+      final item = _currentMediaItem;
+      if (item != null) mediaItem.add(item);
+    }
+  }
+
   void _publishMediaItem(MediaItem item) {
     _currentMediaItem = _withVivoPlaybackMode(item);
+    if (_iosNowPlayingSuppressed) return;
     mediaItem.add(_currentMediaItem);
   }
 

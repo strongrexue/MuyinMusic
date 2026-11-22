@@ -27,6 +27,7 @@ class KaraokeLineText extends StatefulWidget {
     required this.active,
     this.accent,
     this.textAlign = TextAlign.start,
+    this.unsungAlpha = _dimAlpha,
   });
 
   final KaraokeLyricLine line;
@@ -41,6 +42,11 @@ class KaraokeLineText extends StatefulWidget {
 
   /// 系统强调色，用于高亮当前正在唱的字；为 null 时不启用。
   final Color? accent;
+
+  /// 活动行未唱部分的 alpha（扫光 mask 的暗端与扫光前沿峰值的基底）。
+  /// 默认 [_dimAlpha]，未唱字明显变暗；传 1.0 时未唱字实色显示，
+  /// 只靠已唱字的强调色区分进度（横屏 KTV 式）。
+  final double unsungAlpha;
 
   @override
   KaraokeLineTextState createState() => KaraokeLineTextState();
@@ -259,6 +265,7 @@ class KaraokeLineTextState extends State<KaraokeLineText>
               active: widget.active,
               reduceMotion: _reduceMotion,
               accent: widget.accent,
+              unsungAlpha: widget.unsungAlpha,
             ),
           );
         },
@@ -422,6 +429,16 @@ class _LyricParagraph {
   final sweeps = <_TimedSweep>[];
   ui.Image? glyphAtlas;
   ui.Image? staticImage;
+
+  /// 段落块在可用宽度内的水平落点偏移。TextPainter 的段落宽度只等于
+  /// 最宽一行，textAlign 只决定各行在段落内部的相对落点；段落块本身
+  /// 居中/靠右要由绘制方平移（Text 组件是靠渲染盒拿到整宽才居中的，
+  /// 自绘时把段落原样画在 x=0 就会恒靠左）。
+  double get alignDx => switch (textAlign) {
+    TextAlign.center => math.max(0.0, (width - text.width) / 2),
+    TextAlign.end => math.max(0.0, width - text.width),
+    _ => 0.0,
+  };
   static const _staticImagePadding = 2;
   Offset get staticImageOrigin => Offset(
     -_staticImagePadding / pixelRatio,
@@ -618,6 +635,7 @@ class _KaraokePainter extends CustomPainter {
     required this.active,
     required this.reduceMotion,
     this.accent,
+    this.unsungAlpha = _dimAlpha,
   }) : super(repaint: repaint);
 
   final _LyricParagraph paragraph;
@@ -630,6 +648,9 @@ class _KaraokePainter extends CustomPainter {
 
   /// 系统强调色，用于高亮当前正在唱的字；为 null 时不启用。
   final Color? accent;
+
+  /// 未唱部分的 alpha；1.0 时扫光 mask 均匀不透明、peak 恒为 1.0。
+  final double unsungAlpha;
   final _imagePaint = Paint()..filterQuality = FilterQuality.low;
   late final _inkFilter = ColorFilter.mode(ink, BlendMode.srcIn);
   ColorFilter? get _accentFilter => accent == null
@@ -643,7 +664,7 @@ class _KaraokePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final p = paragraph;
     final ms = position.value;
-    final peak = _dimAlpha + (1 - _dimAlpha) * emphasis.value;
+    final peak = unsungAlpha + (1 - unsungAlpha) * emphasis.value;
     final tint = tintMask ? _inkFilter : null;
     if (!active) {
       final dy = !reduceMotion && ms < p.line.startMs ? p.lift : 0.0;
@@ -653,7 +674,10 @@ class _KaraokePainter extends CustomPainter {
           ..color = Colors.white.withValues(alpha: peak)
           ..colorFilter = tint;
         canvas.save();
-        canvas.translate(p.staticImageOrigin.dx, p.staticImageOrigin.dy + dy);
+        canvas.translate(
+          p.staticImageOrigin.dx + p.alignDx,
+          p.staticImageOrigin.dy + dy,
+        );
         canvas.scale(1 / p.pixelRatio);
         canvas.drawImage(image, Offset.zero, _imagePaint);
         canvas.restore();
@@ -665,10 +689,14 @@ class _KaraokePainter extends CustomPainter {
           ..color = Colors.white.withValues(alpha: peak)
           ..colorFilter = tint,
       );
-      p.text.paint(canvas, Offset(0, dy));
+      p.text.paint(canvas, Offset(p.alignDx, dy));
       canvas.restore();
       return;
     }
+    // 活动行：字形图集、扫光与强调色都以段落坐标绘制，整体按 alignDx
+    // 平移即可，扫光的累加坐标是段落内相对量，不受平移影响。
+    canvas.save();
+    canvas.translate(p.alignDx, 0);
     final front = p.frontAt(ms);
     // KTV 式强调色：所有已唱字（含正在唱的字）用系统强调色高亮。
     // 原生彩色 emoji 行不是白色 mask，跳过以免破坏其原生颜色。
@@ -720,7 +748,7 @@ class _KaraokePainter extends CustomPainter {
           ..shader =
               ui.Gradient.linear(Offset(x, 0), Offset(x + p.feather, 0), [
                 Colors.white.withValues(alpha: peak),
-                Colors.white.withValues(alpha: _dimAlpha),
+                Colors.white.withValues(alpha: unsungAlpha),
               ]),
       );
       canvas.restore();
@@ -771,6 +799,7 @@ class _KaraokePainter extends CustomPainter {
         }
       }
     }
+    canvas.restore();
   }
 
   @override
@@ -780,6 +809,7 @@ class _KaraokePainter extends CustomPainter {
       emphasis != oldDelegate.emphasis ||
       ink != oldDelegate.ink ||
       accent != oldDelegate.accent ||
+      unsungAlpha != oldDelegate.unsungAlpha ||
       tintMask != oldDelegate.tintMask ||
       active != oldDelegate.active ||
       reduceMotion != oldDelegate.reduceMotion;
