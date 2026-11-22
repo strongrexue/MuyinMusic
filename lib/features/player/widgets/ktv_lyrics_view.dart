@@ -453,6 +453,9 @@ class _KtvActiveLine extends StatelessWidget {
                   buffering: buffering,
                   active: true,
                   accent: accent,
+                  // KTV 当前行整行实色：未唱字不压暗，只靠已唱字
+                  // 变强调色区分进度。
+                  unsungAlpha: 1.0,
                 ),
               ),
             ),

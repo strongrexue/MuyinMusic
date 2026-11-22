@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/app_logger.dart';
+import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import 'lyric_frame.dart';
 import 'player_audio_handler.dart';
@@ -42,6 +43,14 @@ final liveActivitySyncProvider = Provider<void>((ref) {
   ref.listen(likedSongsProvider, (_, _) {
     service.refreshNowPlaying();
   });
+  // 「启用灵动岛」开关：关闭即清卡停发，打开即按当前状态重推。
+  ref.listen<bool>(
+    settingsProvider.select((s) => s.iosDynamicIslandEnabled),
+    (_, enabled) {
+      unawaited(service.setDynamicIslandEnabled(enabled));
+    },
+    fireImmediately: true,
+  );
 });
 
 class LiveActivityService {
@@ -77,6 +86,33 @@ class LiveActivityService {
   /// 喜欢状态变化后主动重推一次系统卡，让五角星实心/空心立即同步。
   void refreshNowPlaying() {
     unawaited(_pushNowPlaying());
+  }
+
+  bool _dynamicIslandEnabled = true;
+
+  /// 「启用灵动岛」开关变化（设置页切换 / 启动时同步存量值）。
+  ///
+  /// 关闭：两条发布路径一起停（自研通道在这里门控，audio_service 凭
+  /// mediaItem 的写入在 handler 侧抑制），并立即清掉现有系统卡；
+  /// 打开：清掉去重签名，按当前播放状态立即重推一次，不等切歌。
+  Future<void> setDynamicIslandEnabled(bool enabled) async {
+    if (!Platform.isIOS || _dynamicIslandEnabled == enabled) return;
+    _dynamicIslandEnabled = enabled;
+    _ref
+        .read(playerAudioHandlerProvider)
+        .setIosNowPlayingSuppressed(!enabled);
+    _lastNowPlayingKey = null;
+    if (enabled) {
+      await _pushNowPlaying();
+      return;
+    }
+    try {
+      await _nowPlayingChannel.invokeMethod<bool>('clear');
+    } on MissingPluginException {
+      // 老版本原生没有 clear 方法，忽略。
+    } catch (error) {
+      await AppLogger.write('live-activity', '清除播放卡片失败: $error');
+    }
   }
 
   /// 检查系统的实时活动开关。
@@ -352,6 +388,8 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   /// 与 Live Activity 可用性完全解耦：即使 ActivityKit 不可用（巨魔/低版本 iOS），
   /// 只要写了 nowPlayingInfo，系统就会画出标准播放卡片。
   Future<void> _pushNowPlaying() async {
+    // 「启用灵动岛」关闭时停发系统卡（灵动岛与锁屏是同一张卡）。
+    if (!_dynamicIslandEnabled) return;
     final payload = _payload();
     if (payload == null) return;
     // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，

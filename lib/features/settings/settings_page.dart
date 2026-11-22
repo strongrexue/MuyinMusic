@@ -302,6 +302,19 @@ class SettingsPage extends ConsumerWidget {
                                     .read(settingsProvider.notifier)
                                     .setAllowMixWithOthers(value),
                               ),
+                              if (Platform.isIOS)
+                                SettingsSwitchAction(
+                                  key: const ValueKey(
+                                    'ios-dynamic-island-setting',
+                                  ),
+                                  icon: Icons.phone_iphone_rounded,
+                                  title: '启用灵动岛',
+                                  subtitle: '关闭后不再显示灵动岛与锁屏播放卡片',
+                                  value: settings.iosDynamicIslandEnabled,
+                                  onChanged: (value) => ref
+                                      .read(settingsProvider.notifier)
+                                      .setIosDynamicIslandEnabled(value),
+                                ),
                               SettingsSwitchAction(
                                 key: const ValueKey('bluetooth-lyric-setting'),
                                 icon: Icons.bluetooth_audio_rounded,

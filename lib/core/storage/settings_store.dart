@@ -22,6 +22,7 @@ const String _kDownloadDirKey = 'download_dir';
 const String _kDownloadFileNameFormatKey = 'download_file_name_format';
 const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
 const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
+const String _kIosDynamicIslandEnabledKey = 'ios_dynamic_island_enabled';
 const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
 const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
 const String _kKtvBackgroundItemsKey = 'player_ktv_background_items';
@@ -232,6 +233,7 @@ class AppSettings {
     required this.batchDownloadQuality,
     required this.showMiniLyrics,
     this.grooveShiftEnabled = false,
+    this.iosDynamicIslandEnabled = true,
     required this.allowMixWithOthers,
     this.playerVolume = 1.0,
     required this.bluetoothLyricEnabled,
@@ -320,6 +322,11 @@ class AppSettings {
   /// Whether playback should avoid taking exclusive audio focus so other apps
   /// can continue playing at the same time.
   final bool grooveShiftEnabled;
+
+  /// iOS 是否发布系统播放卡片（灵动岛与锁屏是同一张系统卡）。关闭后
+  /// 自研通道与 audio_service 两条发布路径都停发，规避部分侧载机型
+  /// 点卡误跳签名工具的问题。非 iOS 平台无此设置项。
+  final bool iosDynamicIslandEnabled;
   final bool allowMixWithOthers;
 
   /// Playback gain in 0..1, applied to the BASS stream. Remembered so a level
@@ -373,6 +380,7 @@ class AppSettings {
     OnlinePlaybackQuality? batchDownloadQuality,
     bool? showMiniLyrics,
     bool? grooveShiftEnabled,
+    bool? iosDynamicIslandEnabled,
     bool? allowMixWithOthers,
     double? playerVolume,
     bool? bluetoothLyricEnabled,
@@ -434,6 +442,8 @@ class AppSettings {
     batchDownloadQuality: batchDownloadQuality ?? this.batchDownloadQuality,
     showMiniLyrics: showMiniLyrics ?? this.showMiniLyrics,
     grooveShiftEnabled: grooveShiftEnabled ?? this.grooveShiftEnabled,
+    iosDynamicIslandEnabled:
+        iosDynamicIslandEnabled ?? this.iosDynamicIslandEnabled,
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
     playerVolume: playerVolume ?? this.playerVolume,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
@@ -607,6 +617,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       showMiniLyrics: _prefs.getBool(_kShowMiniLyricsKey) ?? true,
       grooveShiftEnabled: _prefs.getBool(_kGrooveShiftEnabledKey) ?? false,
       allowMixWithOthers: readAllowMixWithOthersPreference(_prefs),
+      iosDynamicIslandEnabled:
+          _prefs.getBool(_kIosDynamicIslandEnabledKey) ?? true,
       playerVolume: (_prefs.getDouble(_kPlayerVolumeKey) ?? 1.0).clamp(
         0.0,
         1.0,
@@ -662,6 +674,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> setKtvModeEnabled(bool value) async {
     await _prefs.setBool(_kKtvModeEnabledKey, value);
     state = state.copyWith(ktvModeEnabled: value);
+  }
+
+  Future<void> setIosDynamicIslandEnabled(bool value) async {
+    await _prefs.setBool(_kIosDynamicIslandEnabledKey, value);
+    state = state.copyWith(iosDynamicIslandEnabled: value);
   }
 
   Future<void> setLocalMusicDir(String value) => setLocalMusicDirs([value]);
@@ -1022,6 +1039,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     'liquidGlassMode': state.liquidGlassMode.code,
     'playlistArtworkColorsEnabled': state.playlistArtworkColorsEnabled,
     'flowingLightEnabled': state.flowingLightEnabled,
+    'iosDynamicIslandEnabled': state.iosDynamicIslandEnabled,
     'ktvBackgroundStyle': state.ktvBackgroundStyle.code,
     'ktvBackgroundItems': state.ktvBackgroundItems
         .map((item) => item.toJson())
@@ -1065,6 +1083,17 @@ class SettingsNotifier extends Notifier<AppSettings> {
       syncedFlowingLight = rawFlowingLight;
     } else {
       throw const FormatException('云端流光设置无效');
+    }
+
+    // iosDynamicIslandEnabled 同样是后加字段，缺失时保留本机开关。
+    final rawIosDynamicIsland = json['iosDynamicIslandEnabled'];
+    final bool? syncedIosDynamicIsland;
+    if (rawIosDynamicIsland == null) {
+      syncedIosDynamicIsland = null;
+    } else if (rawIosDynamicIsland is bool) {
+      syncedIosDynamicIsland = rawIosDynamicIsland;
+    } else {
+      throw const FormatException('云端灵动岛设置无效');
     }
 
     final rawLyricBlurDisabled = json['lyricViewBlurDisabled'];
@@ -1183,6 +1212,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       liquidGlassMode: syncedGlass,
       playlistArtworkColorsEnabled: syncedPlaylistColors,
       flowingLightEnabled: syncedFlowingLight,
+      iosDynamicIslandEnabled: syncedIosDynamicIsland,
       ktvBackgroundStyle: syncedKtvBackground,
       ktvBackgroundItems: syncedKtvItems,
       ktvBackgroundSelectedId: syncedKtvSelectedId,
@@ -1203,6 +1233,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     }
     if (syncedFlowingLight != null) {
       await _prefs.setBool(_kFlowingLightEnabledKey, syncedFlowingLight);
+    }
+    if (syncedIosDynamicIsland != null) {
+      await _prefs.setBool(
+        _kIosDynamicIslandEnabledKey,
+        syncedIosDynamicIsland,
+      );
     }
     if (rawLyricBlurDisabled != null) {
       await _prefs.setBool(_kLyricViewBlurDisabledKey, rawLyricBlurDisabled);

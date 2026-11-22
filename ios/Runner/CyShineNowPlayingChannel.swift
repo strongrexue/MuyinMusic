@@ -20,6 +20,15 @@ final class CyShineNowPlayingChannel: NSObject {
     commandChannel = channel
     setupRemoteCommands()
     channel.setMethodCallHandler { call, result in
+      // 「启用灵动岛」关闭时 Dart 调 clear：整卡清掉并标记停止，
+      // 否则已画出的灵动岛/锁屏卡会一直残留。
+      if call.method == "clear" {
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = nil
+        center.playbackState = .stopped
+        result(true)
+        return
+      }
       guard call.method == "publish",
             let a = call.arguments as? [String: Any],
             let title = a["title"] as? String, !title.isEmpty else {
