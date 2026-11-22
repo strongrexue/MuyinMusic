@@ -20,7 +20,11 @@ import 'package:cy_shine_music/features/player/widgets/album_cluster.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_line_text.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_lyrics_view.dart';
 import 'package:cy_shine_music/features/player/widgets/ktv_lyrics_view.dart';
+import 'package:cy_shine_music/features/player/widgets/lyric_line.dart';
 import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
+import 'package:cy_shine_music/features/player/widgets/playback_queue_sheet.dart';
+import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
+import 'package:cy_shine_music/features/player/widgets/transport_bar.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
 import 'package:cy_shine_music/features/shell/shell_route_utils.dart';
 import 'package:cy_shine_music/router.dart';
@@ -1084,21 +1088,75 @@ void main() {
       find.byKey(const ValueKey('player-action-volume')),
       findsOneWidget,
     );
-
-    // The cover fits its column completely at phone-landscape height:
-    // no part of it is scrolled or clipped out of the album area.
     final albumRect = tester.getRect(
       find.byKey(const ValueKey('player-phone-landscape-album')),
     );
     final coverRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
+
+    // The bottom stack is merged into two lines: a slim progress line
+    // pressed down against the body, then one control row with the
+    // action buttons split around the transport cluster. There is no
+    // standalone full-width action row in this layout.
+    expect(find.byType(PlayerActionRow), findsNWidgets(2));
+    for (final key in [
+      'player-action-lyric-settings',
+      'player-action-playlist',
+      'player-action-download',
+      'player-action-like',
+      'player-action-volume',
+    ]) {
+      expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
+    }
+    final progressRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-progress')),
+    );
+    final controlsRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-controls')),
+    );
+    final layoutRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+    );
+    // The progress line sits right below the body (6dp gap) and above
+    // the control row; the whole merged stack is far slimmer than the
+    // old action row + transport bar combination.
+    expect(progressRect.top - albumRect.bottom, closeTo(6, 1));
+    expect(progressRect.bottom, lessThanOrEqualTo(controlsRect.top));
+    expect(controlsRect.height - progressRect.height, greaterThan(0));
+    expect(
+      controlsRect.bottom - progressRect.top,
+      lessThan(110),
+    );
+    expect(layoutRect.bottom - controlsRect.bottom, closeTo(12, 1));
+    // Transport cluster lives inside the merged control row.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('player-phone-landscape-controls')),
+        matching: find.byType(TransportBar),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('上一首'), findsOneWidget);
+    expect(find.byTooltip('下一首'), findsOneWidget);
+    expect(find.byType(PlaybackQueueButton), findsOneWidget);
+    // The side clusters use the compact glyph size.
+    final volumeIcon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(const ValueKey('player-action-volume')),
+        matching: find.byType(Icon),
+      ),
+    );
+    expect(volumeIcon.size, 22);
+
+    // The cover fits its column completely at phone-landscape height:
+    // no part of it is scrolled or clipped out of the album area.
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
-    // Without the album-name line the round cover uses the freed
-    // height: 0.8 of the 147dp album area at this size.
-    expect(coverRect.width, closeTo(117.6, 0.6));
-    expect(coverRect.height, closeTo(117.6, 0.6));
+    // With the merged bottom stack the album area is 228dp tall here
+    // and the round cover takes 0.8 of it.
+    expect(coverRect.width, closeTo(182.4, 0.6));
+    expect(coverRect.height, closeTo(182.4, 0.6));
     // The album-name line is not rendered in this layout.
     expect(find.text('横屏专辑'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -1134,8 +1192,8 @@ void main() {
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
     // Square covers scale by 1.12 over the round size.
-    expect(coverRect.width, closeTo(131.8, 0.6));
-    expect(coverRect.height, closeTo(131.8, 0.6));
+    expect(coverRect.width, closeTo(204.2, 0.6));
+    expect(coverRect.height, closeTo(204.2, 0.6));
     expect(find.text('横屏方专辑'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -1194,6 +1252,227 @@ void main() {
       find.byKey(const ValueKey('player-compact-pager')),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape lyrics keep neighbouring lines readable', (
+    tester,
+  ) async {
+    // Active line is index 6 (18s into 3s-spaced lines).
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'wy:landscape-lyrics-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏歌词歌曲',
+        artist: '横屏歌手',
+        album: '横屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/landscape-lyrics.flac',
+      ),
+      lyrics: _timedLyrics(14),
+      position: const Duration(milliseconds: 18000),
+    );
+
+    // The landscape panel carries its own scoped metrics.
+    final view = tester.widget<KaraokeLyricsView>(
+      find.byType(KaraokeLyricsView),
+    );
+    expect(view.edgeFadeExtent, 10);
+    expect(view.scrollAnchor, 0.5);
+    expect(view.lineVerticalPadding, 4);
+    expect(view.alignModeOverride, LyricAlignMode.left);
+
+    final panelRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-lyrics')),
+    );
+    Rect tileRect(String text) => tester.getRect(
+      find
+          .ancestor(
+            of: find.text(text),
+            matching: find.byType(LyricLineTile),
+          )
+          .first,
+    );
+    // The active line and two lines on each side are fully inside the
+    // panel: at least five lines are readable at once.
+    var fullyVisible = 0;
+    for (final element in find.byType(LyricLineTile).evaluate()) {
+      final rect = tester.getRect(find.byWidget(element.widget));
+      if (rect.top >= panelRect.top - 0.5 &&
+          rect.bottom <= panelRect.bottom + 0.5) {
+        fullyVisible++;
+      }
+    }
+    expect(fullyVisible, greaterThanOrEqualTo(5));
+    for (final index in [4, 5, 6, 7, 8]) {
+      final rect = tileRect('第${index + 1}句歌词用于测试平稳切换');
+      expect(rect.top, greaterThanOrEqualTo(panelRect.top - 0.5));
+      expect(rect.bottom, lessThanOrEqualTo(panelRect.bottom + 0.5));
+    }
+    // Tightened rows: one line's extent is ~44dp, not the portrait ~58dp.
+    final activeRect = tileRect('第7句歌词用于测试平稳切换');
+    expect(activeRect.height, closeTo(44, 1.5));
+
+    // A non-active line keeps the portrait page's text alpha (0.3 for
+    // word-timing-less lines): the landscape panel does not fade its
+    // neighbours out beyond what the portrait page does.
+    double lineAlpha() {
+      final text = tester.widget<Text>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('lyric-focus-scale-15000')),
+              matching: find.byType(Text),
+            )
+            .first,
+      );
+      return text.style!.color!.a;
+    }
+
+    expect(lineAlpha(), closeTo(0.3, 0.01));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape lyrics follow their own alignment setting', (
+    tester,
+  ) async {
+    TextAlign? landscapeLineAlign() {
+      final text = tester.widget<Text>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('lyric-focus-scale-15000')),
+              matching: find.byType(Text),
+            )
+            .first,
+      );
+      return text.textAlign;
+    }
+
+    Future<void> pumpLandscape() => _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'wy:landscape-align-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏对齐歌曲',
+        artist: '横屏歌手',
+        album: '横屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/landscape-align.flac',
+      ),
+      lyrics: _timedLyrics(14),
+      position: const Duration(milliseconds: 18000),
+    );
+
+    // Portrait setting centred, landscape setting left: the landscape
+    // panel follows its own key and stays left-aligned.
+    SharedPreferences.setMockInitialValues({
+      'lyric_align_mode': 'center',
+      'lyric_align_mode_landscape': 'left',
+    });
+    await pumpLandscape();
+    expect(
+      tester
+          .widget<KaraokeLyricsView>(find.byType(KaraokeLyricsView))
+          .alignModeOverride,
+      LyricAlignMode.left,
+    );
+    expect(landscapeLineAlign(), TextAlign.start);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape lyrics centre on their own setting', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'lyric_align_mode_landscape': 'center',
+    });
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'wy:landscape-align-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏对齐歌曲',
+        artist: '横屏歌手',
+        album: '横屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/landscape-align.flac',
+      ),
+      lyrics: _timedLyrics(14),
+      position: const Duration(milliseconds: 18000),
+    );
+    expect(
+      tester
+          .widget<KaraokeLyricsView>(find.byType(KaraokeLyricsView))
+          .alignModeOverride,
+      LyricAlignMode.center,
+    );
+    final text = tester.widget<Text>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('lyric-focus-scale-15000')),
+            matching: find.byType(Text),
+          )
+          .first,
+    );
+    expect(text.textAlign, TextAlign.center);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait lyrics ignore the landscape alignment setting', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'lyric_align_mode_landscape': 'center',
+    });
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:portrait-align-song',
+        kind: PlayerTrackKind.remote,
+        title: '竖屏对齐歌曲',
+        artist: '竖屏歌手',
+        album: '竖屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/portrait-align.flac',
+      ),
+      lyrics: _timedLyrics(14),
+      position: const Duration(milliseconds: 18000),
+    );
+    await tester.drag(
+      find.byKey(const ValueKey('player-compact-pager')),
+      const Offset(-360, 0),
+    );
+    await _pumpUi(tester);
+
+    // The portrait page reads only its own key (unset here, so the
+    // default left alignment applies) even though the landscape key
+    // is centred.
+    expect(
+      tester
+          .widget<KaraokeLyricsView>(find.byType(KaraokeLyricsView))
+          .alignModeOverride,
+      isNull,
+    );
+    final text = tester.widget<Text>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('lyric-focus-scale-15000')),
+            matching: find.byType(Text),
+          )
+          .first,
+    );
+    expect(text.textAlign, TextAlign.start);
+    // Alpha parity with the landscape panel: a non-active,
+    // word-timing-less line renders at the same 0.3 alpha here.
+    expect(text.style!.color!.a, closeTo(0.3, 0.01));
     expect(tester.takeException(), isNull);
   });
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_motion.dart';
 import '../player_controller.dart';
 import 'karaoke_lyrics_view.dart';
@@ -13,10 +14,25 @@ class LyricsPanel extends ConsumerStatefulWidget {
     super.key,
     this.edgeFadeEnabled = true,
     this.horizontalPadding = playerContentInset,
+    this.edgeFadeExtent,
+    this.scrollAnchor,
+    this.lineVerticalPadding,
+    this.listPadding,
+    this.alignMode,
   });
 
   final bool edgeFadeEnabled;
   final double horizontalPadding;
+
+  /// Optional panel-scoped overrides forwarded to [KaraokeLyricsView].
+  /// All null (the default, used by the portrait page and the
+  /// car/tablet layout) keeps the shared lyrics-page behaviour; only
+  /// the phone-landscape layout passes its own values.
+  final double? edgeFadeExtent;
+  final double? scrollAnchor;
+  final double? lineVerticalPadding;
+  final EdgeInsets? listPadding;
+  final LyricAlignMode? alignMode;
 
   @override
   ConsumerState<LyricsPanel> createState() => _LyricsPanelState();
@@ -77,6 +93,11 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
               showTranslation: hasExtraLyrics && _showTranslation,
               edgeFadeEnabled: widget.edgeFadeEnabled,
               horizontalPadding: widget.horizontalPadding,
+              edgeFadeExtent: widget.edgeFadeExtent,
+              scrollAnchor: widget.scrollAnchor,
+              lineVerticalPadding: widget.lineVerticalPadding,
+              listPadding: widget.listPadding,
+              alignModeOverride: widget.alignMode,
             ),
           ),
           if (hasExtraLyrics)

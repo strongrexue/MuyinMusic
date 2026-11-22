@@ -30,10 +30,31 @@ const double playerActionRowExtent = 48;
 const double _playerActionTargetSize = 48;
 const double _playerActionGlyphSize = 26;
 
-/// A single row of round actions above the transport bar: lyric settings, the
-/// comment placeholder, add to playlist, download and more.
+enum _ActionSection { all, leading, trailing }
+
+/// A single row of round actions above the transport bar: lyric settings,
+/// add to playlist, download, like and volume.
+///
+/// The phone-landscape layout uses the [PlayerActionRow.leading] /
+/// [PlayerActionRow.trailing] sections instead: the same buttons at a
+/// smaller size, split around the merged transport cluster. Every other
+/// layout uses the default full row, unchanged.
 class PlayerActionRow extends ConsumerWidget {
-  const PlayerActionRow({super.key});
+  const PlayerActionRow({super.key}) : compact = false, _section = _ActionSection.all;
+
+  /// The first three actions (lyric settings, add to playlist,
+  /// download) at the compact size.
+  const PlayerActionRow.leading({super.key})
+    : compact = true,
+      _section = _ActionSection.leading;
+
+  /// The last two actions (like, volume) at the compact size.
+  const PlayerActionRow.trailing({super.key})
+    : compact = true,
+      _section = _ActionSection.trailing;
+
+  final bool compact;
+  final _ActionSection _section;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -79,97 +100,113 @@ class PlayerActionRow extends ConsumerWidget {
           ),
         );
 
-    return SizedBox(
-      height: playerActionRowExtent,
-      child: Center(
-        child: ConstrainedBox(
-          // Matches the transport bar under it, so the outer buttons line up.
-          constraints: const BoxConstraints(
-            maxWidth: playerWideTransportMaxWidth,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              prism.PopupAnchor(
-                targetBuilder: (open) => _PlayerActionButton(
-                  key: const ValueKey('player-action-lyric-settings'),
-                  tooltip: '歌词界面设置',
-                  glyph: MusicActionGlyphs.lyrics,
-                  onPressed: open,
-                ),
-                popupBuilder: (_) => const LyricSettingsPopup(),
+    final targetSize = compact ? 40.0 : _playerActionTargetSize;
+    final glyphSize = compact ? 22.0 : _playerActionGlyphSize;
+    final actions = <Widget>[
+      prism.PopupAnchor(
+        targetBuilder: (open) => _PlayerActionButton(
+          key: const ValueKey('player-action-lyric-settings'),
+          tooltip: '歌词界面设置',
+          glyph: MusicActionGlyphs.lyrics,
+          onPressed: open,
+          targetSize: targetSize,
+          glyphSize: glyphSize,
+        ),
+        popupBuilder: (_) => const LyricSettingsPopup(),
+      ),
+      prism.PopupAnchor(
+        targetBuilder: (open) => _PlayerActionButton(
+          key: const ValueKey('player-action-playlist'),
+          tooltip: canUseMusic ? '添加到歌单' : disabledReason,
+          glyph: MusicActionGlyphs.playlistAdd,
+          onPressed: canUseMusic ? open : null,
+          targetSize: targetSize,
+          glyphSize: glyphSize,
+        ),
+        popupBuilder: (_) => PlaylistAddPopup(
+          onPicked: (playlist) {
+            final target = music;
+            // The popup's own context dies with its route, so the
+            // toast is reported against the action row's context,
+            // which resolves to the app-wide toast overlay.
+            if (target != null) {
+              unawaited(
+                _addMusicToPlaylist(context, ref, target, playlist),
+              );
+            }
+          },
+        ),
+      ),
+      _DownloadActionButton(
+        key: const ValueKey('player-action-download'),
+        task: task,
+        downloaded: downloaded,
+        enabled: canUseMusic,
+        disabledReason: disabledReason,
+        targetSize: targetSize,
+        glyphSize: glyphSize,
+        onPressed: !canUseMusic
+            ? null
+            : () => unawaited(
+                showQualityPickerSheet(context, music, asSheet: true),
               ),
-              prism.PopupAnchor(
-                targetBuilder: (open) => _PlayerActionButton(
-                  key: const ValueKey('player-action-playlist'),
-                  tooltip: canUseMusic ? '添加到歌单' : disabledReason,
-                  glyph: MusicActionGlyphs.playlistAdd,
-                  onPressed: canUseMusic ? open : null,
-                ),
-                popupBuilder: (_) => PlaylistAddPopup(
-                  onPicked: (playlist) {
-                    final target = music;
-                    // The popup's own context dies with its route, so the
-                    // toast is reported against the action row's context,
-                    // which resolves to the app-wide toast overlay.
-                    if (target != null) {
-                      unawaited(
-                        _addMusicToPlaylist(context, ref, target, playlist),
-                      );
-                    }
-                  },
-                ),
-              ),
-              _DownloadActionButton(
-                key: const ValueKey('player-action-download'),
-                task: task,
-                downloaded: downloaded,
-                enabled: canUseMusic,
-                disabledReason: disabledReason,
-                onPressed: !canUseMusic
-                    ? null
-                    : () => unawaited(
-                        showQualityPickerSheet(context, music, asSheet: true),
-                      ),
-              ),
-              KeyedSubtree(
-                key: const ValueKey('player-action-like'),
-                child: prism.IconButton(
-                  tooltip: liked ? '取消喜欢' : '喜欢',
-                  onPressed: likeEntry == null
-                      ? null
-                      : () {
-                          final nowLiked = ref
-                              .read(likedSongsProvider.notifier)
-                              .toggle(likeEntry);
-                          showAppToast(
-                            context,
-                            nowLiked ? '已加入我的喜欢' : '已取消喜欢',
-                            type: AppToastType.success,
-                          );
-                        },
-                  style: prism.ButtonStyle.from(
-                    fixedSize: const Size.square(_playerActionTargetSize),
-                  ),
-                  icon: Icon(
-                    liked
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    size: _playerActionGlyphSize,
-                    color: likeEntry == null
-                        ? playerMuted(context).withValues(alpha: 0.45)
-                        : liked
-                        ? const Color(0xFFFF6382)
-                        : playerInk(context),
-                  ),
-                ),
-              ),
-              const _VolumeActionButton(),
-            ],
+      ),
+      KeyedSubtree(
+        key: const ValueKey('player-action-like'),
+        child: prism.IconButton(
+          tooltip: liked ? '取消喜欢' : '喜欢',
+          onPressed: likeEntry == null
+              ? null
+              : () {
+                  final nowLiked = ref
+                      .read(likedSongsProvider.notifier)
+                      .toggle(likeEntry);
+                  showAppToast(
+                    context,
+                    nowLiked ? '已加入我的喜欢' : '已取消喜欢',
+                    type: AppToastType.success,
+                  );
+                },
+          style: prism.ButtonStyle.from(fixedSize: Size.square(targetSize)),
+          icon: Icon(
+            liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            size: glyphSize,
+            color: likeEntry == null
+                ? playerMuted(context).withValues(alpha: 0.45)
+                : liked
+                ? const Color(0xFFFF6382)
+                : playerInk(context),
           ),
         ),
       ),
-    );
+      _VolumeActionButton(targetSize: targetSize, glyphSize: glyphSize),
+    ];
+
+    return switch (_section) {
+      _ActionSection.all => SizedBox(
+        height: playerActionRowExtent,
+        child: Center(
+          child: ConstrainedBox(
+            // Matches the transport bar under it, so the outer buttons line up.
+            constraints: const BoxConstraints(
+              maxWidth: playerWideTransportMaxWidth,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: actions,
+            ),
+          ),
+        ),
+      ),
+      _ActionSection.leading => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: actions.sublist(0, 3),
+      ),
+      _ActionSection.trailing => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: actions.sublist(3),
+      ),
+    };
   }
 }
 
@@ -204,7 +241,13 @@ Future<void> _addMusicToPlaylist(
 }
 
 class _VolumeActionButton extends StatefulWidget {
-  const _VolumeActionButton();
+  const _VolumeActionButton({
+    this.targetSize = _playerActionTargetSize,
+    this.glyphSize = _playerActionGlyphSize,
+  });
+
+  final double targetSize;
+  final double glyphSize;
 
   @override
   State<_VolumeActionButton> createState() => _VolumeActionButtonState();
@@ -230,11 +273,11 @@ class _VolumeActionButtonState extends State<_VolumeActionButton> {
           tooltip: '音量',
           onPressed: _open,
           style: prism.ButtonStyle.from(
-            fixedSize: const Size.square(_playerActionTargetSize),
+            fixedSize: Size.square(widget.targetSize),
           ),
           icon: Icon(
             Icons.volume_up_outlined,
-            size: _playerActionGlyphSize,
+            size: widget.glyphSize,
             color: playerInk(context),
           ),
         ),
@@ -251,6 +294,8 @@ class _DownloadActionButton extends StatelessWidget {
     required this.enabled,
     required this.disabledReason,
     required this.onPressed,
+    this.targetSize = _playerActionTargetSize,
+    this.glyphSize = _playerActionGlyphSize,
   });
 
   final DownloadTask? task;
@@ -258,6 +303,8 @@ class _DownloadActionButton extends StatelessWidget {
   final bool enabled;
   final String disabledReason;
   final VoidCallback? onPressed;
+  final double targetSize;
+  final double glyphSize;
 
   @override
   Widget build(BuildContext context) {
@@ -278,8 +325,8 @@ class _DownloadActionButton extends StatelessWidget {
     if ((busy || paused) && task != null) {
       return DownloadTaskChip(
         task: task!,
-        dimension: _playerActionTargetSize,
-        progressSize: _playerActionGlyphSize,
+        dimension: targetSize,
+        progressSize: glyphSize,
         color: playerInk(context),
       );
     }
@@ -288,6 +335,8 @@ class _DownloadActionButton extends StatelessWidget {
       glyph: done ? MusicActionGlyphs.downloaded : MusicActionGlyphs.download,
       onPressed: done ? null : onPressed,
       forceDisabledLook: done,
+      targetSize: targetSize,
+      glyphSize: glyphSize,
     );
   }
 }
@@ -299,12 +348,16 @@ class _PlayerActionButton extends StatelessWidget {
     required this.glyph,
     required this.onPressed,
     this.forceDisabledLook = false,
+    this.targetSize = _playerActionTargetSize,
+    this.glyphSize = _playerActionGlyphSize,
   });
 
   final String tooltip;
   final prism_glyph.Glyph glyph;
   final VoidCallback? onPressed;
   final bool forceDisabledLook;
+  final double targetSize;
+  final double glyphSize;
 
   @override
   Widget build(BuildContext context) {
@@ -316,12 +369,12 @@ class _PlayerActionButton extends StatelessWidget {
       tooltip: tooltip,
       onPressed: onPressed,
       style: prism.ButtonStyle.from(
-        fixedSize: const Size.square(_playerActionTargetSize),
-        iconSize: _playerActionGlyphSize,
+        fixedSize: Size.square(targetSize),
+        iconSize: glyphSize,
       ),
       icon: prism_glyph.GlyphIcon(
         glyph,
-        size: _playerActionGlyphSize,
+        size: glyphSize,
         color: color,
       ),
     );

@@ -312,6 +312,9 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((settings) => settings.ktvModeEnabled),
     );
+    final landscapeLyricAlignMode = ref.watch(
+      settingsProvider.select((settings) => settings.lyricAlignModeLandscape),
+    );
     final mediaSize = MediaQuery.sizeOf(context);
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
       return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
@@ -367,12 +370,15 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     }
 
     // Phone landscape (not KTV, not car/tablet): a split layout of its
-    // own — cover left, lyrics right, and the action row + transport
-    // spanning the full width below instead of stacking inside the
-    // cover column, so the cover sizes against the full body height.
-    // The imported portrait background never applies here: the backdrop
-    // skips it in landscape and AlbumPage(wide: true) always shows the
-    // cover.
+    // own — cover left, lyrics right, and a merged two-line bottom
+    // stack (one slim progress line, then a single control row with
+    // the action buttons split around the transport cluster) so the
+    // body keeps as much height as possible. The lyrics panel gets
+    // landscape-scoped metrics (smaller edge fade, centred scroll
+    // anchor, tighter rows) and follows the separate landscape lyric
+    // alignment setting. The imported portrait background never
+    // applies here: the backdrop skips it in landscape and
+    // AlbumPage(wide: true) always shows the cover.
     if (mediaSize.width > mediaSize.height) {
       return Padding(
         key: const ValueKey('player-phone-landscape-layout'),
@@ -400,19 +406,45 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     ),
                   ),
                   const SizedBox(width: playerWideColumnGap),
-                  const Expanded(
+                  Expanded(
                     flex: 11,
                     child: KeyedSubtree(
-                      key: ValueKey('player-phone-landscape-lyrics'),
-                      child: LyricsPanel(),
+                      key: const ValueKey('player-phone-landscape-lyrics'),
+                      child: LyricsPanel(
+                        edgeFadeExtent: 10,
+                        scrollAnchor: 0.5,
+                        lineVerticalPadding: 4,
+                        listPadding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
+                        alignMode: landscapeLyricAlignMode,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 4),
-            const PlayerActionRow(),
-            const TransportBar(),
+            const SizedBox(height: 6),
+            const TransportBar.progressLine(
+              key: ValueKey('player-phone-landscape-progress'),
+            ),
+            const SizedBox(height: 2),
+            const Row(
+              key: ValueKey('player-phone-landscape-controls'),
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: PlayerActionRow.leading(),
+                  ),
+                ),
+                TransportBar.controlsRow(),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: PlayerActionRow.trailing(),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       );

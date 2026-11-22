@@ -149,6 +149,8 @@ class LyricLineTile extends ConsumerWidget {
     required this.buffering,
     required this.onSelect,
     required this.onSeek,
+    this.verticalPadding = 11,
+    this.alignModeOverride,
   });
 
   final KaraokeLyricLine line;
@@ -167,6 +169,17 @@ class LyricLineTile extends ConsumerWidget {
   final VoidCallback onSelect;
   final VoidCallback onSeek;
 
+  /// Vertical padding inside the tile, i.e. half the gap the row adds
+  /// around its text. The phone-landscape panel passes a smaller value
+  /// to fit more lines in its short viewport; the default keeps the
+  /// portrait lyrics page metrics.
+  final double verticalPadding;
+
+  /// Alignment for this tile when the hosting panel does not follow
+  /// the portrait lyrics page's setting (the phone-landscape panel
+  /// has its own). Null reads the shared portrait setting.
+  final LyricAlignMode? alignModeOverride;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final font = ref.watch(
@@ -178,11 +191,12 @@ class LyricLineTile extends ConsumerWidget {
     final blurDisabled = ref.watch(
       settingsProvider.select((settings) => settings.lyricViewBlurDisabled),
     );
-    final centered = ref.watch(
-      settingsProvider.select(
-        (settings) => settings.lyricAlignMode == LyricAlignMode.center,
-      ),
-    );
+    final centered =
+        (alignModeOverride ??
+            ref.watch(
+              settingsProvider.select((settings) => settings.lyricAlignMode),
+            )) ==
+        LyricAlignMode.center;
     final textAlign = centered ? TextAlign.center : TextAlign.start;
     final secondaryWeight = lyricSecondaryFontWeight(font.weight);
     final ink = Theme.of(context).brightness == Brightness.dark
@@ -323,7 +337,7 @@ class LyricLineTile extends ConsumerWidget {
         margin: const EdgeInsets.symmetric(vertical: 1),
         padding: EdgeInsets.symmetric(
           horizontal: selected ? _kLyricSelectionHorizontalPadding : 0,
-          vertical: 11,
+          vertical: verticalPadding,
         ),
         alignment: centered ? Alignment.center : Alignment.centerLeft,
         decoration: BoxDecoration(

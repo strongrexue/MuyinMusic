@@ -17,13 +17,31 @@ import 'player_layout.dart';
 import 'player_slider_thumb_shape.dart';
 import 'player_volume_card.dart';
 
+enum _TransportPart { full, progress, controls }
+
 class TransportBar extends ConsumerStatefulWidget {
-  const TransportBar({super.key, this.compact = false});
+  const TransportBar({super.key, this.compact = false})
+    : _part = _TransportPart.full;
+
+  /// Only the progress line (current time, slider, total time in one
+  /// slim row) for the phone-landscape layout's merged bottom stack.
+  const TransportBar.progressLine({super.key})
+    : compact = false,
+      _part = _TransportPart.progress;
+
+  /// Only the transport button cluster (mode, previous, play, next,
+  /// queue) at its intrinsic width, for the phone-landscape layout's
+  /// merged control row.
+  const TransportBar.controlsRow({super.key})
+    : compact = false,
+      _part = _TransportPart.controls;
 
   /// Single-row overlay layout for the KTV landscape layout: transport
   /// buttons on the left, the progress slider filling the middle and
   /// the mode / queue buttons on the right, all in one slim row.
   final bool compact;
+
+  final _TransportPart _part;
 
   @override
   ConsumerState<TransportBar> createState() => _TransportBarState();
@@ -273,6 +291,78 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             ),
           );
         }
+        final buttons = <Widget>[
+          _PlaybackModeButton(
+            color: ink,
+            mode: vm.playbackMode,
+            enabled: vm.hasTrack,
+            onPressed: controller.cyclePlaybackMode,
+          ),
+          IconButton(
+            tooltip: '上一首',
+            onPressed: canControl ? controller.playPrevious : null,
+            icon: Icon(
+              Icons.skip_previous_rounded,
+              color: controlColor,
+              size: 38,
+            ),
+          ),
+          _PlayButton(
+            color: ink,
+            playing: vm.playing,
+            showSpinner: vm.loading || vm.buffering,
+            ended: vm.ended,
+            canControl: canControl,
+            controller: controller,
+          ),
+          IconButton(
+            tooltip: '下一首',
+            onPressed: canControl ? controller.playNext : null,
+            icon: Icon(
+              Icons.skip_next_rounded,
+              color: controlColor,
+              size: 38,
+            ),
+          ),
+          prism.PopupAnchor(
+            placement: prism.PopupPlacement.screenLowerTwoThirds,
+            targetBuilder: (open) => PlaybackQueueButton(
+              color: ink,
+              count: vm.queueCount,
+              enabled: vm.hasTrack,
+              onPressed: open,
+            ),
+            popupBuilder: (_) => const PlaybackQueuePopup(),
+          ),
+        ];
+        if (widget._part == _TransportPart.progress) {
+          // Phone landscape: one slim line, times flanking the slider
+          // instead of a separate row underneath it.
+          final slimTimeStyle = _timeStyle(context).copyWith(fontSize: 13);
+          return Row(
+            children: [
+              Text(
+                _formatDuration(Duration(milliseconds: shownMs.round())),
+                style: slimTimeStyle,
+              ),
+              Expanded(
+                child: slider(24, const EdgeInsets.symmetric(horizontal: 8)),
+              ),
+              Text(_formatDuration(vm.duration), style: slimTimeStyle),
+            ],
+          );
+        }
+        if (widget._part == _TransportPart.controls) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < buttons.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                buttons[i],
+              ],
+            ],
+          );
+        }
         return Padding(
           padding: const EdgeInsets.fromLTRB(0, 0, 0, 2),
           child: Column(
@@ -305,50 +395,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _PlaybackModeButton(
-                    color: ink,
-                    mode: vm.playbackMode,
-                    enabled: vm.hasTrack,
-                    onPressed: controller.cyclePlaybackMode,
-                  ),
-                  IconButton(
-                    tooltip: '上一首',
-                    onPressed: canControl ? controller.playPrevious : null,
-                    icon: Icon(
-                      Icons.skip_previous_rounded,
-                      color: controlColor,
-                      size: 38,
-                    ),
-                  ),
-                  _PlayButton(
-                    color: ink,
-                    playing: vm.playing,
-                    showSpinner: vm.loading || vm.buffering,
-                    ended: vm.ended,
-                    canControl: canControl,
-                    controller: controller,
-                  ),
-                  IconButton(
-                    tooltip: '下一首',
-                    onPressed: canControl ? controller.playNext : null,
-                    icon: Icon(
-                      Icons.skip_next_rounded,
-                      color: controlColor,
-                      size: 38,
-                    ),
-                  ),
-                  prism.PopupAnchor(
-                    placement: prism.PopupPlacement.screenLowerTwoThirds,
-                    targetBuilder: (open) => PlaybackQueueButton(
-                      color: ink,
-                      count: vm.queueCount,
-                      enabled: vm.hasTrack,
-                      onPressed: open,
-                    ),
-                    popupBuilder: (_) => const PlaybackQueuePopup(),
-                  ),
-                ],
+                children: buttons,
               ),
             ],
           ),

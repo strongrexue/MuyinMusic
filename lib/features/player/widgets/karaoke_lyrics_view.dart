@@ -51,12 +51,31 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
     required this.showTranslation,
     this.edgeFadeEnabled = true,
     this.horizontalPadding = playerContentInset,
+    this.edgeFadeExtent,
+    this.scrollAnchor,
+    this.lineVerticalPadding,
+    this.listPadding,
+    this.alignModeOverride,
   });
 
   final KaraokeLyrics lyrics;
   final bool showTranslation;
   final bool edgeFadeEnabled;
   final double horizontalPadding;
+
+  /// Panel-scoped display metrics. Null (the default everywhere except
+  /// the phone-landscape panel) resolves to the portrait lyrics page's
+  /// values, so the shared page is unchanged; the short landscape
+  /// panel passes a smaller fade, a centred anchor, tighter rows and
+  /// less list padding so its neighbouring lines stay readable.
+  final double? edgeFadeExtent;
+  final double? scrollAnchor;
+  final double? lineVerticalPadding;
+  final EdgeInsets? listPadding;
+
+  /// Alignment override for panels with their own setting (the
+  /// phone-landscape panel). Null follows the portrait setting.
+  final LyricAlignMode? alignModeOverride;
 
   @override
   ConsumerState<KaraokeLyricsView> createState() => _KaraokeLyricsViewState();
@@ -530,7 +549,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
       _lyricScrollTarget =
           (_controller.offset +
                   currentY -
-                  viewportObject.size.height * _kLyricScrollAnchor)
+                  viewportObject.size.height *
+                      (widget.scrollAnchor ?? _kLyricScrollAnchor))
               .clamp(position.minScrollExtent, position.maxScrollExtent);
       _lyricScrollTargetIsRough = false;
       return;
@@ -804,7 +824,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
         key: const ValueKey('karaoke-lyrics-list'),
         controller: _controller,
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(0, 104, 0, 94),
+        padding: widget.listPadding ?? const EdgeInsets.fromLTRB(0, 104, 0, 94),
         itemCount: lines.length,
         itemBuilder: (context, index) {
           final line = lines[index];
@@ -847,6 +867,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
                 selected: index == _selectedIndex,
                 distance: distance,
                 blurSuppressed: _blurSuppressed,
+                verticalPadding: widget.lineVerticalPadding ?? 11,
+                alignModeOverride: widget.alignModeOverride,
                 showTranslation: widget.showTranslation,
                 anchorMs: _anchorMs,
                 playing: _playing,
@@ -873,7 +895,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
       child: _ToggleableLyricEdgeFade(
         key: const ValueKey('karaoke-lyrics-edge-fade'),
         enabled: widget.edgeFadeEnabled,
-        fadeExtent: _kLyricEdgeFadeExtent,
+        fadeExtent: widget.edgeFadeExtent ?? _kLyricEdgeFadeExtent,
         child: lyricsList,
       ),
     );

@@ -45,6 +45,7 @@ const String _kPlaylistArtworkColorsEnabledKey =
 const String _kFlowingLightEnabledKey = 'flowing_light_enabled';
 const String _kLyricViewBlurDisabledKey = 'lyric_view_blur_disabled';
 const String _kLyricAlignModeKey = 'lyric_align_mode';
+const String _kLyricAlignModeLandscapeKey = 'lyric_align_mode_landscape';
 const String _kSquareAlbumCoverEnabledKey = 'square_album_cover_enabled';
 const String _kLyricFontWeightKey = 'lyric_font_weight';
 const String _kLyricFontSizeKey = 'lyric_font_size';
@@ -176,7 +177,8 @@ List<KtvBackgroundItem> _decodeKtvBackgroundItems(String? encoded) {
   }
 }
 
-/// 竖屏歌词页的歌词对齐方式。
+/// 歌词对齐方式。竖屏歌词页与手机横屏歌词面板各用一份独立设置，
+/// 共用这组选项。
 enum LyricAlignMode {
   left('left', '左对齐'),
   center('center', '居中对齐');
@@ -215,6 +217,7 @@ class AppSettings {
     required this.flowingLightEnabled,
     this.lyricViewBlurDisabled = false,
     this.lyricAlignMode = LyricAlignMode.left,
+    this.lyricAlignModeLandscape = LyricAlignMode.left,
     this.squareAlbumCoverEnabled = false,
     this.lyricFontWeight = kLyricFontWeightDefault,
     this.lyricFontSize = kLyricFontSizeDefault,
@@ -299,6 +302,10 @@ class AppSettings {
   final bool flowingLightEnabled;
   final bool lyricViewBlurDisabled;
   final LyricAlignMode lyricAlignMode;
+
+  /// 手机横屏歌词面板的对齐方式，与竖屏歌词页的 [lyricAlignMode]
+  /// 相互独立、互不联动。本机设置，不参与跨设备同步。
+  final LyricAlignMode lyricAlignModeLandscape;
   final bool squareAlbumCoverEnabled;
   final double lyricFontWeight;
   final double lyricFontSize;
@@ -375,6 +382,7 @@ class AppSettings {
     bool? flowingLightEnabled,
     bool? lyricViewBlurDisabled,
     LyricAlignMode? lyricAlignMode,
+    LyricAlignMode? lyricAlignModeLandscape,
     bool? squareAlbumCoverEnabled,
     double? lyricFontWeight,
     double? lyricFontSize,
@@ -436,6 +444,8 @@ class AppSettings {
     flowingLightEnabled: flowingLightEnabled ?? this.flowingLightEnabled,
     lyricViewBlurDisabled: lyricViewBlurDisabled ?? this.lyricViewBlurDisabled,
     lyricAlignMode: lyricAlignMode ?? this.lyricAlignMode,
+    lyricAlignModeLandscape:
+        lyricAlignModeLandscape ?? this.lyricAlignModeLandscape,
     squareAlbumCoverEnabled:
         squareAlbumCoverEnabled ?? this.squareAlbumCoverEnabled,
     lyricFontWeight: lyricFontWeight ?? this.lyricFontWeight,
@@ -596,6 +606,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
           _prefs.getBool(_kLyricViewBlurDisabledKey) ?? false,
       lyricAlignMode: LyricAlignMode.fromCode(
         _prefs.getString(_kLyricAlignModeKey),
+      ),
+      lyricAlignModeLandscape: LyricAlignMode.fromCode(
+        _prefs.getString(_kLyricAlignModeLandscapeKey),
       ),
       squareAlbumCoverEnabled:
           _prefs.getBool(_kSquareAlbumCoverEnabledKey) ?? false,
@@ -1025,6 +1038,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> setLyricAlignMode(LyricAlignMode mode) async {
     await _prefs.setString(_kLyricAlignModeKey, mode.code);
     state = state.copyWith(lyricAlignMode: mode);
+  }
+
+  Future<void> setLyricAlignModeLandscape(LyricAlignMode mode) async {
+    await _prefs.setString(_kLyricAlignModeLandscapeKey, mode.code);
+    state = state.copyWith(lyricAlignModeLandscape: mode);
   }
 
   Future<void> setSquareAlbumCoverEnabled(bool value) async {
