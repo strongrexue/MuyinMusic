@@ -3,13 +3,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../lyric_parser.dart';
 import '../player_controller.dart';
 import 'immersive_chrome.dart';
 import 'karaoke_line_text.dart';
+import 'lyric_sweep_line.dart';
 import 'player_layout.dart';
 import 'transport_bar.dart';
 
@@ -195,16 +195,25 @@ class _KtvLyricsViewState extends ConsumerState<KtvLyricsView> {
     final slotA = slotIndex(0);
     final slotB = slotIndex(1);
     // Effective end of a line for the no-word-timing progress sweep:
-    // the next line's start, or the song duration for the last line.
+    // the estimated sung end, capped by the next line's start (or the
+    // song duration for the last line). See sweepEndMs.
     int endMsFor(int index) {
-      if (index + 1 < lines.length) return lines[index + 1].startMs;
-      final durationMs = ref
-          .read(playerControllerProvider)
-          .duration
-          .inMilliseconds;
-      return durationMs > lines[index].startMs
-          ? durationMs
-          : lines[index].endMs;
+      final line = lines[index];
+      final int limitMs;
+      if (index + 1 < lines.length) {
+        limitMs = lines[index + 1].startMs;
+      } else {
+        final durationMs = ref
+            .read(playerControllerProvider)
+            .duration
+            .inMilliseconds;
+        limitMs = durationMs > line.startMs ? durationMs : line.endMs;
+      }
+      return sweepEndMs(
+        startMs: line.startMs,
+        totalWeight: lyricSweepTotalWeight(lyricSweepSegments(line.text)),
+        limitMs: limitMs,
+      );
     }
     final chromeVisible = ImmersiveChromeScope.maybeOf(context);
     // The panel stretches full-bleed, so on notched phones the side
@@ -440,7 +449,7 @@ class _KtvActiveLine extends StatelessWidget {
       // fill clipped in from the left by line progress).
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: playerContentInset),
-        child: _KtvSweepLine(
+        child: LyricSweepLine(
           line: line,
           endMs: endMs,
           anchorMs: anchorMs,
@@ -448,7 +457,8 @@ class _KtvActiveLine extends StatelessWidget {
           buffering: buffering,
           style: style,
           accent: accent,
-          alignRight: alignRight,
+          textAlign: alignRight ? TextAlign.right : TextAlign.left,
+          maxLines: 2,
         ),
       );
     }
@@ -492,189 +502,6 @@ class _KtvActiveLine extends StatelessWidget {
           );
         },
       ),
-    );
-  }
-}
-
-/// Active KTV line without word timings: the white line is overlaid
-/// by the same text in the accent color, clipped in from the left by
-/// the line's progress (see [lyricLineProgress]).
-///
-/// Driven by the same anchor mechanism as [KaraokeLineText]: the
-/// position stream ticks slower than the sweep, so the anchor is
-/// extrapolated with a stopwatch between ticks and small stream
-/// corrections are absorbed instead of stepping the fill backwards.
-class _KtvSweepLine extends StatefulWidget {
-  const _KtvSweepLine({
-    required this.line,
-    required this.endMs,
-    required this.anchorMs,
-    required this.playing,
-    required this.buffering,
-    required this.style,
-    required this.accent,
-    required this.alignRight,
-  });
-
-  final KaraokeLyricLine line;
-  final int endMs;
-  final ValueListenable<int> anchorMs;
-  final ValueListenable<bool> playing;
-  final ValueListenable<bool> buffering;
-  final TextStyle style;
-  final Color accent;
-  final bool alignRight;
-
-  @override
-  State<_KtvSweepLine> createState() => _KtvSweepLineState();
-}
-
-class _KtvSweepLineState extends State<_KtvSweepLine>
-    with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  final _sinceAnchor = Stopwatch();
-  late final ValueNotifier<double> _fraction;
-  late double _anchorPositionMs;
-  double _anchorErrorMs = 0;
-  bool _reduceMotion = false;
-
-  double get _clockPosition {
-    final elapsedMs = _sinceAnchor.elapsedMicroseconds / 1000;
-    return _anchorPositionMs +
-        elapsedMs +
-        _anchorErrorMs * math.exp(-elapsedMs / 200);
-  }
-
-  double _progress() => lyricLineProgress(
-    startMs: widget.line.startMs,
-    endMs: widget.endMs,
-    positionMs: _clockPosition.round(),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    _anchorPositionMs = widget.anchorMs.value.toDouble();
-    _fraction = ValueNotifier(_progress());
-    _ticker = createTicker((_) => _publish());
-    widget.anchorMs.addListener(_handleAnchor);
-    widget.playing.addListener(_handlePlayback);
-    widget.buffering.addListener(_handlePlayback);
-    _syncClock();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    _syncClock();
-  }
-
-  @override
-  void didUpdateWidget(covariant _KtvSweepLine oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(widget.anchorMs, oldWidget.anchorMs)) {
-      oldWidget.anchorMs.removeListener(_handleAnchor);
-      widget.anchorMs.addListener(_handleAnchor);
-    }
-    if (!identical(widget.playing, oldWidget.playing)) {
-      oldWidget.playing.removeListener(_handlePlayback);
-      widget.playing.addListener(_handlePlayback);
-    }
-    if (!identical(widget.buffering, oldWidget.buffering)) {
-      oldWidget.buffering.removeListener(_handlePlayback);
-      widget.buffering.addListener(_handlePlayback);
-    }
-    if (widget.line != oldWidget.line || widget.endMs != oldWidget.endMs) {
-      _anchorPositionMs = widget.anchorMs.value.toDouble();
-      _anchorErrorMs = 0;
-      _sinceAnchor.reset();
-    }
-    _syncClock();
-  }
-
-  void _handleAnchor() {
-    final anchor = widget.anchorMs.value.toDouble();
-    final error = _clockPosition - anchor;
-    // Same absorption as KaraokeLineText: small corrections decay
-    // into the clock; a seek (large jump) applies immediately.
-    _anchorErrorMs = _sinceAnchor.isRunning && error.abs() < 160 ? error : 0;
-    _anchorPositionMs = anchor;
-    _sinceAnchor.reset();
-    _syncClock();
-  }
-
-  void _handlePlayback() {
-    // Freeze at the displayed time when pausing or buffering.
-    _anchorPositionMs = _clockPosition;
-    _anchorErrorMs = 0;
-    _sinceAnchor.reset();
-    _syncClock();
-  }
-
-  void _syncClock() {
-    final running = widget.playing.value && !widget.buffering.value;
-    if (running) {
-      _sinceAnchor.start();
-    } else {
-      _sinceAnchor.stop();
-    }
-    final needsTicks =
-        running && !_reduceMotion && _clockPosition < widget.endMs;
-    if (needsTicks && !_ticker.isActive) {
-      _ticker.start();
-    } else if (!needsTicks && _ticker.isActive) {
-      _ticker.stop();
-    }
-    _publish();
-  }
-
-  void _publish() {
-    _fraction.value = _progress();
-    if (_clockPosition >= widget.endMs && _ticker.isActive) {
-      _ticker.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.anchorMs.removeListener(_handleAnchor);
-    widget.playing.removeListener(_handlePlayback);
-    widget.buffering.removeListener(_handlePlayback);
-    _ticker.dispose();
-    _fraction.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final textAlign = widget.alignRight ? TextAlign.right : TextAlign.left;
-    return Stack(
-      children: [
-        Text(
-          widget.line.text,
-          maxLines: 2,
-          textAlign: textAlign,
-          style: widget.style,
-        ),
-        ValueListenableBuilder<double>(
-          valueListenable: _fraction,
-          child: Text(
-            widget.line.text,
-            maxLines: 2,
-            textAlign: textAlign,
-            style: widget.style.copyWith(color: widget.accent),
-          ),
-          builder: (context, fraction, child) => ClipRect(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              widthFactor: fraction,
-              heightFactor: 1,
-              child: child,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -793,6 +793,10 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
   @override
   Widget build(BuildContext context) {
     final controller = ref.read(playerControllerProvider.notifier);
+    final durationMs = ref
+        .read(playerControllerProvider)
+        .duration
+        .inMilliseconds;
     final lines = widget.lyrics.lines;
     final lyricsList = NotificationListener<ScrollNotification>(
       onNotification: _handleScrollNotification,
@@ -828,6 +832,17 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
               ),
               child: LyricLineTile(
                 line: line,
+                sweepEndMs: sweepEndMs(
+                  startMs: line.startMs,
+                  totalWeight: lyricSweepTotalWeight(
+                    lyricSweepSegments(line.text),
+                  ),
+                  limitMs: index + 1 < lines.length
+                      ? lines[index + 1].startMs
+                      : (durationMs > line.startMs
+                            ? durationMs
+                            : line.endMs),
+                ),
                 active: active,
                 selected: index == _selectedIndex,
                 distance: distance,

@@ -992,6 +992,89 @@ void main() {
     });
   });
 
+  group('sweepEndMs', () {
+    test('estimates the sung end at ~300ms per unit of weight', () {
+      // Weight 10 -> 3s after the line start, well before the limit.
+      expect(
+        sweepEndMs(startMs: 1000, totalWeight: 10, limitMs: 12000),
+        4000,
+      );
+    });
+
+    test('never passes the limit (next line start or song duration)', () {
+      // Weight 20 -> 6s estimate, but the next line starts at 5s.
+      expect(sweepEndMs(startMs: 1000, totalWeight: 20, limitMs: 5000), 5000);
+      // A gap shorter than the 1s floor ends at the limit too.
+      expect(sweepEndMs(startMs: 1000, totalWeight: 10, limitMs: 1500), 1500);
+    });
+
+    test('clamps the estimate to at least one second', () {
+      expect(sweepEndMs(startMs: 2000, totalWeight: 1, limitMs: 9000), 3000);
+      expect(sweepEndMs(startMs: 2000, totalWeight: 0, limitMs: 9000), 3000);
+    });
+  });
+
+  group('lyric sweep weights', () {
+    test('CJK characters weigh 1 each and the last one is held', () {
+      final segments = lyricSweepSegments('你好世界');
+      expect(segments.map((s) => s.weight), [1.0, 1.0, 1.0, 2.5]);
+      expect(lyricSweepTotalWeight(segments), 5.5);
+    });
+
+    test('latin letters and spaces weigh less than CJK', () {
+      expect(lyricSweepTotalWeight(lyricSweepSegments('abc')), closeTo(2.025, 1e-9));
+      // a(0.45) + space(0.3) + b held (0.45 * 2.5)
+      expect(
+        lyricSweepTotalWeight(lyricSweepSegments('a b')),
+        closeTo(1.875, 1e-9),
+      );
+    });
+
+    test('punctuation adds a pause segment after itself', () {
+      final segments = lyricSweepSegments('好，好');
+      // 好(1) ，(0.2) pause(0.8, no ink) 好 held(2.5)
+      expect(segments.map((s) => s.weight), [1.0, 0.2, 0.8, 2.5]);
+      expect(segments[2].start, segments[2].end);
+      expect(lyricSweepTotalWeight(segments), 4.5);
+    });
+
+    test('trailing punctuation does not steal the held tail', () {
+      // The last content character (好) is held even though 。 follows.
+      expect(lyricSweepTotalWeight(lyricSweepSegments('你好。')), 4.5);
+    });
+
+    test('width fraction follows cumulative weight, not time', () {
+      final segments = lyricSweepSegments('你好世界');
+      double at(double progress) => lyricSweepWidthFraction(
+        segments: segments,
+        runeCount: 4,
+        progress: progress,
+      );
+      expect(at(0), 0);
+      expect(at(1), 1);
+      // One weight unit in (of 5.5) crosses exactly the first character.
+      expect(at(1 / 5.5), closeTo(0.25, 1e-9));
+      // Half the weight lands 3/4 into the third character, because
+      // the held final character owns a disproportionate share.
+      expect(at(0.5), closeTo(0.6875, 1e-9));
+    });
+
+    test('width fraction holds still during a punctuation pause', () {
+      final segments = lyricSweepSegments('好，好');
+      double at(double progress) => lyricSweepWidthFraction(
+        segments: segments,
+        runeCount: 3,
+        progress: progress,
+      );
+      // Cumulative weight 1.2 = end of the punctuation mark itself.
+      expect(at(1.2 / 4.5), closeTo(2 / 3, 1e-9));
+      // Mid-pause (weight 1.6) the sweep still sits at the same spot.
+      expect(at(1.6 / 4.5), closeTo(2 / 3, 1e-9));
+      // Halfway through the held final character.
+      expect(at(3.25 / 4.5), closeTo(2.5 / 3, 1e-9));
+    });
+  });
+
   group('format helpers', () {
     test('formatPlayTime handles minutes, hours, and zero', () {
       expect(formatPlayTime(222), '03:42');

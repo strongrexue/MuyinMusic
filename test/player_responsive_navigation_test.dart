@@ -296,15 +296,12 @@ void main() {
       onDismissRequested: ([String? target]) => destinations.add(target),
     );
 
-    final equalizerButton = find.byKey(
-      const ValueKey('player-equalizer-button'),
-    );
-    expect(equalizerButton, findsOneWidget);
+    final moreButton = find.byKey(const ValueKey('player-more-button'));
+    expect(moreButton, findsOneWidget);
     expect(find.byTooltip('歌曲列表'), findsNothing);
-    expect(find.byTooltip('均衡器'), findsOneWidget);
+    expect(find.byTooltip('更多'), findsOneWidget);
 
-    await tester.tap(equalizerButton);
-    await _pumpUi(tester);
+    await _pickTopBarMoreItem(tester, '均衡器');
 
     expect(
       find.byKey(const ValueKey('player-equalizer-popup')),
@@ -340,8 +337,7 @@ void main() {
     );
     expect(container.read(sleepTimerProvider), isNull);
 
-    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-button')));
-    await _pumpUi(tester);
+    await _pickTopBarMoreItem(tester, '定时关闭');
     expect(
       find.byKey(const ValueKey('player-sleep-timer-popup')),
       findsOneWidget,
@@ -381,8 +377,7 @@ void main() {
     expect(container.read(sleepTimerProvider), const Duration(minutes: 40));
 
     // With a timer running the popup offers a cancel entry.
-    await tester.tap(find.byKey(const ValueKey('player-sleep-timer-button')));
-    await _pumpUi(tester);
+    await _pickTopBarMoreItem(tester, '定时关闭');
     await tester.tap(
       find.byKey(const ValueKey('player-sleep-timer-cancel-entry')),
     );
@@ -423,7 +418,7 @@ void main() {
       '网易 24bit',
     );
     expect(
-      find.byKey(const ValueKey('player-equalizer-button')),
+      find.byKey(const ValueKey('player-more-button')),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -478,24 +473,27 @@ void main() {
     final miniViewport = tester.getRect(
       find.byKey(const ValueKey('player-mini-lyrics-scroll')),
     );
-    final fourthLine = tester.getRect(
-      find.byKey(const ValueKey('player-mini-lyric-line-3')),
+    // The fourth line starts exactly at the viewport's bottom edge, so
+    // it is either not built at all or entirely below the viewport.
+    final fourthLine = find.byKey(const ValueKey('player-mini-lyric-line-3'));
+    if (fourthLine.evaluate().isNotEmpty) {
+      expect(
+        tester.getRect(fourthLine).top,
+        greaterThanOrEqualTo(miniViewport.bottom),
+      );
+    }
+    // The active no-word-timing line is a LyricSweepLine (base +
+    // accent layers); its base Text carries the line's metrics.
+    final activeLineText = tester.widget<Text>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('player-mini-lyric-line-1')),
+            matching: find.byType(Text),
+          )
+          .first,
     );
-    expect(fourthLine.top, greaterThanOrEqualTo(miniViewport.bottom));
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('player-mini-lyric-line-1')))
-          .style
-          ?.fontWeight,
-      FontWeight.w400,
-    );
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('player-mini-lyric-line-1')))
-          .style
-          ?.fontSize,
-      14,
-    );
+    expect(activeLineText.style?.fontWeight, FontWeight.w400);
+    expect(activeLineText.style?.fontSize, 17);
     expect(
       tester
           .widget<ImageFiltered>(
@@ -526,15 +524,22 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 190));
-    expect(scrollState.position.pixels, inExclusiveRange(0, 22));
+    expect(scrollState.position.pixels, inExclusiveRange(0, 26));
     await tester.pumpAndSettle();
-    expect(scrollState.position.pixels, closeTo(22, 0.01));
+    expect(scrollState.position.pixels, closeTo(26, 0.01));
     expect(
       tester
-          .widget<Text>(find.byKey(const ValueKey('player-mini-lyric-line-2')))
+          .widget<Text>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey('player-mini-lyric-line-2')),
+                  matching: find.byType(Text),
+                )
+                .first,
+          )
           .style
           ?.fontSize,
-      14,
+      17,
     );
     expect(
       tester
@@ -1042,6 +1047,155 @@ void main() {
     expect(popup, findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('phone landscape player uses split layout without pager', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'wy:phone-landscape-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏歌曲',
+        artist: '横屏歌手',
+        album: '横屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/phone-landscape-song.flac',
+      ),
+      lyrics: const KaraokeLyrics([
+        KaraokeLyricLine(startMs: 0, endMs: 3000, text: '横屏第一句'),
+        KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '横屏第二句'),
+        KaraokeLyricLine(startMs: 6000, endMs: 9000, text: '横屏第三句'),
+      ]),
+    );
+
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
+    expect(find.byKey(const ValueKey('player-compact-pager')), findsNothing);
+    expect(find.byType(PageView), findsNothing);
+    expect(find.byType(AlbumPage), findsOneWidget);
+    expect(find.byType(LyricsPanel), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('player-action-volume')),
+      findsOneWidget,
+    );
+
+    // The cover fits its column completely at phone-landscape height:
+    // no part of it is scrolled or clipped out of the album area.
+    final albumRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-album')),
+    );
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
+    expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
+    // Without the album-name line the round cover uses the freed
+    // height: 0.8 of the 147dp album area at this size.
+    expect(coverRect.width, closeTo(117.6, 0.6));
+    expect(coverRect.height, closeTo(117.6, 0.6));
+    // The album-name line is not rendered in this layout.
+    expect(find.text('横屏专辑'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape square cover also fits without album line', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'square_album_cover_enabled': true,
+    });
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'wy:phone-landscape-square-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏方封面歌曲',
+        artist: '横屏歌手',
+        album: '横屏方专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/phone-landscape-square.flac',
+      ),
+    );
+
+    final albumRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-album')),
+    );
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
+    expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
+    // Square covers scale by 1.12 over the round size.
+    expect(coverRect.width, closeTo(131.8, 0.6));
+    expect(coverRect.height, closeTo(131.8, 0.6));
+    expect(find.text('横屏方专辑'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape with car mode keeps the wide layout', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      carPadModeEnabled: true,
+      track: const PlayerTrack(
+        id: 'wy:phone-landscape-car-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏车载歌曲',
+        artist: '横屏车载歌手',
+        album: '横屏车载专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/phone-landscape-car-song.flac',
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait player never uses the phone landscape layout', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:portrait-song',
+        kind: PlayerTrackKind.remote,
+        title: '竖屏歌曲',
+        artist: '竖屏歌手',
+        album: '竖屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/portrait-song.flac',
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('player-compact-pager')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _RouterHarness {
@@ -1306,6 +1460,19 @@ bool _actionEnabled(WidgetTester tester, String key) {
   );
   expect(button, findsOneWidget, reason: key);
   return tester.widget<prism.IconButton>(button).onPressed != null;
+}
+
+/// Picks [label] from the player top bar's "more" menu.
+Future<void> _pickTopBarMoreItem(WidgetTester tester, String label) async {
+  await tester.tap(find.byKey(const ValueKey('player-more-button')));
+  await _pumpUi(tester);
+  await tester.tap(
+    find.descendant(
+      of: find.byType(prism.PopupMenu),
+      matching: find.text(label),
+    ),
+  );
+  await _pumpUi(tester);
 }
 
 Future<void> _pumpUi(WidgetTester tester) async {

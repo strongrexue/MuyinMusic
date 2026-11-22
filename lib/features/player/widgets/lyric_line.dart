@@ -11,6 +11,7 @@ import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_motion.dart';
 import '../lyric_parser.dart';
 import 'karaoke_line_text.dart';
+import 'lyric_sweep_line.dart';
 import 'lyric_typography.dart';
 import 'player_control_color.dart';
 import 'player_palette.dart';
@@ -137,6 +138,7 @@ class LyricLineTile extends ConsumerWidget {
   const LyricLineTile({
     super.key,
     required this.line,
+    required this.sweepEndMs,
     required this.active,
     required this.selected,
     required this.distance,
@@ -150,6 +152,10 @@ class LyricLineTile extends ConsumerWidget {
   });
 
   final KaraokeLyricLine line;
+
+  /// Effective sweep end for a word-timing-less line (see sweepEndMs
+  /// in lyric_parser.dart); unused for word-timed lines.
+  final int sweepEndMs;
   final bool active;
   final bool selected;
   final int distance;
@@ -373,17 +379,20 @@ class LyricLineTile extends ConsumerWidget {
 
   Widget _mainText(BuildContext context, TextAlign textAlign) {
     if (!line.hasWordTiming) {
-      // No word timings to sweep: the active line takes the accent
-      // color as a whole, matching the sung words of timed lines.
-      // Inactive lines keep no explicit style and inherit the
-      // AnimatedDefaultTextStyle above, so color can transition
-      // without changing layout metrics.
-      return Text(
-        line.text,
+      // No word timings: the active line sweeps by the same weighted
+      // model as KTV (see LyricSweepLine). Inactive rows render the
+      // same widget in its plain form — no explicit style, inheriting
+      // the AnimatedDefaultTextStyle above — so a row's widget type
+      // never changes across the focus boundary.
+      return LyricSweepLine(
+        line: line,
+        endMs: sweepEndMs,
+        anchorMs: anchorMs,
+        playing: playing,
+        buffering: buffering,
+        active: active,
         textAlign: textAlign,
-        style: active
-            ? TextStyle(color: Theme.of(context).colorScheme.primary)
-            : null,
+        accent: Theme.of(context).colorScheme.primary,
       );
     }
     return KaraokeLineText(

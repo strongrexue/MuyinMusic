@@ -366,6 +366,58 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
       );
     }
 
+    // Phone landscape (not KTV, not car/tablet): a split layout of its
+    // own — cover left, lyrics right, and the action row + transport
+    // spanning the full width below instead of stacking inside the
+    // cover column, so the cover sizes against the full body height.
+    // The imported portrait background never applies here: the backdrop
+    // skips it in landscape and AlbumPage(wide: true) always shows the
+    // cover.
+    if (mediaSize.width > mediaSize.height) {
+      return Padding(
+        key: const ValueKey('player-phone-landscape-layout'),
+        padding: const EdgeInsets.fromLTRB(
+          playerWideOuterInset,
+          8,
+          playerWideOuterInset,
+          12,
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 10,
+                    child: KeyedSubtree(
+                      key: const ValueKey('player-phone-landscape-album'),
+                      child: AlbumPage(
+                        wide: true,
+                        wideHeightFactor: 0.8,
+                        wideMinCoverSize: 80,
+                        wideShowMetadata: false,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: playerWideColumnGap),
+                  const Expanded(
+                    flex: 11,
+                    child: KeyedSubtree(
+                      key: ValueKey('player-phone-landscape-lyrics'),
+                      child: LyricsPanel(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            const PlayerActionRow(),
+            const TransportBar(),
+          ],
+        ),
+      );
+    }
+
     // Keep the lyrics' horizontal inset inside each row so their blur halos
     // have room before reaching the pager clips. Text starts at the same
     // position as the progress track, including the slider's own inset.

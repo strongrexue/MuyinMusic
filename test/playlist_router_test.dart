@@ -783,11 +783,11 @@ void main() {
       ),
       findsNothing,
     );
-    final topEqualizerIcon = find.descendant(
-      of: find.byTooltip('均衡器'),
-      matching: find.byIcon(Icons.graphic_eq_rounded),
+    final topMoreIcon = find.descendant(
+      of: find.byTooltip('更多'),
+      matching: find.byIcon(Icons.more_horiz_rounded),
     );
-    expect(tester.widget<Icon>(topEqualizerIcon).color, darkScheme.onSurface);
+    expect(tester.widget<Icon>(topMoreIcon).color, darkScheme.onSurface);
     expect(tester.takeException(), isNull);
   });
 

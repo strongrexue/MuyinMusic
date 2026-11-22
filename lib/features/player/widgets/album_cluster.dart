@@ -14,13 +14,31 @@ import 'spinning_cover_art.dart';
 import 'track_change_switcher.dart';
 
 const double _compactAlbumTopPadding = 20;
-const double _miniLyricsSlotHeight = 84;
 
 class AlbumPage extends ConsumerWidget {
-  const AlbumPage({super.key, this.wide = false, this.onOpenLyrics});
+  const AlbumPage({
+    super.key,
+    this.wide = false,
+    this.onOpenLyrics,
+    this.wideHeightFactor,
+    this.wideMinCoverSize,
+    this.wideShowMetadata = true,
+  });
 
   final bool wide;
   final VoidCallback? onOpenLyrics;
+
+  /// Wide-layout cover sizing overrides. Null keeps the car/tablet
+  /// defaults (0.68 of the available height, at least 160dp); the
+  /// phone-landscape layout passes tighter values so the cover fits
+  /// the short body height without scrolling.
+  final double? wideHeightFactor;
+  final double? wideMinCoverSize;
+
+  /// Whether the wide layout shows the album-name line under the
+  /// cover. The phone-landscape layout hides it so the cover can use
+  /// the freed height; car/tablet keeps it.
+  final bool wideShowMetadata;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -38,10 +56,17 @@ class AlbumPage extends ConsumerWidget {
     final square = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
+    // Compact cover page only: when the user picked an imported image
+    // as the portrait background, that image is the main visual and
+    // the album cover (with its round/square tap toggle) is not shown.
+    final hasImportedPortraitBackground = ref.watch(
+      settingsProvider.select((s) => s.selectedPortraitBackgroundItem != null),
+    );
+    final hideCover = !wide && hasImportedPortraitBackground;
     final track = player.track;
-    // The compact column is top-anchored and the mini-lyric slot below the
-    // cover keeps a fixed height, so the cover never shifts when the lyrics
-    // finish loading or the mini-lyrics setting toggles.
+    // The compact column is top-anchored with the cover first, so the
+    // cover never shifts when the lyrics finish loading or the
+    // mini-lyrics setting toggles.
     final reserveMiniLyrics =
         !wide && onOpenLyrics != null && miniLyricsEnabled;
     final showMiniLyrics = reserveMiniLyrics && player.miniLyricsReady;
@@ -54,12 +79,14 @@ class AlbumPage extends ConsumerWidget {
           maxCoverSize,
           math.min(
                 constraints.maxWidth * (wide ? 0.88 : 0.86),
-                constraints.maxHeight * (wide ? 0.68 : 0.62),
+                constraints.maxHeight *
+                    (wide ? (wideHeightFactor ?? 0.68) : 0.62),
               ) *
               coverScale,
         );
+        final minCoverSize = wide ? (wideMinCoverSize ?? 160.0) : 160.0;
         final resolvedCoverSize = coverSize
-            .clamp(160.0, maxCoverSize)
+            .clamp(minCoverSize, maxCoverSize)
             .toDouble();
         final metadataKey = track == null
             ? 'album-metadata:loading'
@@ -120,14 +147,16 @@ class AlbumPage extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   cover,
-                  const SizedBox(height: 18),
-                  TrackChangeSwitcher(
-                    transitionKey: metadataKey,
-                    incomingOffset: const Offset(0.12, 0),
-                    child: track == null
-                        ? const SizedBox(height: 24)
-                        : _AlbumMetadata(track: track),
-                  ),
+                  if (wideShowMetadata) ...[
+                    const SizedBox(height: 18),
+                    TrackChangeSwitcher(
+                      transitionKey: metadataKey,
+                      incomingOffset: const Offset(0.12, 0),
+                      child: track == null
+                          ? const SizedBox(height: 24)
+                          : _AlbumMetadata(track: track),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -135,30 +164,26 @@ class AlbumPage extends ConsumerWidget {
         }
 
         // Compact: the cover hugs the top bar instead of floating in the
-        // vertical center, and the mini lyrics sit in flow right below it,
-        // centered. The album line is no longer shown here (the top bar
-        // already carries the title and artist).
-        return SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
+        // vertical center, and the mini lyrics are centered in the space
+        // left between the cover and the transport bar. The album line
+        // is no longer shown here (the top bar already carries the title
+        // and artist). With an imported portrait background the cover is
+        // hidden, and the mini lyrics center in the freed space instead.
+        return Padding(
           padding: const EdgeInsets.fromLTRB(0, _compactAlbumTopPadding, 0, 12),
-          child: SizedBox(
-            width: constraints.maxWidth,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                cover,
-                if (reserveMiniLyrics) ...[
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    height: _miniLyricsSlotHeight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (!hideCover) cover,
+              if (reserveMiniLyrics)
+                Expanded(
+                  child: Center(
                     child: showMiniLyrics
                         ? MiniLyricsPanel(onOpenLyrics: onOpenLyrics!)
                         : null,
                   ),
-                ],
-              ],
-            ),
+                ),
+            ],
           ),
         );
       },

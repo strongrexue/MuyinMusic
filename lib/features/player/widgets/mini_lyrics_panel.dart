@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,13 +9,14 @@ import '../../../core/storage/settings_store.dart';
 import '../../../theme/app_motion.dart';
 import '../lyric_parser.dart';
 import '../player_controller.dart';
+import 'lyric_sweep_line.dart';
 import 'player_layout.dart';
 
 /// Blur applied directly to the previous and next lyric text. Increase this
 /// value for a stronger effect; the active line always stays sharp.
 const double miniLyricsInactiveBlurSigma = 0.45;
 
-const double _miniLyricLineExtent = 22;
+const double _miniLyricLineExtent = 26;
 const int _miniLyricVisibleLineCount = 3;
 const Duration _miniLyricScrollDuration = Duration(milliseconds: 380);
 // Breathing room INSIDE the list viewport so the first/last row's blur halo
@@ -27,13 +29,60 @@ const double _miniLyricBlurBleed = 4;
 const double _miniLyricViewportExtent =
     _miniLyricVisibleLineCount * _miniLyricLineExtent + _miniLyricBlurBleed;
 
-class MiniLyricsPanel extends ConsumerWidget {
+class MiniLyricsPanel extends ConsumerStatefulWidget {
   const MiniLyricsPanel({super.key, required this.onOpenLyrics});
 
   final VoidCallback onOpenLyrics;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MiniLyricsPanel> createState() => _MiniLyricsPanelState();
+}
+
+class _MiniLyricsPanelState extends ConsumerState<MiniLyricsPanel> {
+  // Per-tick playback values for the no-word-timing sweep, fed through
+  // notifiers like the KTV view so position ticks do not rebuild the
+  // panel itself.
+  final _anchorMs = ValueNotifier<int>(0);
+  final _playing = ValueNotifier<bool>(false);
+  final _buffering = ValueNotifier<bool>(false);
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = ref.read(playerControllerProvider);
+    _anchorMs.value = initial.position.inMilliseconds;
+    _playing.value = initial.playing;
+    _buffering.value = initial.buffering;
+    ref.listenManual(playerControllerProvider.select((s) => s.position), (
+      previous,
+      next,
+    ) {
+      _anchorMs.value = next.inMilliseconds;
+    });
+    ref.listenManual(playerControllerProvider.select((s) => s.playing), (
+      previous,
+      next,
+    ) {
+      _playing.value = next;
+    });
+    ref.listenManual(playerControllerProvider.select((s) => s.buffering), (
+      previous,
+      next,
+    ) {
+      _buffering.value = next;
+    });
+  }
+
+  @override
+  void dispose() {
+    _anchorMs.dispose();
+    _playing.dispose();
+    _buffering.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final enabled = ref.watch(
       settingsProvider.select((settings) => settings.showMiniLyrics),
     );
@@ -45,6 +94,7 @@ class MiniLyricsPanel extends ConsumerWidget {
           activeIndex: state.lyricLoading || state.lyrics.isEmpty
               ? -1
               : state.lyrics.activeIndex(state.position),
+          durationMs: state.duration.inMilliseconds,
         ),
       ),
     );
@@ -62,9 +112,12 @@ class MiniLyricsPanel extends ConsumerWidget {
           color: Colors.transparent,
           child: InkWell(
             key: const ValueKey('player-mini-lyrics'),
-            onTap: onOpenLyrics,
+            onTap: widget.onOpenLyrics,
             child: SizedBox(
-              height: 84,
+              // Viewport extent + the vertical padding below, exactly:
+              // a taller box would stretch the viewport past three rows
+              // (the tight constraint overrides the inner SizedBox).
+              height: _miniLyricViewportExtent + 2 * (9 - _miniLyricBlurBleed),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: playerProgressTrackInset - _miniLyricBlurBleed,
@@ -75,6 +128,10 @@ class MiniLyricsPanel extends ConsumerWidget {
                   child: _MiniLyricsScroller(
                     lyrics: vm.lyrics,
                     activeIndex: vm.activeIndex,
+                    anchorMs: _anchorMs,
+                    playing: _playing,
+                    buffering: _buffering,
+                    songDurationMs: vm.durationMs,
                   ),
                 ),
               ),
@@ -110,7 +167,7 @@ class _MiniKaraokeLine extends ConsumerWidget {
     final style = TextStyle(
       fontSize: fontSize,
       fontWeight: FontWeight.w400,
-      height: 1.15,
+      height: 1.3,
     );
     final spans = <TextSpan>[];
     for (final word in line.words) {
@@ -132,10 +189,21 @@ class _MiniKaraokeLine extends ConsumerWidget {
 }
 
 class _MiniLyricsScroller extends StatefulWidget {
-  const _MiniLyricsScroller({required this.lyrics, required this.activeIndex});
+  const _MiniLyricsScroller({
+    required this.lyrics,
+    required this.activeIndex,
+    required this.anchorMs,
+    required this.playing,
+    required this.buffering,
+    required this.songDurationMs,
+  });
 
   final KaraokeLyrics lyrics;
   final int activeIndex;
+  final ValueListenable<int> anchorMs;
+  final ValueListenable<bool> playing;
+  final ValueListenable<bool> buffering;
+  final int songDurationMs;
 
   @override
   State<_MiniLyricsScroller> createState() => _MiniLyricsScrollerState();
@@ -170,6 +238,21 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
     _scrollGeneration++;
     _controller.dispose();
     super.dispose();
+  }
+
+  int _sweepEndMsFor(int index) {
+    final lines = widget.lyrics.lines;
+    final line = lines[index];
+    final limitMs = index + 1 < lines.length
+        ? lines[index + 1].startMs
+        : (widget.songDurationMs > line.startMs
+              ? widget.songDurationMs
+              : line.endMs);
+    return sweepEndMs(
+      startMs: line.startMs,
+      totalWeight: lyricSweepTotalWeight(lyricSweepSegments(line.text)),
+      limitMs: limitMs,
+    );
   }
 
   int _resolveWindowStart() {
@@ -233,14 +316,34 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
           child: Align(
             alignment: Alignment.center,
             // 当前行有逐字时间戳时逐字染色（KTV 式：起唱即强调色），
-            // 否则回退到整行高亮；非当前行保持原有模糊 + 变体色。
+            // 无逐字时整行进度扫色（与 KTV、歌词页同一套加权模型）；
+            // 非当前行保持原有模糊 + 变体色。
             child: active && lines[index].hasWordTiming
                 ? _MiniKaraokeLine(
                     key: ValueKey('player-mini-lyric-line-$index'),
                     line: lines[index],
                     sungColor: scheme.primary,
                     pendingColor: scheme.onSurface,
-                    fontSize: 14,
+                    fontSize: 17,
+                  )
+                : active
+                ? LyricSweepLine(
+                    key: ValueKey('player-mini-lyric-line-$index'),
+                    line: lines[index],
+                    endMs: _sweepEndMsFor(index),
+                    anchorMs: widget.anchorMs,
+                    playing: widget.playing,
+                    buffering: widget.buffering,
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w400,
+                      height: 1.3,
+                    ),
+                    accent: scheme.primary,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   )
                 : Text(
                     lines[index].text,
@@ -249,12 +352,10 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: active
-                          ? scheme.onSurface
-                          : scheme.onSurfaceVariant.withValues(alpha: 0.72),
-                      fontSize: active ? 14 : 12.5,
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
+                      fontSize: 15,
                       fontWeight: FontWeight.w400,
-                      height: 1.15,
+                      height: 1.3,
                     ),
                   ),
           ),

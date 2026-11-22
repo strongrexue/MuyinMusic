@@ -14,7 +14,8 @@ import 'player_sleep_timer_sheet.dart';
 import 'track_change_switcher.dart';
 
 /// Top bar: track title/artist on the left, then the source · quality entry
-/// (opens the quality sheet), the sleep timer, and the equalizer entry.
+/// (opens the quality sheet), the KTV mode toggle, and a "more" menu holding
+/// the sleep timer, the background picker, and the equalizer entry.
 class TopChromeRow extends ConsumerWidget {
   const TopChromeRow({super.key, required this.onOpenEqualizer});
 
@@ -113,8 +114,6 @@ class TopChromeRow extends ConsumerWidget {
               child: _QualityEntry(darkForeground: darkForeground),
             ),
             const SizedBox(width: 4),
-            _SleepTimerButton(darkForeground: darkForeground),
-            const SizedBox(width: 4),
             _KtvModeButton(
               enabled: ktvModeEnabled,
               darkForeground: darkForeground,
@@ -122,28 +121,12 @@ class TopChromeRow extends ConsumerWidget {
                   .read(settingsProvider.notifier)
                   .setKtvModeEnabled(!ktvModeEnabled),
             ),
-            if (showKtvBackgroundButton) ...[
-              const SizedBox(width: 4),
-              _KtvBackgroundButton(darkForeground: darkForeground),
-            ],
-            if (showPortraitBackgroundButton) ...[
-              const SizedBox(width: 4),
-              _KtvBackgroundButton(
-                darkForeground: darkForeground,
-                target: KtvBackgroundTarget.portrait,
-              ),
-            ],
             const SizedBox(width: 4),
-            prism.PopupAnchor(
-              targetBuilder: (open) => _ChromeIconButton(
-                key: const ValueKey('player-equalizer-button'),
-                icon: Icons.graphic_eq_rounded,
-                tooltip: '均衡器',
-                onPressed: open,
-                darkForeground: darkForeground,
-              ),
-              popupBuilder: (_) =>
-                  PlayerEqualizerPopup(onOpenPage: onOpenEqualizer),
+            _MoreMenuButton(
+              darkForeground: darkForeground,
+              showKtvBackground: showKtvBackgroundButton,
+              showPortraitBackground: showPortraitBackgroundButton,
+              onOpenEqualizer: onOpenEqualizer,
             ),
           ],
         ),
@@ -243,90 +226,135 @@ class _KtvModeButton extends StatelessWidget {
   }
 }
 
-/// Opens the background picker (built-in image / imported images for KTV,
-/// flowing-light default / imported images for the portrait player page).
-class _KtvBackgroundButton extends StatelessWidget {
-  const _KtvBackgroundButton({
-    this.darkForeground = false,
-    this.target = KtvBackgroundTarget.ktv,
+/// The overflow menu at the end of the top bar: the sleep timer, the
+/// background picker, and the equalizer, moved out of the row so the track
+/// title keeps its width. Picking an entry closes the menu and opens that
+/// entry's usual panel as a popup anchored to this same button.
+class _MoreMenuButton extends StatefulWidget {
+  const _MoreMenuButton({
+    required this.darkForeground,
+    required this.showKtvBackground,
+    required this.showPortraitBackground,
+    required this.onOpenEqualizer,
   });
 
   final bool darkForeground;
-  final KtvBackgroundTarget target;
+  final bool showKtvBackground;
+  final bool showPortraitBackground;
+  final VoidCallback onOpenEqualizer;
+
+  @override
+  State<_MoreMenuButton> createState() => _MoreMenuButtonState();
+}
+
+class _MoreMenuButtonState extends State<_MoreMenuButton> {
+  final _anchorKey = GlobalKey();
+
+  /// The button's rect in navigator coordinates, resolved the same way
+  /// [prism.PopupAnchor] resolves its own source rect.
+  Rect? _anchorRect() {
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached || !box.hasSize) return null;
+    final navigatorBox =
+        Navigator.maybeOf(context)?.context.findRenderObject() as RenderBox?;
+    final origin = box.localToGlobal(Offset.zero, ancestor: navigatorBox);
+    return origin & box.size;
+  }
+
+  /// Opens [builder]'s panel as an anchored popup out of this button, the
+  /// same route and placement the panel's own top-bar button used before.
+  void _openPanel(WidgetBuilder builder) {
+    if (!mounted) return;
+    Navigator.of(context).push(
+      prism.AnchoredPopupRoute<void>(
+        barrierLabel: prism.UiLocalizations.of(context).close,
+        builder: builder,
+        anchorOf: _anchorRect,
+        elevated: prism.ElevatedSurfaceTheme.isIn(context),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return prism.PopupAnchor(
+      key: _anchorKey,
       targetBuilder: (open) => _ChromeIconButton(
-        key: const ValueKey('player-ktv-background-button'),
-        icon: Icons.image_outlined,
-        tooltip: target == KtvBackgroundTarget.portrait ? '播放页背景' : 'KTV 背景',
+        key: const ValueKey('player-more-button'),
+        icon: Icons.more_horiz_rounded,
+        tooltip: '更多',
         onPressed: open,
-        darkForeground: darkForeground,
+        darkForeground: widget.darkForeground,
       ),
-      popupBuilder: (_) => KtvBackgroundPopup(target: target),
+      popupBuilder: (_) => _MoreMenuItems(
+        showKtvBackground: widget.showKtvBackground,
+        showPortraitBackground: widget.showPortraitBackground,
+        onOpenSleepTimer: () =>
+            _openPanel((_) => const PlayerSleepTimerPopup()),
+        onOpenBackground: (target) =>
+            _openPanel((_) => KtvBackgroundPopup(target: target)),
+        onOpenEqualizer: () => _openPanel(
+          (_) => PlayerEqualizerPopup(onOpenPage: widget.onOpenEqualizer),
+        ),
+      ),
     );
   }
 }
 
-class _SleepTimerButton extends ConsumerWidget {
-  const _SleepTimerButton({this.darkForeground = false});
+/// The "more" menu's entries. Watches the sleep timer itself so a running
+/// timer's remaining time stays current while the menu is open.
+class _MoreMenuItems extends ConsumerWidget {
+  const _MoreMenuItems({
+    required this.showKtvBackground,
+    required this.showPortraitBackground,
+    required this.onOpenSleepTimer,
+    required this.onOpenBackground,
+    required this.onOpenEqualizer,
+  });
 
-  final bool darkForeground;
+  final bool showKtvBackground;
+  final bool showPortraitBackground;
+  final VoidCallback onOpenSleepTimer;
+  final ValueChanged<KtvBackgroundTarget> onOpenBackground;
+  final VoidCallback onOpenEqualizer;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final remaining = ref.watch(sleepTimerProvider);
-    if (remaining == null) {
-      return prism.PopupAnchor(
-        targetBuilder: (open) => _ChromeIconButton(
-          key: const ValueKey('player-sleep-timer-button'),
-          icon: Icons.timer_outlined,
-          tooltip: '定时关闭音乐',
-          onPressed: open,
-          darkForeground: darkForeground,
-        ),
-        popupBuilder: (_) => const PlayerSleepTimerPopup(),
-      );
-    }
     final scheme = Theme.of(context).colorScheme;
-    final label = formatSleepTimerRemaining(remaining);
-    return prism.PopupAnchor(
-      targetBuilder: (open) => Tooltip(
-        message: '定时关闭音乐 · 剩余 $label',
-        child: prism.PressRegion(
-          key: const ValueKey('player-sleep-timer-button'),
-          onTap: open,
-          shape: const StadiumBorder(),
-          fill: scheme.primaryContainer,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: SizedBox(
-              height: 36,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.timer_rounded,
-                    color: scheme.onPrimaryContainer,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: scheme.onPrimaryContainer,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
+    Widget leading(IconData icon) =>
+        Icon(icon, size: 20, color: scheme.onSurface);
+    return prism.PopupMenu(
+      items: [
+        prism.PopupMenuItem(
+          label: '定时关闭',
+          subtitle: remaining == null
+              ? null
+              : '剩余 ${formatSleepTimerRemaining(remaining)}',
+          leading: leading(
+            remaining == null ? Icons.timer_outlined : Icons.timer_rounded,
+          ),
+          executeImmediately: true,
+          onPressed: onOpenSleepTimer,
+        ),
+        if (showKtvBackground || showPortraitBackground)
+          prism.PopupMenuItem(
+            label: '背景',
+            leading: leading(Icons.image_outlined),
+            executeImmediately: true,
+            onPressed: () => onOpenBackground(
+              showKtvBackground
+                  ? KtvBackgroundTarget.ktv
+                  : KtvBackgroundTarget.portrait,
             ),
           ),
+        prism.PopupMenuItem(
+          label: '均衡器',
+          leading: leading(Icons.graphic_eq_rounded),
+          executeImmediately: true,
+          onPressed: onOpenEqualizer,
         ),
-      ),
-      popupBuilder: (_) => const PlayerSleepTimerPopup(),
+      ],
     );
   }
 }

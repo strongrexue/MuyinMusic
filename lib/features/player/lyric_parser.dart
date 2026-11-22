@@ -43,10 +43,9 @@ class KaraokeLyricLine {
 }
 
 /// Fraction of a word-timing-less line that has elapsed at
-/// [positionMs], where [endMs] is the line's effective end (the next
-/// line's start, or the song's duration for the last line). Drives the
-/// whole-line progress sweep shown for lyrics without per-word
-/// timestamps.
+/// [positionMs], where [endMs] is the line's effective sweep end (see
+/// [sweepEndMs]). Drives the whole-line progress sweep shown for
+/// lyrics without per-word timestamps.
 double lyricLineProgress({
   required int startMs,
   required int endMs,
@@ -56,6 +55,190 @@ double lyricLineProgress({
   if (positionMs >= endMs) return 1;
   final duration = math.max(1, endMs - startMs);
   return ((positionMs - startMs) / duration).clamp(0, 1).toDouble();
+}
+
+/// Effective end of a word-timing-less line for the progress sweep:
+/// the earlier of [limitMs] (the next line's start, or the song's
+/// duration for the last line) and an estimate of when the line
+/// finishes being sung, so the sweep completes with the singing
+/// instead of spreading across the silent tail before the next line.
+/// The estimate is ~300ms per unit of [totalWeight] (see
+/// [lyricSweepSegments]), clamped to at least 1s and at most the gap
+/// up to [limitMs].
+int sweepEndMs({
+  required int startMs,
+  required double totalWeight,
+  required int limitMs,
+}) {
+  final gapMs = math.max(0, limitMs - startMs);
+  final estimateMs = (totalWeight * _kSweepMsPerWeight)
+      .round()
+      .clamp(1000, math.max(1000, gapMs))
+      .toInt();
+  return math.min(limitMs, startMs + estimateMs);
+}
+
+/// One span of a word-timing-less line in the weighted sweep model:
+/// [weight] is how long the sweep spends crossing the span, and
+/// [start]/[end] are the rune offsets its ink covers. A pause segment
+/// (inserted after punctuation) has start == end: the sweep waits at
+/// that rune boundary while its weight elapses.
+class LyricSweepSegment {
+  const LyricSweepSegment({
+    required this.weight,
+    required this.start,
+    required this.end,
+  });
+
+  final double weight;
+  final double start;
+  final double end;
+}
+
+const double _kSweepCjkWeight = 1.0;
+const double _kSweepLatinWeight = 0.45;
+const double _kSweepSpaceWeight = 0.3;
+const double _kSweepPunctuationWeight = 0.2;
+const double _kSweepPunctuationPauseWeight = 0.8;
+const double _kSweepTailWeightFactor = 2.5;
+const int _kSweepMsPerWeight = 300;
+
+bool _isSweepSpace(int rune) => rune == 0x20 || rune == 0x09 || rune == 0x3000;
+
+bool _isSweepPunctuation(int rune) {
+  // ASCII punctuation plus the CJK/fullwidth marks common in lyrics.
+  if (rune < 0x80) {
+    return (rune >= 0x21 && rune <= 0x2F) ||
+        (rune >= 0x3A && rune <= 0x40) ||
+        (rune >= 0x5B && rune <= 0x5E) ||
+        (rune >= 0x7B && rune <= 0x7E);
+  }
+  return rune == 0xB7 || // ·
+      (rune >= 0x2013 && rune <= 0x2014) || // – —
+      rune == 0x2018 ||
+      rune == 0x2019 ||
+      rune == 0x201C ||
+      rune == 0x201D ||
+      rune == 0x2026 || // …
+      (rune >= 0x3001 && rune <= 0x3002) || // 、 。
+      (rune >= 0x3008 && rune <= 0x3011) || // 〈 〉 《 》 【 】
+      rune == 0xFF01 || // ！
+      rune == 0xFF08 || // （
+      rune == 0xFF09 || // ）
+      rune == 0xFF0C || // ，
+      rune == 0xFF1A || // ：
+      rune == 0xFF1B || // ；
+      rune == 0xFF1F; // ？
+}
+
+bool _isSweepCjk(int rune) =>
+    (rune >= 0x2E80 && rune <= 0x303E) ||
+    (rune >= 0x3041 && rune <= 0x30FF) || // hiragana + katakana
+    (rune >= 0x3400 && rune <= 0x4DBF) ||
+    (rune >= 0x4E00 && rune <= 0x9FFF) ||
+    (rune >= 0xAC00 && rune <= 0xD7A3) || // hangul syllables
+    (rune >= 0xF900 && rune <= 0xFAFF) ||
+    (rune >= 0xFF00 && rune <= 0xFF5E) || // fullwidth forms
+    (rune >= 0x20000 && rune <= 0x2A6DF);
+
+bool _isSweepLatin(int rune) =>
+    (rune >= 0x30 && rune <= 0x39) || // digits
+    (rune >= 0x41 && rune <= 0x5A) ||
+    (rune >= 0x61 && rune <= 0x7A) ||
+    (rune >= 0xC0 && rune <= 0x24F); // latin-1 letters + latin extended
+
+double _sweepRuneWeight(int rune) {
+  if (_isSweepSpace(rune)) return _kSweepSpaceWeight;
+  if (_isSweepCjk(rune)) return _kSweepCjkWeight;
+  if (_isSweepLatin(rune)) return _kSweepLatinWeight;
+  return _kSweepCjkWeight;
+}
+
+/// Splits [text] into weighted sweep segments. Singing does not move
+/// at a constant speed through a line: CJK syllables carry a full
+/// beat each, latin letters run faster, a pause follows punctuation,
+/// and the last content character of the line is held (its weight is
+/// multiplied, modelling the trailing note). The three sweep surfaces
+/// (KTV, lyrics page, mini lyrics) share this model so their timing
+/// math is identical.
+List<LyricSweepSegment> lyricSweepSegments(String text) {
+  final segments = <LyricSweepSegment>[];
+  var offset = 0.0;
+  var lastContentSegment = -1;
+  for (final rune in text.runes) {
+    if (_isSweepPunctuation(rune)) {
+      segments.add(
+        LyricSweepSegment(
+          weight: _kSweepPunctuationWeight,
+          start: offset,
+          end: offset + 1,
+        ),
+      );
+      offset += 1;
+      // The pause after punctuation: time passes, no ink advances.
+      segments.add(
+        LyricSweepSegment(
+          weight: _kSweepPunctuationPauseWeight,
+          start: offset,
+          end: offset,
+        ),
+      );
+      continue;
+    }
+    segments.add(
+      LyricSweepSegment(
+        weight: _sweepRuneWeight(rune),
+        start: offset,
+        end: offset + 1,
+      ),
+    );
+    if (!_isSweepSpace(rune)) lastContentSegment = segments.length - 1;
+    offset += 1;
+  }
+  if (lastContentSegment >= 0) {
+    final tail = segments[lastContentSegment];
+    segments[lastContentSegment] = LyricSweepSegment(
+      weight: tail.weight * _kSweepTailWeightFactor,
+      start: tail.start,
+      end: tail.end,
+    );
+  }
+  return segments;
+}
+
+/// Total singing weight of [segments]; a line's estimated sung
+/// duration is this times ~300ms (see [sweepEndMs]).
+double lyricSweepTotalWeight(List<LyricSweepSegment> segments) =>
+    segments.fold(0.0, (sum, segment) => sum + segment.weight);
+
+/// Maps the elapsed fraction [progress] of a line's estimated sung
+/// duration to the sweep's clip fraction (0..1 of the line's rune
+/// span): the position where the cumulative segment weight reaches
+/// progress × total weight, interpolated inside the segment it lands
+/// in. During a pause segment the position holds at its boundary.
+double lyricSweepWidthFraction({
+  required List<LyricSweepSegment> segments,
+  required int runeCount,
+  required double progress,
+}) {
+  if (segments.isEmpty || runeCount <= 0) return 0;
+  if (progress <= 0) return 0;
+  if (progress >= 1) return 1;
+  final target = progress * lyricSweepTotalWeight(segments);
+  var cumulative = 0.0;
+  for (final segment in segments) {
+    final next = cumulative + segment.weight;
+    if (target <= next) {
+      if (segment.weight <= 0 || segment.end <= segment.start) {
+        return (segment.start / runeCount).clamp(0.0, 1.0).toDouble();
+      }
+      final within = (target - cumulative) / segment.weight;
+      final position = segment.start + within * (segment.end - segment.start);
+      return (position / runeCount).clamp(0.0, 1.0).toDouble();
+    }
+    cumulative = next;
+  }
+  return 1;
 }
 
 class KaraokeWordTiming {
