@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui/car_display_layout.dart';
@@ -47,6 +48,28 @@ class PlayerPage extends ConsumerStatefulWidget {
 }
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
+  bool _systemBarsHidden = false;
+
+  /// Landscape KTV is a full-screen stage, so the system bars hide while
+  /// it is on screen; every other player state keeps the app-wide
+  /// edge-to-edge mode set at startup. Guarded by [_systemBarsHidden] so
+  /// the platform call only fires on transitions.
+  void _syncKtvSystemUi(bool hide) {
+    if (hide == _systemBarsHidden) return;
+    _systemBarsHidden = hide;
+    SystemChrome.setEnabledSystemUIMode(
+      hide ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+    );
+  }
+
+  @override
+  void dispose() {
+    if (_systemBarsHidden) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Watch only what decides the page skeleton. `position` ticks every few
@@ -62,6 +85,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           settingsProvider.select((settings) => settings.ktvModeEnabled),
         ) &&
         MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
+    // Hide the system bars only while landscape KTV is actually the
+    // active page; the page stays mounted (inactive) under other routes.
+    _syncKtvSystemUi(ktvChromePinned && widget.active);
     final topChromeRow = TopChromeRow(
       onOpenEqualizer: () =>
           widget.onDismissRequested('/settings/equalizer'),
