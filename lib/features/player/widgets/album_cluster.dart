@@ -13,8 +13,8 @@ import 'player_palette.dart';
 import 'spinning_cover_art.dart';
 import 'track_change_switcher.dart';
 
-const double _compactAlbumContentLift = 36;
-const double _miniLyricsBottomInset = 20;
+const double _compactAlbumTopPadding = 20;
+const double _miniLyricsSlotHeight = 84;
 
 class AlbumPage extends ConsumerWidget {
   const AlbumPage({super.key, this.wide = false, this.onOpenLyrics});
@@ -39,8 +39,9 @@ class AlbumPage extends ConsumerWidget {
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
     final track = player.track;
-    // Reserve the mini-lyric space before loading finishes. Otherwise its
-    // arrival moves the real cover 36dp away from the captured flight endpoint.
+    // The compact column is top-anchored and the mini-lyric slot below the
+    // cover keeps a fixed height, so the cover never shifts when the lyrics
+    // finish loading or the mini-lyrics setting toggles.
     final reserveMiniLyrics =
         !wide && onOpenLyrics != null && miniLyricsEnabled;
     final showMiniLyrics = reserveMiniLyrics && player.miniLyricsReady;
@@ -63,94 +64,102 @@ class AlbumPage extends ConsumerWidget {
         final metadataKey = track == null
             ? 'album-metadata:loading'
             : 'album-metadata:${track.id}:${track.album}';
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Center(
-              child: Transform.translate(
-                offset: Offset(
-                  0,
-                  reserveMiniLyrics ? -_compactAlbumContentLift : 0,
+        final cover = SizedBox.square(
+          dimension: resolvedCoverSize,
+          // The tap recognizer coexists with the parent's vertical
+          // pull recognizer, so dragging still dismisses the page.
+          child: PlayerPullHandle(
+            child: Semantics(
+              button: true,
+              label: square ? '切换为圆形封面' : '切换为方形封面',
+              child: GestureDetector(
+                key: const ValueKey('player-cover-toggle-button'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => unawaited(
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setSquareAlbumCoverEnabled(!square),
                 ),
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.symmetric(vertical: wide ? 8 : 12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox.square(
-                        dimension: resolvedCoverSize,
-                        // The tap recognizer coexists with the parent's vertical
-                        // pull recognizer, so dragging still dismisses the page.
-                        child: PlayerPullHandle(
-                          child: Semantics(
-                            button: true,
-                            label: square ? '切换为圆形封面' : '切换为方形封面',
-                            child: GestureDetector(
-                              key: const ValueKey('player-cover-toggle-button'),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => unawaited(
-                                ref
-                                    .read(settingsProvider.notifier)
-                                    .setSquareAlbumCoverEnabled(!square),
-                              ),
-                              child: PlayerCoverAnchor(
-                                expanded: true,
-                                child: track == null
-                                    ? _LoadingAlbumArtwork(
-                                        size: resolvedCoverSize,
-                                      )
-                                    : SpinningCoverArt(
-                                        track: track,
-                                        size: resolvedCoverSize,
-                                        placeholder: ColoredBox(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.34,
-                                          ),
-                                          child: Center(
-                                            child: Icon(
-                                              Icons.album_rounded,
-                                              size: 56,
-                                              color: playerMuted(context),
-                                            ),
-                                          ),
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                            blurRadius: 28,
-                                            offset: const Offset(0, 18),
-                                          ),
-                                        ],
-                                      ),
+                child: PlayerCoverAnchor(
+                  expanded: true,
+                  child: track == null
+                      ? _LoadingAlbumArtwork(size: resolvedCoverSize)
+                      : SpinningCoverArt(
+                          track: track,
+                          size: resolvedCoverSize,
+                          placeholder: ColoredBox(
+                            color: Colors.white.withValues(alpha: 0.34),
+                            child: Center(
+                              child: Icon(
+                                Icons.album_rounded,
+                                size: 56,
+                                color: playerMuted(context),
                               ),
                             ),
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.16),
+                              blurRadius: 28,
+                              offset: const Offset(0, 18),
+                            ),
+                          ],
                         ),
-                      ),
-                      SizedBox(height: wide ? 18 : 22),
-                      TrackChangeSwitcher(
-                        transitionKey: metadataKey,
-                        incomingOffset: const Offset(0.12, 0),
-                        child: track == null
-                            ? const SizedBox(height: 24)
-                            : _AlbumMetadata(track: track),
-                      ),
-                    ],
-                  ),
                 ),
               ),
             ),
-            if (showMiniLyrics)
-              Positioned(
-                left: 0,
-                bottom: _miniLyricsBottomInset,
-                width: math.min(320, constraints.maxWidth * 0.78),
-                child: MiniLyricsPanel(onOpenLyrics: onOpenLyrics!),
+          ),
+        );
+
+        if (wide) {
+          return Center(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  cover,
+                  const SizedBox(height: 18),
+                  TrackChangeSwitcher(
+                    transitionKey: metadataKey,
+                    incomingOffset: const Offset(0.12, 0),
+                    child: track == null
+                        ? const SizedBox(height: 24)
+                        : _AlbumMetadata(track: track),
+                  ),
+                ],
               ),
-          ],
+            ),
+          );
+        }
+
+        // Compact: the cover hugs the top bar instead of floating in the
+        // vertical center, and the mini lyrics sit in flow right below it,
+        // centered. The album line is no longer shown here (the top bar
+        // already carries the title and artist).
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(0, _compactAlbumTopPadding, 0, 12),
+          child: SizedBox(
+            width: constraints.maxWidth,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                cover,
+                if (reserveMiniLyrics) ...[
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: _miniLyricsSlotHeight,
+                    child: showMiniLyrics
+                        ? MiniLyricsPanel(onOpenLyrics: onOpenLyrics!)
+                        : null,
+                  ),
+                ],
+              ],
+            ),
+          ),
         );
       },
     );

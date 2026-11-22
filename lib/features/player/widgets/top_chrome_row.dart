@@ -31,10 +31,13 @@ class TopChromeRow extends ConsumerWidget {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
     );
-    // The KTV background picker only exists on the landscape KTV page.
-    final showKtvBackgroundButton =
-        ktvModeEnabled &&
+    final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
+    // The KTV background picker only exists on the landscape KTV page.
+    final showKtvBackgroundButton = ktvModeEnabled && isLandscape;
+    // The portrait player page gets the same background entry, editing the
+    // portrait selection instead (shared library, separate selected item).
+    final showPortraitBackgroundButton = !isLandscape;
     // The built-in KTV background is a bright photo at the top, so the
     // chrome switches to dark foreground colors while it is showing.
     final darkForeground =
@@ -102,11 +105,11 @@ class TopChromeRow extends ConsumerWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             // Capped so a long source/quality label ellipsizes instead of
             // squeezing the title on narrow phones.
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 96),
+              constraints: const BoxConstraints(maxWidth: 84),
               child: _QualityEntry(darkForeground: darkForeground),
             ),
             const SizedBox(width: 4),
@@ -123,7 +126,14 @@ class TopChromeRow extends ConsumerWidget {
               const SizedBox(width: 4),
               _KtvBackgroundButton(darkForeground: darkForeground),
             ],
-            const SizedBox(width: 8),
+            if (showPortraitBackgroundButton) ...[
+              const SizedBox(width: 4),
+              _KtvBackgroundButton(
+                darkForeground: darkForeground,
+                target: KtvBackgroundTarget.portrait,
+              ),
+            ],
+            const SizedBox(width: 4),
             prism.PopupAnchor(
               targetBuilder: (open) => _ChromeIconButton(
                 key: const ValueKey('player-equalizer-button'),
@@ -233,11 +243,16 @@ class _KtvModeButton extends StatelessWidget {
   }
 }
 
-/// Opens the KTV background picker (built-in image / imported images).
+/// Opens the background picker (built-in image / imported images for KTV,
+/// flowing-light default / imported images for the portrait player page).
 class _KtvBackgroundButton extends StatelessWidget {
-  const _KtvBackgroundButton({this.darkForeground = false});
+  const _KtvBackgroundButton({
+    this.darkForeground = false,
+    this.target = KtvBackgroundTarget.ktv,
+  });
 
   final bool darkForeground;
+  final KtvBackgroundTarget target;
 
   @override
   Widget build(BuildContext context) {
@@ -245,11 +260,11 @@ class _KtvBackgroundButton extends StatelessWidget {
       targetBuilder: (open) => _ChromeIconButton(
         key: const ValueKey('player-ktv-background-button'),
         icon: Icons.image_outlined,
-        tooltip: 'KTV 背景',
+        tooltip: target == KtvBackgroundTarget.portrait ? '播放页背景' : 'KTV 背景',
         onPressed: open,
         darkForeground: darkForeground,
       ),
-      popupBuilder: (_) => const KtvBackgroundPopup(),
+      popupBuilder: (_) => KtvBackgroundPopup(target: target),
     );
   }
 }

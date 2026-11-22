@@ -27,6 +27,8 @@ const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
 const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
 const String _kKtvBackgroundItemsKey = 'player_ktv_background_items';
 const String _kKtvBackgroundSelectedIdKey = 'player_ktv_background_selected_id';
+const String _kPortraitBackgroundSelectedIdKey =
+    'player_portrait_background_selected_id';
 const String _kKtvBackgroundMigratedKey =
     'player_ktv_background_items_migrated_v1';
 const String _kLocalMusicDirKey = 'local_music_dir';
@@ -201,6 +203,7 @@ class AppSettings {
     this.ktvBackgroundImagePath,
     this.ktvBackgroundItems = const [],
     this.ktvBackgroundSelectedId,
+    this.portraitBackgroundSelectedId,
     required this.localMusicDirs,
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
@@ -264,6 +267,18 @@ class AppSettings {
     if (ktvBackgroundStyle != KtvBackgroundStyle.custom) return null;
     for (final item in ktvBackgroundItems) {
       if (item.id == ktvBackgroundSelectedId) return item;
+    }
+    return null;
+  }
+
+  /// 竖屏播放页选中的背景图库条目 id；为 null 时竖屏播放页用流光背景。
+  /// 图库与图片文件和 KTV 共用，选中状态与 [ktvBackgroundSelectedId] 独立。
+  final String? portraitBackgroundSelectedId;
+
+  /// 竖屏播放页当前生效的背景条目（选中条目存在时）。
+  KtvBackgroundItem? get selectedPortraitBackgroundItem {
+    for (final item in ktvBackgroundItems) {
+      if (item.id == portraitBackgroundSelectedId) return item;
     }
     return null;
   }
@@ -347,6 +362,7 @@ class AppSettings {
     Object? ktvBackgroundImagePath = _unsetValue,
     List<KtvBackgroundItem>? ktvBackgroundItems,
     Object? ktvBackgroundSelectedId = _unsetValue,
+    Object? portraitBackgroundSelectedId = _unsetValue,
     String? localMusicDir,
     List<String>? localMusicDirs,
     bool? useBuiltInSourceFilePicker,
@@ -401,6 +417,10 @@ class AppSettings {
     ktvBackgroundSelectedId: identical(ktvBackgroundSelectedId, _unsetValue)
         ? this.ktvBackgroundSelectedId
         : ktvBackgroundSelectedId as String?,
+    portraitBackgroundSelectedId:
+        identical(portraitBackgroundSelectedId, _unsetValue)
+        ? this.portraitBackgroundSelectedId
+        : portraitBackgroundSelectedId as String?,
     localMusicDirs:
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
@@ -540,6 +560,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
         _prefs.getString(_kKtvBackgroundItemsKey),
       ),
       ktvBackgroundSelectedId: _prefs.getString(_kKtvBackgroundSelectedIdKey),
+      portraitBackgroundSelectedId: _prefs.getString(
+        _kPortraitBackgroundSelectedIdKey,
+      ),
       localMusicDirs: _normalizeLocalMusicDirs(
         _prefs.getStringList(_kLocalMusicDirsKey) ??
             [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
@@ -882,6 +905,44 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await _persistKtvBackgroundItems();
   }
 
+  Future<void> _persistPortraitBackgroundSelectedId() async {
+    final selectedId = state.portraitBackgroundSelectedId;
+    if (selectedId == null) {
+      await _prefs.remove(_kPortraitBackgroundSelectedIdKey);
+    } else {
+      await _prefs.setString(_kPortraitBackgroundSelectedIdKey, selectedId);
+    }
+  }
+
+  /// 把一张已复制进 ktv_backgrounds/ 的图片登记进共用图库并选为竖屏
+  /// 播放页背景；不改动 KTV 的样式与选中。
+  Future<void> addPortraitBackgroundItem(KtvBackgroundItem item) async {
+    state = state.copyWith(
+      ktvBackgroundItems: List.unmodifiable([
+        for (final current in state.ktvBackgroundItems)
+          if (current.id != item.id) current,
+        item,
+      ]),
+      portraitBackgroundSelectedId: item.id,
+    );
+    await _persistKtvBackgroundItems();
+    await _persistPortraitBackgroundSelectedId();
+  }
+
+  /// 选用图库中的一张图作竖屏播放页背景；与 KTV 选中互不影响。
+  Future<void> selectPortraitBackgroundItem(String id) async {
+    if (!state.ktvBackgroundItems.any((item) => item.id == id)) return;
+    state = state.copyWith(portraitBackgroundSelectedId: id);
+    await _persistPortraitBackgroundSelectedId();
+  }
+
+  /// 竖屏播放页恢复无图背景（流光）。
+  Future<void> clearPortraitBackground() async {
+    if (state.portraitBackgroundSelectedId == null) return;
+    state = state.copyWith(portraitBackgroundSelectedId: null);
+    await _persistPortraitBackgroundSelectedId();
+  }
+
   Future<void> renameKtvBackgroundItem(String id, String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
@@ -908,6 +969,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     }
     if (removed == null) return null;
     final wasSelected = state.ktvBackgroundSelectedId == id;
+    final wasPortraitSelected = state.portraitBackgroundSelectedId == id;
     state = state.copyWith(
       ktvBackgroundItems: List.unmodifiable(remaining),
       ktvBackgroundSelectedId: wasSelected
@@ -916,6 +978,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       ktvBackgroundStyle: wasSelected
           ? KtvBackgroundStyle.builtin
           : state.ktvBackgroundStyle,
+      portraitBackgroundSelectedId: wasPortraitSelected
+          ? null
+          : state.portraitBackgroundSelectedId,
     );
     if (wasSelected) {
       await _prefs.setString(
@@ -924,6 +989,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       );
     }
     await _persistKtvBackgroundItems();
+    if (wasPortraitSelected) {
+      await _persistPortraitBackgroundSelectedId();
+    }
     return removed;
   }
 

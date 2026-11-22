@@ -29,9 +29,18 @@ String _newKtvBackgroundId() {
       '${random.nextInt(1 << 24).toRadixString(36)}';
 }
 
-/// KTV 背景选择面板：内置背景 + 自定义图库，点选立即生效。
+/// 背景面板的编辑目标。横屏 KTV 与竖屏播放页共用同一图库与图片文件，
+/// 但选中状态分开：KTV 用 ktvBackgroundStyle / ktvBackgroundSelectedId，
+/// 竖屏用 portraitBackgroundSelectedId（为 null 时竖屏是流光背景，
+/// 面板不提供 KTV 的横构图内置图）。
+enum KtvBackgroundTarget { ktv, portrait }
+
+/// 背景选择面板：KTV 是内置背景 + 自定义图库，竖屏是默认（流光）+
+/// 自定义图库，点选立即生效。
 class KtvBackgroundPopup extends ConsumerWidget {
-  const KtvBackgroundPopup({super.key});
+  const KtvBackgroundPopup({super.key, this.target = KtvBackgroundTarget.ktv});
+
+  final KtvBackgroundTarget target;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,9 +51,11 @@ class KtvBackgroundPopup extends ConsumerWidget {
           style: s.ktvBackgroundStyle,
           items: s.ktvBackgroundItems,
           selectedId: s.ktvBackgroundSelectedId,
+          portraitSelectedId: s.portraitBackgroundSelectedId,
         ),
       ),
     );
+    final isPortrait = target == KtvBackgroundTarget.portrait;
     return PlayerPopupCard(
       key: const ValueKey('player-ktv-background-popup'),
       minWidth: 264,
@@ -53,32 +64,49 @@ class KtvBackgroundPopup extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const PlayerPopupHeader(title: 'KTV 背景', subtitle: '切换立即生效'),
-          PlayerPopupRow(
-            key: const ValueKey('ktv-background-builtin'),
-            label: '内置背景',
-            subtitle: '默认',
-            leading: const ClipRRect(
-              borderRadius: BorderRadius.all(Radius.circular(4)),
-              child: Image(
-                image: AssetImage('assets/images/ktv_bg_default.jpg'),
-                width: 20,
-                height: 20,
-                fit: BoxFit.cover,
+          PlayerPopupHeader(
+            title: isPortrait ? '播放页背景' : 'KTV 背景',
+            subtitle: '切换立即生效',
+          ),
+          if (isPortrait)
+            PlayerPopupRow(
+              key: const ValueKey('portrait-background-none'),
+              label: '默认背景',
+              subtitle: '流光',
+              leading: const Icon(Icons.auto_awesome_outlined, size: 20),
+              selected: state.portraitSelectedId == null,
+              onTap: () => unawaited(
+                ref.read(settingsProvider.notifier).clearPortraitBackground(),
+              ),
+            )
+          else
+            PlayerPopupRow(
+              key: const ValueKey('ktv-background-builtin'),
+              label: '内置背景',
+              subtitle: '默认',
+              leading: const ClipRRect(
+                borderRadius: BorderRadius.all(Radius.circular(4)),
+                child: Image(
+                  image: AssetImage('assets/images/ktv_bg_default.jpg'),
+                  width: 20,
+                  height: 20,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              selected: state.style == KtvBackgroundStyle.builtin,
+              onTap: () => unawaited(
+                ref.read(settingsProvider.notifier).selectBuiltinKtvBackground(),
               ),
             ),
-            selected: state.style == KtvBackgroundStyle.builtin,
-            onTap: () => unawaited(
-              ref.read(settingsProvider.notifier).selectBuiltinKtvBackground(),
-            ),
-          ),
           for (final item in state.items)
             _CustomItemRow(
               key: ValueKey('ktv-background-item-${item.id}'),
               item: item,
-              selected:
-                  state.style == KtvBackgroundStyle.custom &&
-                  state.selectedId == item.id,
+              target: target,
+              selected: isPortrait
+                  ? state.portraitSelectedId == item.id
+                  : state.style == KtvBackgroundStyle.custom &&
+                        state.selectedId == item.id,
             ),
           PlayerPopupRow(
             key: const ValueKey('ktv-background-import'),
@@ -111,15 +139,18 @@ class KtvBackgroundPopup extends ConsumerWidget {
       final id = _newKtvBackgroundId();
       final fileName = '$id$extension';
       // 复制进应用文档目录，避免原图被移动/删除后背景失效。
-      final target = await ktvBackgroundFile(fileName);
-      await File(sourcePath).copy(target.path);
+      final targetFile = await ktvBackgroundFile(fileName);
+      await File(sourcePath).copy(targetFile.path);
       var name = p.basenameWithoutExtension(picked.name).trim();
       if (name.isEmpty) name = '自定义背景';
-      await ref
-          .read(settingsProvider.notifier)
-          .addKtvBackgroundItem(
-            KtvBackgroundItem(id: id, name: name, fileName: fileName),
-          );
+      final item = KtvBackgroundItem(id: id, name: name, fileName: fileName);
+      final notifier = ref.read(settingsProvider.notifier);
+      // 导入只登记进共用图库并选中到当前入口的目标，另一侧选中不变。
+      if (target == KtvBackgroundTarget.portrait) {
+        await notifier.addPortraitBackgroundItem(item);
+      } else {
+        await notifier.addKtvBackgroundItem(item);
+      }
       if (!context.mounted) return;
       showAppToast(context, '背景图已更新', type: AppToastType.success);
     } catch (error) {
@@ -130,10 +161,16 @@ class KtvBackgroundPopup extends ConsumerWidget {
 }
 
 class _CustomItemRow extends ConsumerWidget {
-  const _CustomItemRow({super.key, required this.item, required this.selected});
+  const _CustomItemRow({
+    super.key,
+    required this.item,
+    required this.selected,
+    required this.target,
+  });
 
   final KtvBackgroundItem item;
   final bool selected;
+  final KtvBackgroundTarget target;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -143,7 +180,13 @@ class _CustomItemRow extends ConsumerWidget {
         .valueOrNull;
     return prism.PressRegion(
       onTap: () => unawaited(
-        ref.read(settingsProvider.notifier).selectKtvBackgroundItem(item.id),
+        target == KtvBackgroundTarget.portrait
+            ? ref
+                  .read(settingsProvider.notifier)
+                  .selectPortraitBackgroundItem(item.id)
+            : ref
+                  .read(settingsProvider.notifier)
+                  .selectKtvBackgroundItem(item.id),
       ),
       shape: prism.AppShape.md,
       overlay: prism.PressRegion.hoverOverlay,

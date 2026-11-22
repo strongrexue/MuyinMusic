@@ -49,6 +49,12 @@ class PlayerPage extends ConsumerStatefulWidget {
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _systemBarsHidden = false;
 
+  /// Compact pager cover-page visibility (1 = cover page, 0 = lyrics
+  /// page), driven by _NowPlayingBody's PageController and consumed by
+  /// the backdrop: the portrait image background belongs to the cover
+  /// page only and fades out as the lyrics page slides in.
+  final ValueNotifier<double> _compactCoverVisibility = ValueNotifier(1);
+
   /// Landscape KTV is a full-screen stage, so the system bars hide while
   /// it is on screen; every other player state keeps the app-wide
   /// edge-to-edge mode set at startup. Guarded by [_systemBarsHidden] so
@@ -63,6 +69,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   void dispose() {
+    _compactCoverVisibility.dispose();
     if (_systemBarsHidden) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
@@ -123,7 +130,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               child: FadeTransition(
                 opacity: widget.progress.drive(const PlayerPhase(0, 0.12)),
                 child: RepaintBoundary(
-                  child: ImmersiveBackground(revealProgress: widget.progress),
+                  child: ImmersiveBackground(
+                    revealProgress: widget.progress,
+                    coverVisibility: _compactCoverVisibility,
+                  ),
                 ),
               ),
             ),
@@ -142,7 +152,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                           Expanded(
                             child: showEmpty
                                 ? const _EmptyPlayer()
-                                : const _NowPlayingBody(),
+                                : _NowPlayingBody(coverVisibility: _compactCoverVisibility),
                           ),
                         ],
                       )
@@ -154,7 +164,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                             Expanded(
                               child: showEmpty
                                   ? const _EmptyPlayer()
-                                  : const _NowPlayingBody(),
+                                  : _NowPlayingBody(
+                                      coverVisibility:
+                                          _compactCoverVisibility,
+                                    ),
                             ),
                           ],
                         ),
@@ -169,7 +182,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 }
 
 class _NowPlayingBody extends ConsumerStatefulWidget {
-  const _NowPlayingBody();
+  const _NowPlayingBody({this.coverVisibility});
+
+  /// Receives the compact pager's cover-page visibility (1 on the cover
+  /// page, 0 on the lyrics page); the backdrop fades the portrait image
+  /// background with it.
+  final ValueNotifier<double>? coverVisibility;
 
   @override
   ConsumerState<_NowPlayingBody> createState() => _NowPlayingBodyState();
@@ -188,13 +206,30 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
+    _pageController = PageController()..addListener(_syncCoverVisibility);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncCoverVisibility();
+    });
   }
 
   @override
   void dispose() {
+    _pageController.removeListener(_syncCoverVisibility);
     _pageController.dispose();
     super.dispose();
+  }
+
+  /// The portrait image background belongs to the cover page only: mirror
+  /// the pager position into [widget.coverVisibility] (1 − page) so the
+  /// backdrop fades it out as the lyrics page slides in.
+  void _syncCoverVisibility() {
+    final visibility = widget.coverVisibility;
+    if (visibility == null) return;
+    final page = _pageController.hasClients
+        ? (_pageController.page ?? 0)
+        : 0.0;
+    final value = (1 - page).clamp(0.0, 1.0);
+    if (visibility.value != value) visibility.value = value;
   }
 
   void _goToPage(int page) {

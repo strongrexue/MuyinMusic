@@ -125,6 +125,7 @@ class _MiniKaraokeLine extends ConsumerWidget {
     return RichText(
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
       text: TextSpan(children: spans, style: style.copyWith(color: pendingColor)),
     );
   }
@@ -230,7 +231,7 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
           duration: blurDuration,
           curve: AppMotion.emphasized,
           child: Align(
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.center,
             // 当前行有逐字时间戳时逐字染色（KTV 式：起唱即强调色），
             // 否则回退到整行高亮；非当前行保持原有模糊 + 变体色。
             child: active && lines[index].hasWordTiming
@@ -246,6 +247,7 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
                     key: ValueKey('player-mini-lyric-line-$index'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: active
                           ? scheme.onSurface
