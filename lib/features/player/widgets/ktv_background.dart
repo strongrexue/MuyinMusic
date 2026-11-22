@@ -7,8 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../../core/storage/settings_store.dart';
 import 'ktv_background_files.dart';
 
-const String _builtinAsset = 'assets/images/ktv_bg_aurora.webp';
-const String _builtinPosterAsset = 'assets/images/ktv_bg_aurora_poster.jpg';
+const String _builtinAsset = 'assets/images/ktv_bg_default.jpg';
 
 /// 一次性把旧版单张自定义背景图迁进图库：把旧文件复制到
 /// ktv_backgrounds/ 并登记为「自定义背景」。图库非空或已迁移时
@@ -44,7 +43,7 @@ final _selectedKtvBackgroundFileProvider = FutureProvider<File?>((ref) async {
   return await file.exists() ? file : null;
 });
 
-/// 横屏 KTV 播放页背景：内置极光动态图，或用户导入的自定义图片，
+/// 横屏 KTV 播放页背景：内置默认图片，或用户导入的自定义图片，
 /// 由 [AppSettings.ktvBackgroundStyle] 决定。自定义图缺失时回退内置。
 class KtvBackground extends ConsumerWidget {
   const KtvBackground({super.key});
@@ -72,11 +71,8 @@ class KtvBackground extends ConsumerWidget {
               _builtinAsset,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              errorBuilder: (context, error, stackTrace) => Image.asset(
-                _builtinPosterAsset,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-              ),
+              errorBuilder: (context, error, stackTrace) =>
+                  const ColoredBox(color: Color(0xFF101016)),
             ),
           const _BottomScrim(),
         ],

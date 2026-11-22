@@ -32,6 +32,12 @@ class TopChromeRow extends ConsumerWidget {
     final showKtvBackgroundButton =
         ref.watch(settingsProvider.select((s) => s.ktvModeEnabled)) &&
         MediaQuery.orientationOf(context) == Orientation.landscape;
+    // The built-in KTV background is a bright photo at the top, so the
+    // chrome switches to dark foreground colors while it is showing.
+    final darkForeground =
+        showKtvBackgroundButton &&
+        ref.watch(settingsProvider.select((s) => s.ktvBackgroundStyle)) ==
+            KtvBackgroundStyle.builtin;
     return PlayerPullHandle(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(28, 8, 12, 4),
@@ -60,7 +66,9 @@ class TopChromeRow extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: playerInk(context),
+                                color: darkForeground
+                                    ? Colors.black87
+                                    : playerInk(context),
                                 fontSize: 18,
                                 fontWeight: FontWeight.w500,
                                 height: 1.05,
@@ -75,9 +83,11 @@ class TopChromeRow extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: playerMuted(
-                                  context,
-                                ).withValues(alpha: 0.78),
+                                color: darkForeground
+                                    ? Colors.black54
+                                    : playerMuted(
+                                        context,
+                                      ).withValues(alpha: 0.78),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w400,
                                 height: 1.05,
@@ -94,13 +104,13 @@ class TopChromeRow extends ConsumerWidget {
             // squeezing the title on narrow phones.
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 96),
-              child: const _QualityEntry(),
+              child: _QualityEntry(darkForeground: darkForeground),
             ),
             const SizedBox(width: 4),
-            const _SleepTimerButton(),
+            _SleepTimerButton(darkForeground: darkForeground),
             if (showKtvBackgroundButton) ...[
               const SizedBox(width: 4),
-              const _KtvBackgroundButton(),
+              _KtvBackgroundButton(darkForeground: darkForeground),
             ],
             const SizedBox(width: 8),
             prism.PopupAnchor(
@@ -109,6 +119,7 @@ class TopChromeRow extends ConsumerWidget {
                 icon: Icons.graphic_eq_rounded,
                 tooltip: '均衡器',
                 onPressed: open,
+                darkForeground: darkForeground,
               ),
               popupBuilder: (_) =>
                   PlayerEqualizerPopup(onOpenPage: onOpenEqualizer),
@@ -125,7 +136,9 @@ class TopChromeRow extends ConsumerWidget {
 /// tracks and tracks with a single quality have nothing to switch to, so the
 /// label is shown dimmed and inert.
 class _QualityEntry extends ConsumerWidget {
-  const _QualityEntry();
+  const _QualityEntry({this.darkForeground = false});
+
+  final bool darkForeground;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -151,9 +164,13 @@ class _QualityEntry extends ConsumerWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: enabled
-              ? playerAccent(context)
-              : playerMuted(context).withValues(alpha: 0.45),
+          color: darkForeground
+              ? (enabled
+                    ? Colors.black87
+                    : Colors.black.withValues(alpha: 0.45))
+              : (enabled
+                    ? playerAccent(context)
+                    : playerMuted(context).withValues(alpha: 0.45)),
           fontSize: 12,
           fontWeight: FontWeight.w600,
           height: 1,
@@ -179,9 +196,11 @@ class _QualityEntry extends ConsumerWidget {
   }
 }
 
-/// Opens the KTV background picker (built-in animation / imported images).
+/// Opens the KTV background picker (built-in image / imported images).
 class _KtvBackgroundButton extends StatelessWidget {
-  const _KtvBackgroundButton();
+  const _KtvBackgroundButton({this.darkForeground = false});
+
+  final bool darkForeground;
 
   @override
   Widget build(BuildContext context) {
@@ -191,6 +210,7 @@ class _KtvBackgroundButton extends StatelessWidget {
         icon: Icons.image_outlined,
         tooltip: 'KTV 背景',
         onPressed: open,
+        darkForeground: darkForeground,
       ),
       popupBuilder: (_) => const KtvBackgroundPopup(),
     );
@@ -198,7 +218,9 @@ class _KtvBackgroundButton extends StatelessWidget {
 }
 
 class _SleepTimerButton extends ConsumerWidget {
-  const _SleepTimerButton();
+  const _SleepTimerButton({this.darkForeground = false});
+
+  final bool darkForeground;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -210,6 +232,7 @@ class _SleepTimerButton extends ConsumerWidget {
           icon: Icons.timer_outlined,
           tooltip: '定时关闭音乐',
           onPressed: open,
+          darkForeground: darkForeground,
         ),
         popupBuilder: (_) => const PlayerSleepTimerPopup(),
       );
@@ -262,11 +285,13 @@ class _ChromeIconButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.darkForeground = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
+  final bool darkForeground;
 
   @override
   Widget build(BuildContext context) {
@@ -281,7 +306,11 @@ class _ChromeIconButton extends StatelessWidget {
           shape: const CircleBorder(),
           backgroundColor: Colors.white.withValues(alpha: 0.28),
         ),
-        icon: Icon(icon, color: playerInk(context), size: 20),
+        icon: Icon(
+          icon,
+          color: darkForeground ? Colors.black87 : playerInk(context),
+          size: 20,
+        ),
       ),
     );
   }

@@ -29,7 +29,7 @@ String _newKtvBackgroundId() {
       '${random.nextInt(1 << 24).toRadixString(36)}';
 }
 
-/// KTV 背景选择面板：内置动态图 + 自定义图库，点选立即生效。
+/// KTV 背景选择面板：内置背景 + 自定义图库，点选立即生效。
 class KtvBackgroundPopup extends ConsumerWidget {
   const KtvBackgroundPopup({super.key});
 
@@ -56,12 +56,12 @@ class KtvBackgroundPopup extends ConsumerWidget {
           const PlayerPopupHeader(title: 'KTV 背景', subtitle: '切换立即生效'),
           PlayerPopupRow(
             key: const ValueKey('ktv-background-builtin'),
-            label: '内置动态',
-            subtitle: '极光',
+            label: '内置背景',
+            subtitle: '默认',
             leading: const ClipRRect(
               borderRadius: BorderRadius.all(Radius.circular(4)),
               child: Image(
-                image: AssetImage('assets/images/ktv_bg_aurora_poster.jpg'),
+                image: AssetImage('assets/images/ktv_bg_default.jpg'),
                 width: 20,
                 height: 20,
                 fit: BoxFit.cover,
