@@ -373,9 +373,18 @@ class LyricLineTile extends ConsumerWidget {
 
   Widget _mainText(BuildContext context, TextAlign textAlign) {
     if (!line.hasWordTiming) {
-      // No explicit style: the text inherits the AnimatedDefaultTextStyle
-      // above, so color can transition without changing layout metrics.
-      return Text(line.text, textAlign: textAlign);
+      // No word timings to sweep: the active line takes the accent
+      // color as a whole, matching the sung words of timed lines.
+      // Inactive lines keep no explicit style and inherit the
+      // AnimatedDefaultTextStyle above, so color can transition
+      // without changing layout metrics.
+      return Text(
+        line.text,
+        textAlign: textAlign,
+        style: active
+            ? TextStyle(color: Theme.of(context).colorScheme.primary)
+            : null,
+      );
     }
     return KaraokeLineText(
       line: line,

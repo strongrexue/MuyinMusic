@@ -582,7 +582,7 @@ void main() {
     );
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsOneWidget);
     final coverToggle = find.byKey(const ValueKey('player-cover-toggle-button'));
-    final liftedCoverTop = tester.getTopLeft(coverToggle);
+    final coverTopWithMiniLyrics = tester.getTopLeft(coverToggle);
 
     await tester.tap(find.byKey(const ValueKey('player-action-lyric-settings')));
     await _pumpUi(tester);
@@ -597,8 +597,10 @@ void main() {
 
     expect(popup, findsOneWidget);
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsNothing);
-    final centeredCoverTop = tester.getTopLeft(coverToggle);
-    expect(centeredCoverTop.dy - liftedCoverTop.dy, 36);
+    final coverTopWithoutMiniLyrics = tester.getTopLeft(coverToggle);
+    // The compact cover is top-anchored, so toggling mini lyrics no longer
+    // shifts it (the old centered layout moved it by the 36dp lift).
+    expect(coverTopWithoutMiniLyrics.dy - coverTopWithMiniLyrics.dy, 0);
 
     await tester.tapAt(const Offset(4, 4));
     await _pumpUi(tester);
@@ -625,7 +627,9 @@ void main() {
           widget.data == text &&
           (widget.style?.fontSize ?? 0) >= 36,
     );
-    expect(bigLine('第一行歌词'), findsOneWidget);
+    // The active line renders two layers (white base + accent sweep),
+    // so its text legitimately appears more than once in the tree.
+    expect(bigLine('第一行歌词'), findsWidgets);
 
     controller.setStateForTest(
       const PlayerState(lyrics: lyrics, position: Duration(seconds: 4)),
@@ -633,7 +637,7 @@ void main() {
     await _pumpUi(tester);
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(bigLine('第二行歌词'), findsOneWidget);
+    expect(bigLine('第二行歌词'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 

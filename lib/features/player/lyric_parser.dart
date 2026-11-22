@@ -42,6 +42,22 @@ class KaraokeLyricLine {
   bool get hasWordTiming => words.isNotEmpty;
 }
 
+/// Fraction of a word-timing-less line that has elapsed at
+/// [positionMs], where [endMs] is the line's effective end (the next
+/// line's start, or the song's duration for the last line). Drives the
+/// whole-line progress sweep shown for lyrics without per-word
+/// timestamps.
+double lyricLineProgress({
+  required int startMs,
+  required int endMs,
+  required int positionMs,
+}) {
+  if (positionMs <= startMs) return 0;
+  if (positionMs >= endMs) return 1;
+  final duration = math.max(1, endMs - startMs);
+  return ((positionMs - startMs) / duration).clamp(0, 1).toDouble();
+}
+
 class KaraokeWordTiming {
   const KaraokeWordTiming({
     required this.text,

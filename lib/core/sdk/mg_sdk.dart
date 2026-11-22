@@ -4,6 +4,7 @@ import '../models/music_info.dart';
 import 'internal/builders.dart';
 import 'internal/crypto_util.dart';
 import 'internal/format.dart';
+import 'internal/mg_mrc.dart';
 import 'internal/sdk_http.dart';
 
 class MgSdk {
@@ -156,24 +157,60 @@ class MgSdk {
     return url;
   }
 
+  static const _lyricHeaders = {
+    'Referer': 'https://app.c.nf.migu.cn/',
+    'User-Agent':
+        'Mozilla/5.0 (Linux; Android 5.1.1) AppleWebKit/537.36 Mobile Safari/537.36',
+    'channel': '0146921',
+  };
+
   static Future<LyricInfo> getLyric(MusicInfo info) async {
     final lrcUrl = info.meta.lrcUrl;
     if (lrcUrl == null || lrcUrl.isEmpty) throw Exception('mg lyric failed');
-    final lyric = await SdkHttp.getText(
-      lrcUrl,
-      headers: const {
-        'Referer': 'https://app.c.nf.migu.cn/',
-        'User-Agent':
-            'Mozilla/5.0 (Linux; Android 5.1.1) AppleWebKit/537.36 Mobile Safari/537.36',
-        'channel': '0146921',
-      },
-    );
+    final lyric = await SdkHttp.getText(lrcUrl, headers: _lyricHeaders);
     String? tlyric;
     if (info.meta.trcUrl != null && info.meta.trcUrl!.isNotEmpty) {
       try {
         tlyric = await SdkHttp.getText(info.meta.trcUrl!);
       } catch (_) {}
     }
-    return LyricInfo(lyric: lyric, tlyric: tlyric);
+    final lxlyric = await _fetchWordLyric(info);
+    return LyricInfo(lyric: lyric, tlyric: tlyric, lxlyric: lxlyric);
+  }
+
+  /// Best-effort word-timed lyric from the song's mrc track. Any
+  /// failure leaves the plain lyric untouched, so this never throws.
+  static Future<String?> _fetchWordLyric(MusicInfo info) async {
+    try {
+      var mrcUrl = info.meta.mrcUrl;
+      if (mrcUrl == null || mrcUrl.isEmpty) {
+        mrcUrl = await _lookupMrcUrl(info.meta.songId);
+      }
+      if (mrcUrl == null || mrcUrl.isEmpty) return null;
+      final cipher = await SdkHttp.getText(mrcUrl, headers: _lyricHeaders);
+      return mgMrcToLxLyric(cipher);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The search payload carries no usable mrc address; the resource
+  /// info endpoint is the reliable source, keyed by song id.
+  static Future<String?> _lookupMrcUrl(Object songId) async {
+    final response = await SdkHttp.fetch<dynamic>(
+      'https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do'
+      '?resourceType=2',
+      method: 'POST',
+      form: {'resourceId': songId.toString()},
+      headers: _lyricHeaders,
+    );
+    final body = response.body;
+    if (body is! Map) return null;
+    final resource = body['resource'];
+    if (resource is! List || resource.isEmpty) return null;
+    final first = resource.first;
+    if (first is! Map) return null;
+    final url = first['mrcUrl']?.toString();
+    return (url == null || url.isEmpty) ? null : url;
   }
 }

@@ -16,6 +16,7 @@ import 'package:cy_shine_music/core/sdk/internal/crypto_util.dart';
 import 'package:cy_shine_music/core/sdk/internal/format.dart';
 import 'package:cy_shine_music/core/sdk/internal/kg_krc.dart';
 import 'package:cy_shine_music/core/sdk/internal/kw_lyricx.dart';
+import 'package:cy_shine_music/core/sdk/internal/mg_mrc.dart';
 import 'package:cy_shine_music/core/sdk/internal/qrc.dart';
 import 'package:cy_shine_music/core/sdk/internal/tx_qrc_lyric.dart';
 import 'package:cy_shine_music/core/sdk/internal/tx_lyric_routing.dart';
@@ -917,6 +918,77 @@ void main() {
 
     test('returns null when only credit lines exist', () {
       expect(wyYrcToLxLyric('{"t":0,"c":[{"tx":"作曲"}]}'), isNull);
+    });
+  });
+
+  group('MgMrc', () {
+    // Real mrc payload for 李荣浩《麻雀》 (songId 1136356401), captured
+    // from the mrcUrl that the resourceinfo endpoint returns.
+    final cipher = File('test/fixtures/mg_mrc_sample.txt').readAsStringSync();
+
+    test('decrypts the mrc payload into timed lyric lines', () {
+      final plain = mgMrcDecrypt(cipher)!;
+
+      expect(plain, contains('[1247,1297]作(1247,250)词(1497,249)'));
+      expect(plain, contains('[22848,1896]山(22848,250)隔(23098,299)'));
+    });
+
+    test('converts absolute word stamps into line-relative lxlyric', () {
+      final lines = mgMrcToLxLyric(cipher)!.split('\n');
+
+      expect(
+        lines,
+        contains(
+          '[00:01.247]<0,250>作<250,249>词<499,249>：李<748,250>荣<998,299>浩',
+        ),
+      );
+      expect(
+        lines,
+        contains(
+          '[00:22.848]<0,250>山<250,299>隔<549,349>壁<898,299>还<1197,300>是<1497,399>山',
+        ),
+      );
+    });
+
+    test('feeds KaraokeLyricsParser with word timings intact', () {
+      final lyrics = KaraokeLyricsParser.parse(
+        LyricInfo(lyric: '[00:22.848]山隔壁还是山', lxlyric: mgMrcToLxLyric(cipher)),
+      );
+
+      final line = lyrics.lines.firstWhere((l) => l.startMs == 22848);
+      expect(line.words.map((w) => w.text), ['山', '隔', '壁', '还', '是', '山']);
+      expect(
+        line.words.map((w) => w.startMs),
+        [22848, 23098, 23397, 23746, 24045, 24345],
+      );
+    });
+
+    test('rejects non-mrc input', () {
+      expect(mgMrcDecrypt('abcd'), isNull);
+      expect(mgMrcToLxLyric('not hex at all, definitely not mrc'), isNull);
+      expect(mgMrcPlainToLxLyric('[ti:只有元信息]'), isNull);
+    });
+  });
+
+  group('lyricLineProgress', () {
+    test('sweeps 0 to 1 across the line span and clamps outside', () {
+      expect(lyricLineProgress(startMs: 1000, endMs: 5000, positionMs: 500), 0);
+      expect(
+        lyricLineProgress(startMs: 1000, endMs: 5000, positionMs: 1000),
+        0,
+      );
+      expect(
+        lyricLineProgress(startMs: 1000, endMs: 5000, positionMs: 3000),
+        0.5,
+      );
+      expect(
+        lyricLineProgress(startMs: 1000, endMs: 5000, positionMs: 5000),
+        1,
+      );
+      expect(
+        lyricLineProgress(startMs: 1000, endMs: 5000, positionMs: 9000),
+        1,
+      );
     });
   });
 
