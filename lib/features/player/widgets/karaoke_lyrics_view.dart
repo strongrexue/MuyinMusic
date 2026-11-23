@@ -52,6 +52,8 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
     this.edgeFadeEnabled = true,
     this.horizontalPadding = playerContentInset,
     this.edgeFadeExtent,
+    this.edgeFadeExtentTop,
+    this.edgeFadeExtentBottom,
     this.scrollAnchor,
     this.lineVerticalPadding,
     this.listPadding,
@@ -69,6 +71,14 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
   /// panel passes a smaller fade, a centred anchor, tighter rows and
   /// less list padding so its neighbouring lines stay readable.
   final double? edgeFadeExtent;
+
+  /// Per-edge fade overrides. Null keeps the symmetric
+  /// [edgeFadeExtent] fade on that edge; the phone-landscape panel
+  /// passes a long extent per edge so lines dissolve over the full
+  /// height of the floating chrome above/below the list instead of
+  /// sliding under it still readable.
+  final double? edgeFadeExtentTop;
+  final double? edgeFadeExtentBottom;
   final double? scrollAnchor;
   final double? lineVerticalPadding;
   final EdgeInsets? listPadding;
@@ -896,6 +906,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
         key: const ValueKey('karaoke-lyrics-edge-fade'),
         enabled: widget.edgeFadeEnabled,
         fadeExtent: widget.edgeFadeExtent ?? _kLyricEdgeFadeExtent,
+        fadeExtentTop: widget.edgeFadeExtentTop,
+        fadeExtentBottom: widget.edgeFadeExtentBottom,
         child: lyricsList,
       ),
     );
@@ -907,17 +919,23 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
     super.key,
     required this.enabled,
     required this.fadeExtent,
+    this.fadeExtentTop,
+    this.fadeExtentBottom,
     required super.child,
   });
 
   final bool enabled;
   final double fadeExtent;
+  final double? fadeExtentTop;
+  final double? fadeExtentBottom;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
     return _RenderToggleableLyricEdgeFade(
       enabled: enabled,
       fadeExtent: fadeExtent,
+      fadeExtentTop: fadeExtentTop,
+      fadeExtentBottom: fadeExtentBottom,
     );
   }
 
@@ -928,7 +946,9 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
   ) {
     renderObject
       ..enabled = enabled
-      ..fadeExtent = fadeExtent;
+      ..fadeExtent = fadeExtent
+      ..fadeExtentTop = fadeExtentTop
+      ..fadeExtentBottom = fadeExtentBottom;
   }
 }
 
@@ -936,14 +956,21 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
   _RenderToggleableLyricEdgeFade({
     required bool enabled,
     required double fadeExtent,
+    double? fadeExtentTop,
+    double? fadeExtentBottom,
   }) : _enabled = enabled,
-       _fadeExtent = fadeExtent;
+       _fadeExtent = fadeExtent,
+       _fadeExtentTop = fadeExtentTop,
+       _fadeExtentBottom = fadeExtentBottom;
 
   bool _enabled;
   double _fadeExtent;
+  double? _fadeExtentTop;
+  double? _fadeExtentBottom;
   ui.Shader? _edgeShader;
   Size? _shaderSize;
-  double? _shaderFadeExtent;
+  double? _shaderFadeTop;
+  double? _shaderFadeBottom;
 
   bool get enabled => _enabled;
 
@@ -958,6 +985,25 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
     _fadeExtent = value;
     markNeedsPaint();
   }
+
+  double? get fadeExtentTop => _fadeExtentTop;
+
+  set fadeExtentTop(double? value) {
+    if (_fadeExtentTop == value) return;
+    _fadeExtentTop = value;
+    markNeedsPaint();
+  }
+
+  double? get fadeExtentBottom => _fadeExtentBottom;
+
+  set fadeExtentBottom(double? value) {
+    if (_fadeExtentBottom == value) return;
+    _fadeExtentBottom = value;
+    markNeedsPaint();
+  }
+
+  double get _effectiveFadeTop => _fadeExtentTop ?? _fadeExtent;
+  double get _effectiveFadeBottom => _fadeExtentBottom ?? _fadeExtent;
 
   @override
   ShaderMaskLayer? get layer => super.layer as ShaderMaskLayer?;
@@ -983,10 +1029,27 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
     assert(needsCompositing);
     if (_edgeShader == null ||
         _shaderSize != size ||
-        _shaderFadeExtent != _fadeExtent) {
-      final edgeStop = size.height <= 0
-          ? 0.0
-          : math.min(_fadeExtent / size.height, 0.18);
+        _shaderFadeTop != _effectiveFadeTop ||
+        _shaderFadeBottom != _effectiveFadeBottom) {
+      var topStop = 0.0;
+      var bottomStop = 1.0;
+      if (size.height > 0) {
+        if (_fadeExtentTop == null && _fadeExtentBottom == null) {
+          // Symmetric fade: capped so short viewports keep a
+          // readable middle band.
+          final edgeStop = math.min(_fadeExtent / size.height, 0.18);
+          topStop = edgeStop;
+          bottomStop = 1 - edgeStop;
+        } else {
+          // Per-edge fades (phone landscape): each edge dissolves
+          // over its own extent, long enough to cover the floating
+          // chrome floating over that edge.
+          topStop = math.min(_effectiveFadeTop / size.height, 0.45);
+          bottomStop =
+              1 - math.min(_effectiveFadeBottom / size.height, 0.45);
+          if (bottomStop < topStop) bottomStop = topStop;
+        }
+      }
       _edgeShader?.dispose();
       _edgeShader = LinearGradient(
         begin: Alignment.topCenter,
@@ -997,10 +1060,11 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
           Colors.white,
           Colors.transparent,
         ],
-        stops: [0, edgeStop, 1 - edgeStop, 1],
+        stops: [0, topStop, bottomStop, 1],
       ).createShader(Offset.zero & size);
       _shaderSize = size;
-      _shaderFadeExtent = _fadeExtent;
+      _shaderFadeTop = _effectiveFadeTop;
+      _shaderFadeBottom = _effectiveFadeBottom;
     }
     layer ??= ShaderMaskLayer();
     layer!

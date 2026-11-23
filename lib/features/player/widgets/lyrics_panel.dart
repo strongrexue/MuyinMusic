@@ -15,6 +15,8 @@ class LyricsPanel extends ConsumerStatefulWidget {
     this.edgeFadeEnabled = true,
     this.horizontalPadding = playerContentInset,
     this.edgeFadeExtent,
+    this.edgeFadeExtentTop,
+    this.edgeFadeExtentBottom,
     this.scrollAnchor,
     this.lineVerticalPadding,
     this.listPadding,
@@ -29,6 +31,13 @@ class LyricsPanel extends ConsumerStatefulWidget {
   /// car/tablet layout) keeps the shared lyrics-page behaviour; only
   /// the phone-landscape layout passes its own values.
   final double? edgeFadeExtent;
+
+  /// Optional per-edge fade overrides, forwarded like [edgeFadeExtent].
+  /// Null (the default) keeps the symmetric [edgeFadeExtent] fade on
+  /// both edges; the phone-landscape panel passes long top/bottom
+  /// extents so lines dissolve before reaching its floating chrome.
+  final double? edgeFadeExtentTop;
+  final double? edgeFadeExtentBottom;
   final double? scrollAnchor;
   final double? lineVerticalPadding;
   final EdgeInsets? listPadding;
@@ -94,6 +103,8 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
               edgeFadeEnabled: widget.edgeFadeEnabled,
               horizontalPadding: widget.horizontalPadding,
               edgeFadeExtent: widget.edgeFadeExtent,
+              edgeFadeExtentTop: widget.edgeFadeExtentTop,
+              edgeFadeExtentBottom: widget.edgeFadeExtentBottom,
               scrollAnchor: widget.scrollAnchor,
               lineVerticalPadding: widget.lineVerticalPadding,
               listPadding: widget.listPadding,

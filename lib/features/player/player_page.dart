@@ -408,14 +408,25 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                   flex: 10,
                   child: KeyedSubtree(
                     key: const ValueKey('player-phone-landscape-album'),
-                    child: AlbumPage(
-                      wide: true,
-                      // The cover scales with the screen instead of
-                      // filling its area: half the short side, the
-                      // same proportion on phones and desktops.
-                      wideCoverCap: mediaSize.shortestSide * 0.5,
-                      wideMinCoverSize: 80,
-                      wideShowMetadata: false,
+                    // The cover centres over the band above the
+                    // floating bottom stack, not the full height, so
+                    // its bottom edge never slides under the progress
+                    // line floating over the plane.
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        bottom:
+                            playerLandscapeBottomInset +
+                            playerLandscapeBottomStackHeight,
+                      ),
+                      child: AlbumPage(
+                        wide: true,
+                        // The cover scales with the screen instead of
+                        // filling its area: half the short side, the
+                        // same proportion on phones and desktops.
+                        wideCoverCap: mediaSize.shortestSide * 0.5,
+                        wideMinCoverSize: 80,
+                        wideShowMetadata: false,
+                      ),
                     ),
                   ),
                 ),
@@ -426,6 +437,15 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     key: const ValueKey('player-phone-landscape-lyrics'),
                     child: LyricsPanel(
                       edgeFadeExtent: 10,
+                      // Long asymmetric fades matched to the list
+                      // insets below: a line dissolves over the full
+                      // height of the floating chrome at each edge
+                      // instead of sliding under it still readable.
+                      edgeFadeExtentTop: playerLandscapeChromeHeight + 12,
+                      edgeFadeExtentBottom:
+                          playerLandscapeBottomInset +
+                          playerLandscapeBottomStackHeight +
+                          12,
                       scrollAnchor: 0.5,
                       lineVerticalPadding: 4,
                       listPadding: const EdgeInsets.fromLTRB(

@@ -160,6 +160,63 @@ class ImmersiveBackground extends ConsumerWidget {
 /// sharp as the disc and appears whenever the track carries a cover,
 /// independent of the backdrop's downsampled provider and of the
 /// chrome-luminance byte resolution.
+/// Stops of the integrated artwork's dstIn dissolve, as fractions of
+/// the layer's height from its top edge.
+const List<double> integratedArtworkDissolveStops = [
+  0.0,
+  0.58,
+  0.622,
+  0.664,
+  0.706,
+  0.748,
+  0.79,
+  0.832,
+  0.874,
+  0.916,
+  0.958,
+  1.0,
+];
+
+/// Alpha at each of [integratedArtworkDissolveStops]: fully opaque
+/// down to 58% of the layer, then a smoothstep fall to zero exactly
+/// at the bottom edge. The fall disperses upward from the bottom —
+/// its slope grows out of zero and settles back to zero with no
+/// single knee — so no row of the poster reads as a boundary line
+/// against the ambience below.
+const List<double> integratedArtworkDissolveAlphas = [
+  1.0,
+  1.0,
+  0.972,
+  0.896,
+  0.784,
+  0.648,
+  0.5,
+  0.352,
+  0.216,
+  0.104,
+  0.028,
+  0.0,
+];
+
+/// The dissolve's alpha at height fraction [t] of the layer,
+/// interpolating the stop table linearly — the same profile the
+/// layer's gradient paints.
+double integratedArtworkDissolveAlphaAt(double t) {
+  if (t <= 0) return integratedArtworkDissolveAlphas.first;
+  if (t >= 1) return integratedArtworkDissolveAlphas.last;
+  for (var i = 1; i < integratedArtworkDissolveStops.length; i++) {
+    final end = integratedArtworkDissolveStops[i];
+    if (t <= end) {
+      final start = integratedArtworkDissolveStops[i - 1];
+      final fraction = (t - start) / (end - start);
+      final a = integratedArtworkDissolveAlphas[i - 1];
+      final b = integratedArtworkDissolveAlphas[i];
+      return a + (b - a) * fraction;
+    }
+  }
+  return integratedArtworkDissolveAlphas.last;
+}
+
 class _IntegratedArtworkLayer extends StatelessWidget {
   const _IntegratedArtworkLayer({
     required this.transitionKey,
@@ -192,14 +249,10 @@ class _IntegratedArtworkLayer extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.white,
-            Colors.white,
-            Colors.white.withValues(alpha: 0.30),
-            Colors.transparent,
+            for (final alpha in integratedArtworkDissolveAlphas)
+              Colors.white.withValues(alpha: alpha),
           ],
-          // Fully opaque over the top 82%, then a short dissolve over
-          // the remaining stretch to the box's bottom.
-          stops: const [0.0, 0.82, 0.95, 1.0],
+          stops: integratedArtworkDissolveStops,
         ).createShader(rect),
         child: imageProvider == null
             ? const SizedBox.expand()

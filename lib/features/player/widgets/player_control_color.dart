@@ -161,7 +161,8 @@ Future<Uint8List?> _artworkEncodedBytes(ImageProvider<Object> provider) async {
 }
 
 /// Keeps the cover's hue while using dark ink in light mode and pale ink in
-/// dark mode. Only the transport controls opt into this color.
+/// dark mode. Only the transport controls and the action row opt into this
+/// color.
 class PlayerControlColor extends ConsumerWidget {
   const PlayerControlColor({super.key, required this.builder});
 

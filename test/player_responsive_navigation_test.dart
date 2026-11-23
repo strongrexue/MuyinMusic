@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +20,7 @@ import 'package:cy_shine_music/features/player/lyric_parser.dart';
 import 'package:cy_shine_music/features/player/player_page.dart';
 import 'package:cy_shine_music/features/player/sleep_timer_controller.dart';
 import 'package:cy_shine_music/features/player/widgets/album_cluster.dart';
+import 'package:cy_shine_music/features/player/widgets/immersive_background.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_line_text.dart';
 import 'package:cy_shine_music/features/player/widgets/karaoke_lyrics_view.dart';
 import 'package:cy_shine_music/features/player/widgets/ktv_lyrics_view.dart';
@@ -1262,12 +1264,17 @@ void main() {
     expect(materialGlyph(playIcon), 56);
     expect(materialGlyph(playIcon), greaterThan(26));
 
-    // The cover sits inside its full-height column: no part of it is
-    // scrolled or clipped out of the album area, and it is centred
-    // vertically over the full height.
+    // The cover sits inside its column: no part of it is scrolled or
+    // clipped out of the album area. Its vertical centre band stops
+    // at the floating bottom stack, so the cover's bottom edge never
+    // reaches the progress line floating over the plane.
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
-    expect(coverRect.center.dy, closeTo(albumRect.center.dy, 0.6));
+    expect(coverRect.bottom, lessThanOrEqualTo(progressRect.top + 0.5));
+    expect(
+      coverRect.center.dy,
+      closeTo((albumRect.top + progressRect.top) / 2, 0.6),
+    );
     // The side follows the proportion rule — half the 412dp short
     // side — not the album area's extent.
     expect(coverRect.width, closeTo(206, 0.6));
@@ -1304,8 +1311,14 @@ void main() {
     final coverRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
+    final progressRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-progress')),
+    );
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
+    // Same centre band as the disc: the square cover's bottom edge
+    // also stays above the floating progress line.
+    expect(coverRect.bottom, lessThanOrEqualTo(progressRect.top + 0.5));
     // Square covers follow the same proportion rule as the disc in
     // this layout: half the 412dp short side (206 here), with no
     // extra square scale on top.
@@ -1578,6 +1591,106 @@ void main() {
     );
     expect(artworkOpacity(), closeTo(0, 0.001));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait square mode lifts mini lyrics toward the poster', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'square_album_cover_enabled': true,
+    });
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:square-mini-lyrics-lift',
+        kind: PlayerTrackKind.remote,
+        title: '方形歌词上移歌曲',
+        artist: '方形歌词上移歌手',
+        album: '方形歌词上移专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/square-mini-lyrics-lift.flac',
+      ),
+      lyrics: _timedLyrics(5),
+    );
+
+    final panel = find.byKey(const ValueKey('player-mini-lyrics'));
+    expect(panel, findsOneWidget);
+    final panelRect = tester.getRect(panel);
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    final pageRect = tester.getRect(find.byType(AlbumPage));
+    // The mini lyrics live in the free space between the cover and the
+    // album column's 12dp bottom padding. Square mode lifts the block
+    // 48dp above that space's centre so it stays close to the poster
+    // dissolving above instead of floating in the empty field below.
+    final freeCentre = (coverRect.bottom + pageRect.bottom - 12) / 2;
+    expect(panelRect.center.dy, closeTo(freeCentre - 48, 1.0));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait round mode keeps mini lyrics centred', (tester) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:round-mini-lyrics-centred',
+        kind: PlayerTrackKind.remote,
+        title: '圆盘歌词居中歌曲',
+        artist: '圆盘歌词居中歌手',
+        album: '圆盘歌词居中专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/round-mini-lyrics-centred.flac',
+      ),
+      lyrics: _timedLyrics(5),
+    );
+
+    final panel = find.byKey(const ValueKey('player-mini-lyrics'));
+    expect(panel, findsOneWidget);
+    final panelRect = tester.getRect(panel);
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    final pageRect = tester.getRect(find.byType(AlbumPage));
+    // Round mode is untouched by the square lift: the block stays at
+    // the centre of the free space under the disc.
+    final freeCentre = (coverRect.bottom + pageRect.bottom - 12) / 2;
+    expect(panelRect.center.dy, closeTo(freeCentre, 1.0));
+    expect(tester.takeException(), isNull);
+  });
+
+  test('integrated artwork dissolve is a smooth bottom-anchored falloff', () {
+    final stops = integratedArtworkDissolveStops;
+    final alphas = integratedArtworkDissolveAlphas;
+    expect(alphas.length, stops.length);
+    expect(stops.first, 0);
+    expect(stops.last, 1);
+    expect(alphas.first, 1);
+    expect(alphas.last, 0);
+    // The stop table is monotone with no isolated step.
+    var maxTableStep = 0.0;
+    for (var i = 1; i < alphas.length; i++) {
+      expect(alphas[i], lessThanOrEqualTo(alphas[i - 1]));
+      maxTableStep = math.max(maxTableStep, alphas[i - 1] - alphas[i]);
+    }
+    expect(maxTableStep, lessThanOrEqualTo(0.15));
+    // Densely sampled, the profile falls monotonically and no single
+    // 0.005 sampling step drops more than 0.02 of alpha, so no row of
+    // the poster can read as a boundary line.
+    var previous = integratedArtworkDissolveAlphaAt(0);
+    expect(previous, 1);
+    var maxStep = 0.0;
+    for (var i = 1; i <= 200; i++) {
+      final alpha = integratedArtworkDissolveAlphaAt(i / 200);
+      expect(alpha, lessThanOrEqualTo(previous + 1e-9));
+      maxStep = math.max(maxStep, previous - alpha);
+      previous = alpha;
+    }
+    expect(previous, 0);
+    expect(maxStep, lessThanOrEqualTo(0.02));
   });
 
   testWidgets(
@@ -1875,6 +1988,11 @@ void main() {
       find.byType(KaraokeLyricsView),
     );
     expect(view.edgeFadeExtent, 10);
+    // Long per-edge fades matched to the floating chrome: 48 + 12 at
+    // the top, 12 + 98 + 12 at the bottom, so lines dissolve before
+    // reaching the chrome instead of sliding under it still readable.
+    expect(view.edgeFadeExtentTop, 60);
+    expect(view.edgeFadeExtentBottom, 122);
     expect(view.scrollAnchor, 0.5);
     expect(view.lineVerticalPadding, 4);
     expect(view.alignModeOverride, LyricAlignMode.left);

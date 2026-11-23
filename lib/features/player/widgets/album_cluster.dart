@@ -15,6 +15,16 @@ import 'track_change_switcher.dart';
 
 const double _compactAlbumTopPadding = 20;
 
+/// How far the compact mini lyrics rise above the centre of the space
+/// under the cover in square mode: the poster ends at the screen-width
+/// line and centred lyrics would float in the empty field below it,
+/// so the block is translated up toward the poster. A paint-time
+/// translation (not padding) keeps the block's layout — and its
+/// three-line viewport — at full size even where the free space is
+/// barely taller than the block itself; round mode keeps the plain
+/// centre.
+const double _squareMiniLyricsLift = 48;
+
 /// Total inset subtracted from the album area's extent in the
 /// phone-landscape capped sizing: the wide scroll view's 8dp top and
 /// bottom padding doubles as the cover's breathing margin, so the
@@ -242,10 +252,13 @@ class AlbumPage extends ConsumerWidget {
               cover,
               if (reserveMiniLyrics)
                 Expanded(
-                  child: Center(
-                    child: showMiniLyrics
-                        ? MiniLyricsPanel(onOpenLyrics: onOpenLyrics!)
-                        : null,
+                  child: Transform.translate(
+                    offset: Offset(0, square ? -_squareMiniLyricsLift : 0),
+                    child: Center(
+                      child: showMiniLyrics
+                          ? MiniLyricsPanel(onOpenLyrics: onOpenLyrics!)
+                          : null,
+                    ),
                   ),
                 ),
             ],
