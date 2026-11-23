@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,7 +25,6 @@ import 'package:cy_shine_music/features/player/widgets/ktv_lyrics_view.dart';
 import 'package:cy_shine_music/features/player/widgets/lyric_line.dart';
 import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
 import 'package:cy_shine_music/features/player/widgets/playback_queue_sheet.dart';
-import 'package:cy_shine_music/features/player/widgets/spinning_cover_art.dart';
 import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
 import 'package:cy_shine_music/features/player/widgets/top_chrome_row.dart';
 import 'package:cy_shine_music/features/player/widgets/transport_bar.dart';
@@ -173,10 +173,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('player-action-playlist')));
       await _pumpUi(tester);
 
-      expect(
-        find.byKey(const ValueKey('playlist-add-popup')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('playlist-add-popup')), findsOneWidget);
       await tester.tap(find.text('在线收藏'));
       await _pumpUi(tester);
 
@@ -198,10 +195,7 @@ void main() {
 
       // Picking a playlist dismisses the picker and lands back on the player.
       expect(find.text('添加到歌单'), findsNothing);
-      expect(
-        find.byKey(const ValueKey('playlist-add-popup')),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('playlist-add-popup')), findsNothing);
       expect(
         find.byKey(const ValueKey('player-compact-pager')),
         findsOneWidget,
@@ -403,18 +397,12 @@ void main() {
       find.byKey(const ValueKey('player-sleep-timer-custom-entry')),
       findsNothing,
     );
-    expect(
-      _stepperMinutes(tester),
-      '30 分钟',
-    );
+    expect(_stepperMinutes(tester), '30 分钟');
 
     await tester.tap(find.byKey(const ValueKey('player-sleep-timer-plus')));
     await tester.tap(find.byKey(const ValueKey('player-sleep-timer-plus')));
     await _pumpUi(tester);
-    expect(
-      _stepperMinutes(tester),
-      '40 分钟',
-    );
+    expect(_stepperMinutes(tester), '40 分钟');
 
     await tester.tap(
       find.byKey(const ValueKey('player-sleep-timer-custom-start')),
@@ -467,10 +455,7 @@ void main() {
           .data,
       '网易 24bit',
     );
-    expect(
-      find.byKey(const ValueKey('player-more-button')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('player-more-button')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -478,9 +463,9 @@ void main() {
     tester,
   ) async {
     const lyrics = KaraokeLyrics([
-        KaraokeLyricLine(startMs: 0, endMs: 3000, text: '宽屏第一句'),
-        KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '宽屏第二句'),
-        KaraokeLyricLine(startMs: 6000, endMs: 9000, text: '宽屏第三句'),
+      KaraokeLyricLine(startMs: 0, endMs: 3000, text: '宽屏第一句'),
+      KaraokeLyricLine(startMs: 3000, endMs: 6000, text: '宽屏第二句'),
+      KaraokeLyricLine(startMs: 6000, endMs: 9000, text: '宽屏第三句'),
       KaraokeLyricLine(startMs: 9000, endMs: 12000, text: '第四句歌词'),
     ]);
     final controller = await _pumpPlayer(
@@ -636,10 +621,14 @@ void main() {
       lyrics: lyrics,
     );
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsOneWidget);
-    final coverToggle = find.byKey(const ValueKey('player-cover-toggle-button'));
+    final coverToggle = find.byKey(
+      const ValueKey('player-cover-toggle-button'),
+    );
     final coverTopWithMiniLyrics = tester.getTopLeft(coverToggle);
 
-    await tester.tap(find.byKey(const ValueKey('player-action-lyric-settings')));
+    await tester.tap(
+      find.byKey(const ValueKey('player-action-lyric-settings')),
+    );
     await _pumpUi(tester);
 
     // The anchored glass card stays open while its toggle applies live.
@@ -961,13 +950,13 @@ void main() {
         startMs: 0,
         endMs: 1000,
         text: '前一句',
-    words: [KaraokeWordTiming(text: '前一句', startMs: 0, endMs: 1000)],
+        words: [KaraokeWordTiming(text: '前一句', startMs: 0, endMs: 1000)],
       ),
       KaraokeLyricLine(
         startMs: 1000,
         endMs: 3000,
         text: '新一句',
-    words: [KaraokeWordTiming(text: '新一句', startMs: 1000, endMs: 2000)],
+        words: [KaraokeWordTiming(text: '新一句', startMs: 1000, endMs: 2000)],
       ),
     ]);
     final controller = await _pumpLyricsPanel(
@@ -1076,16 +1065,15 @@ void main() {
 
     // The action row is shared by both layouts, so the wide player shows it
     // above the transport bar instead of hiding it behind a cover menu.
-    expect(
-      find.byKey(const ValueKey('player-action-volume')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('player-action-volume')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('player-cover-menu-button')),
       findsNothing,
     );
 
-    await tester.tap(find.byKey(const ValueKey('player-action-lyric-settings')));
+    await tester.tap(
+      find.byKey(const ValueKey('player-action-lyric-settings')),
+    );
     await _pumpUi(tester);
     final popup = find.byKey(const ValueKey('lyric-settings-popup'));
     expect(popup, findsOneWidget);
@@ -1130,10 +1118,7 @@ void main() {
     expect(find.byType(PageView), findsNothing);
     expect(find.byType(AlbumPage), findsOneWidget);
     expect(find.byType(LyricsPanel), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('player-action-volume')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('player-action-volume')), findsOneWidget);
     final albumRect = tester.getRect(
       find.byKey(const ValueKey('player-phone-landscape-album')),
     );
@@ -1170,10 +1155,7 @@ void main() {
     expect(progressRect.top - albumRect.bottom, closeTo(6, 1));
     expect(progressRect.bottom, lessThanOrEqualTo(controlsRect.top));
     expect(controlsRect.height - progressRect.height, greaterThan(0));
-    expect(
-      controlsRect.bottom - progressRect.top,
-      lessThan(110),
-    );
+    expect(controlsRect.bottom - progressRect.top, lessThan(110));
     expect(layoutRect.bottom - controlsRect.bottom, closeTo(12, 1));
     // Transport cluster lives inside the merged control row.
     expect(
@@ -1241,8 +1223,7 @@ void main() {
       expect(rect.height, closeTo(side, 1), reason: 'button $i height');
     }
     // One glyph size for every normal button; the play glyph is larger.
-    double materialGlyph(Finder finder) =>
-        tester.widget<Icon>(finder).size!;
+    double materialGlyph(Finder finder) => tester.widget<Icon>(finder).size!;
     double prismGlyph(String key) => tester
         .widget<prism_glyph.GlyphIcon>(
           find.descendant(
@@ -1381,23 +1362,25 @@ void main() {
       findsNothing,
     );
     expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
-    expect(
-      find.byKey(const ValueKey('player-compact-pager')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('player-compact-pager')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('portrait square cover renders as a full-bleed poster', (
+  testWidgets('portrait square cover folds into the integrated background', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
       'square_album_cover_enabled': true,
     });
+    // A dark 48x48 cover (rgb 24, 80, 160), so the artwork provider is
+    // non-null and the integrated background carries the cover itself.
+    final coverBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+    );
     await _pumpPlayer(
       tester,
       size: const Size(390, 844),
-      track: const PlayerTrack(
+      track: PlayerTrack(
         id: 'wy:portrait-poster-song',
         kind: PlayerTrackKind.remote,
         title: '竖屏海报歌曲',
@@ -1406,28 +1389,53 @@ void main() {
         sourceLabel: '网易',
         qualityLabel: '无损',
         remoteUrl: 'https://audio.example/portrait-poster.flac',
+        coverBytes: coverBytes,
       ),
+      lyrics: _timedLyrics(5),
     );
 
-    final poster = find.byKey(const ValueKey('player-portrait-poster'));
-    expect(poster, findsOneWidget);
-    final posterRect = tester.getRect(poster);
-    // Full-bleed: spans the whole page width, square, and its top edge
-    // sits exactly on the top chrome row's bottom edge.
-    expect(posterRect.left, closeTo(0, 0.5));
-    expect(posterRect.width, closeTo(390, 0.5));
-    expect(posterRect.height, closeTo(390, 0.5));
-    final chromeRect = tester.getRect(find.byType(TopChromeRow));
-    expect(posterRect.top, closeTo(chromeRect.bottom, 0.5));
-    // The tap-to-toggle target lives inside the poster.
-    expect(
-      find.descendant(of: poster, matching: find.byType(SpinningCoverArt)),
-      findsOneWidget,
-    );
-    expect(
+    // No standalone poster layer remains on the cover page.
+    expect(find.byKey(const ValueKey('player-portrait-poster')), findsNothing);
+    // The cover is part of the background: full-bleed from the very top
+    // of the screen, behind the status bar and the top chrome.
+    final artwork = find.byKey(const ValueKey('player-integrated-bg-artwork'));
+    expect(artwork, findsOneWidget);
+    final artworkRect = tester.getRect(artwork);
+    expect(artworkRect.left, closeTo(0, 0.5));
+    expect(artworkRect.top, closeTo(0, 0.5));
+    expect(artworkRect.width, closeTo(390, 0.5));
+
+    double artworkOpacity() => tester
+        .widget<Opacity>(
+          find.descendant(of: artwork, matching: find.byType(Opacity)).first,
+        )
+        .opacity;
+    expect(artworkOpacity(), closeTo(1, 0.001));
+
+    // The tap-to-toggle target keeps the old poster's geometry on the
+    // cover page even though the artwork moved into the background.
+    final hotZoneRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    final chromeRect = tester.getRect(find.byType(TopChromeRow));
+    expect(hotZoneRect.left, closeTo(0, 0.5));
+    expect(hotZoneRect.width, closeTo(390, 0.5));
+    expect(hotZoneRect.height, closeTo(390, 0.5));
+    expect(hotZoneRect.top, closeTo(chromeRect.bottom, 0.5));
+
+    // Swiping to the lyrics page fades the background's artwork
+    // component out; only the cover's colour ambience stays behind the
+    // lyrics.
+    await tester.drag(
+      find.byKey(const ValueKey('player-compact-pager')),
+      const Offset(-360, 0),
+    );
+    await _pumpUi(tester);
+    expect(
+      find.byKey(const ValueKey('player-compact-lyrics-clip')),
       findsOneWidget,
     );
+    expect(artworkOpacity(), closeTo(0, 0.001));
     expect(tester.takeException(), isNull);
   });
 
@@ -1450,6 +1458,14 @@ void main() {
     );
 
     expect(find.byKey(const ValueKey('player-portrait-poster')), findsNothing);
+    // Round mode keeps the flowing-light background only: no artwork
+    // component is folded into it.
+    expect(
+      find.byKey(const ValueKey('player-integrated-bg-artwork')),
+      findsNothing,
+    );
+    // The disc floats in the ambience on its cover-coloured halo.
+    expect(find.byKey(const ValueKey('player-disc-glow')), findsOneWidget);
     final coverRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
@@ -1494,10 +1510,7 @@ void main() {
     );
     Rect tileRect(String text) => tester.getRect(
       find
-          .ancestor(
-            of: find.text(text),
-            matching: find.byType(LyricLineTile),
-          )
+          .ancestor(of: find.text(text), matching: find.byType(LyricLineTile))
           .first,
     );
     // The active line and two lines on each side are fully inside the
@@ -1978,4 +1991,3 @@ MusicInfo _remoteMusic() => MusicInfo.fromJson({
     ],
   },
 });
-

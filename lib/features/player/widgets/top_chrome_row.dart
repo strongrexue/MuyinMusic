@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
@@ -8,6 +9,7 @@ import '../../shell/player_pull_scope.dart';
 import '../player_controller.dart';
 import '../sleep_timer_controller.dart';
 import 'ktv_background_panel.dart';
+import 'player_control_color.dart';
 import 'player_palette.dart';
 import 'player_quality_sheet.dart';
 import 'player_sleep_timer_sheet.dart';
@@ -17,12 +19,54 @@ import 'track_change_switcher.dart';
 /// (opens the quality sheet), the KTV mode toggle, and a "more" menu holding
 /// the sleep timer, the background picker, and the equalizer entry.
 class TopChromeRow extends ConsumerWidget {
-  const TopChromeRow({super.key, required this.onOpenEqualizer});
+  const TopChromeRow({
+    super.key,
+    required this.onOpenEqualizer,
+    this.compactPageProgress,
+  });
 
   final VoidCallback onOpenEqualizer;
 
+  /// Continuous compact-pager position (0 = cover page, 1 = lyrics page).
+  /// While the integrated background's artwork component sits behind this
+  /// row (portrait square mode, cover page), the foreground adapts to the
+  /// artwork's top-strip brightness.
+  final ValueListenable<double>? compactPageProgress;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final progress = compactPageProgress;
+    if (progress == null) {
+      return _buildRow(context, ref, lightForeground: false);
+    }
+    final squareCoverEnabled = ref.watch(
+      settingsProvider.select((s) => s.squareAlbumCoverEnabled),
+    );
+    final isPortrait =
+        MediaQuery.orientationOf(context) == Orientation.portrait;
+    final topLuminance = ref
+        .watch(playerArtworkTopLuminanceProvider)
+        .valueOrNull;
+    return ValueListenableBuilder<double>(
+      valueListenable: progress,
+      builder: (context, page, _) => _buildRow(
+        context,
+        ref,
+        lightForeground: artworkChromeLightForeground(
+          squareCoverEnabled: squareCoverEnabled,
+          portrait: isPortrait,
+          topLuminance: topLuminance,
+          pagerPage: page,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool lightForeground,
+  }) {
     final trackMetadata = ref.watch(
       playerControllerProvider.select(
         (s) =>
@@ -70,7 +114,9 @@ class TopChromeRow extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: darkForeground
+                                color: lightForeground
+                                    ? Colors.white
+                                    : darkForeground
                                     ? Colors.black87
                                     : playerInk(context),
                                 fontSize: 18,
@@ -87,7 +133,9 @@ class TopChromeRow extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: darkForeground
+                                color: lightForeground
+                                    ? Colors.white70
+                                    : darkForeground
                                     ? Colors.black54
                                     : playerMuted(
                                         context,
@@ -108,12 +156,16 @@ class TopChromeRow extends ConsumerWidget {
             // squeezing the title on narrow phones.
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 84),
-              child: _QualityEntry(darkForeground: darkForeground),
+              child: _QualityEntry(
+                darkForeground: darkForeground,
+                lightForeground: lightForeground,
+              ),
             ),
             const SizedBox(width: 4),
             _KtvModeButton(
               enabled: ktvModeEnabled,
               darkForeground: darkForeground,
+              lightForeground: lightForeground,
               onPressed: () => ref
                   .read(settingsProvider.notifier)
                   .setKtvModeEnabled(!ktvModeEnabled),
@@ -121,6 +173,7 @@ class TopChromeRow extends ConsumerWidget {
             const SizedBox(width: 4),
             _MoreMenuButton(
               darkForeground: darkForeground,
+              lightForeground: lightForeground,
               showKtvBackground: showKtvBackgroundButton,
               onOpenEqualizer: onOpenEqualizer,
             ),
@@ -136,9 +189,13 @@ class TopChromeRow extends ConsumerWidget {
 /// tracks and tracks with a single quality have nothing to switch to, so the
 /// label is shown dimmed and inert.
 class _QualityEntry extends ConsumerWidget {
-  const _QualityEntry({this.darkForeground = false});
+  const _QualityEntry({
+    this.darkForeground = false,
+    this.lightForeground = false,
+  });
 
   final bool darkForeground;
+  final bool lightForeground;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -164,7 +221,9 @@ class _QualityEntry extends ConsumerWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: darkForeground
+          color: lightForeground
+              ? (enabled ? Colors.white : Colors.white.withValues(alpha: 0.45))
+              : darkForeground
               ? (enabled
                     ? Colors.black87
                     : Colors.black.withValues(alpha: 0.45))
@@ -203,11 +262,13 @@ class _KtvModeButton extends StatelessWidget {
     required this.enabled,
     required this.onPressed,
     this.darkForeground = false,
+    this.lightForeground = false,
   });
 
   final bool enabled;
   final VoidCallback onPressed;
   final bool darkForeground;
+  final bool lightForeground;
 
   @override
   Widget build(BuildContext context) {
@@ -217,6 +278,7 @@ class _KtvModeButton extends StatelessWidget {
       tooltip: '横屏 KTV 模式',
       onPressed: onPressed,
       darkForeground: darkForeground,
+      lightForeground: lightForeground,
       active: enabled,
     );
   }
@@ -231,9 +293,11 @@ class _MoreMenuButton extends StatefulWidget {
     required this.darkForeground,
     required this.showKtvBackground,
     required this.onOpenEqualizer,
+    this.lightForeground = false,
   });
 
   final bool darkForeground;
+  final bool lightForeground;
   final bool showKtvBackground;
   final VoidCallback onOpenEqualizer;
 
@@ -279,13 +343,13 @@ class _MoreMenuButtonState extends State<_MoreMenuButton> {
         tooltip: '更多',
         onPressed: open,
         darkForeground: widget.darkForeground,
+        lightForeground: widget.lightForeground,
       ),
       popupBuilder: (_) => _MoreMenuItems(
         showKtvBackground: widget.showKtvBackground,
         onOpenSleepTimer: () =>
             _openPanel((_) => const PlayerSleepTimerPopup()),
-        onOpenBackground: () =>
-            _openPanel((_) => const KtvBackgroundPopup()),
+        onOpenBackground: () => _openPanel((_) => const KtvBackgroundPopup()),
         onOpenEqualizer: () => _openPanel(
           (_) => PlayerEqualizerPopup(onOpenPage: widget.onOpenEqualizer),
         ),
@@ -353,6 +417,7 @@ class _ChromeIconButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.darkForeground = false,
+    this.lightForeground = false,
     this.active = false,
   });
 
@@ -360,6 +425,7 @@ class _ChromeIconButton extends StatelessWidget {
   final String tooltip;
   final VoidCallback onPressed;
   final bool darkForeground;
+  final bool lightForeground;
   final bool active;
 
   @override
@@ -382,6 +448,8 @@ class _ChromeIconButton extends StatelessWidget {
           icon,
           color: active
               ? scheme.onPrimaryContainer
+              : lightForeground
+              ? Colors.white
               : (darkForeground ? Colors.black87 : playerInk(context)),
           size: 20,
         ),

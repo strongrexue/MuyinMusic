@@ -9,6 +9,7 @@ import '../../shell/player_pull_scope.dart';
 import '../../shell/player_transition.dart';
 import '../player_controller.dart';
 import 'mini_lyrics_panel.dart';
+import 'player_control_color.dart';
 import 'player_palette.dart';
 import 'spinning_cover_art.dart';
 import 'track_change_switcher.dart';
@@ -56,6 +57,10 @@ class AlbumPage extends ConsumerWidget {
     final square = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
+    final artworkBaseColor = ref
+        .watch(playerArtworkColorsProvider)
+        .valueOrNull
+        ?.baseColor;
     final track = player.track;
     // The compact column is top-anchored with the cover first, so the
     // cover never shifts when the lyrics finish loading or the
@@ -84,7 +89,10 @@ class AlbumPage extends ConsumerWidget {
         final metadataKey = track == null
             ? 'album-metadata:loading'
             : 'album-metadata:${track.id}:${track.album}';
-        Widget coverArtwork(double size, {bool poster = false}) {
+        // The tap scaffold shared by every cover form: pull handle,
+        // semantics, the tap-to-toggle gesture and the shared-element
+        // anchor, wrapped around whatever visual the form shows.
+        Widget coverScaffold(double size, Widget visual) {
           return SizedBox.square(
             dimension: size,
             // The tap recognizer coexists with the parent's vertical
@@ -101,67 +109,87 @@ class AlbumPage extends ConsumerWidget {
                         .read(settingsProvider.notifier)
                         .setSquareAlbumCoverEnabled(!square),
                   ),
-                  child: PlayerCoverAnchor(
-                    expanded: true,
-                    child: track == null
-                        ? _LoadingAlbumArtwork(size: size, poster: poster)
-                        : SpinningCoverArt(
-                            track: track,
-                            size: size,
-                            poster: poster,
-                            placeholder: ColoredBox(
-                              color: Colors.white.withValues(alpha: 0.34),
-                              child: Center(
-                                child: Icon(
-                                  Icons.album_rounded,
-                                  size: 56,
-                                  color: playerMuted(context),
-                                ),
-                              ),
-                            ),
-                            boxShadow: poster
-                                ? null
-                                : [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.16,
-                                      ),
-                                      blurRadius: 28,
-                                      offset: const Offset(0, 18),
-                                    ),
-                                  ],
-                          ),
-                  ),
+                  child: PlayerCoverAnchor(expanded: true, child: visual),
                 ),
               ),
             ),
           );
         }
 
-        // Portrait square covers render as a full-bleed poster: it spans
-        // the whole page width directly under the top bar and its bottom
-        // edge fades out (real alpha, via dstIn) into the flowing-light
-        // background behind it.
-        final poster = !wide && square;
+        Widget coverVisual(double size) {
+          return track == null
+              ? _LoadingAlbumArtwork(size: size)
+              : SpinningCoverArt(
+                  track: track,
+                  size: size,
+                  placeholder: ColoredBox(
+                    color: Colors.white.withValues(alpha: 0.34),
+                    child: Center(
+                      child: Icon(
+                        Icons.album_rounded,
+                        size: 56,
+                        color: playerMuted(context),
+                      ),
+                    ),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.16),
+                      blurRadius: 28,
+                      offset: const Offset(0, 18),
+                    ),
+                  ],
+                );
+        }
+
         final Widget cover;
-        if (poster) {
-          final posterSize = math.min(
+        if (!wide && square) {
+          // Square portrait: the artwork itself is part of the page
+          // background now, so the cover page keeps only a transparent
+          // tap target with the old poster's geometry — tap-to-toggle
+          // and the shared-element anchor behave exactly as before.
+          final hotZoneSize = math.min(
             constraints.maxWidth,
             constraints.maxHeight - 12,
           );
-          cover = ShaderMask(
-            key: const ValueKey('player-portrait-poster'),
-            blendMode: BlendMode.dstIn,
-            shaderCallback: (rect) => const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.white, Colors.white, Colors.transparent],
-              stops: [0.0, 0.7, 1.0],
-            ).createShader(rect),
-            child: coverArtwork(posterSize, poster: true),
+          cover = coverScaffold(hotZoneSize, const SizedBox.expand());
+        } else if (!wide) {
+          // Round portrait: the disc floats in the ambience. A soft
+          // cover-coloured halo around its rim, on top of its existing
+          // contact shadow, keeps it from reading as pasted onto the
+          // background.
+          final glowColor = artworkBaseColor ?? playerSurface(context);
+          cover = Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                key: const ValueKey('player-disc-glow'),
+                left: -resolvedCoverSize * 0.1,
+                top: -resolvedCoverSize * 0.1,
+                right: -resolvedCoverSize * 0.1,
+                bottom: -resolvedCoverSize * 0.1,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          glowColor.withValues(alpha: 0.55),
+                          glowColor.withValues(alpha: 0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              coverScaffold(resolvedCoverSize, coverVisual(resolvedCoverSize)),
+            ],
           );
         } else {
-          cover = coverArtwork(resolvedCoverSize);
+          cover = coverScaffold(
+            resolvedCoverSize,
+            coverVisual(resolvedCoverSize),
+          );
         }
 
         if (wide) {
@@ -197,7 +225,7 @@ class AlbumPage extends ConsumerWidget {
         return Padding(
           padding: EdgeInsets.fromLTRB(
             0,
-            poster ? 0 : _compactAlbumTopPadding,
+            square ? 0 : _compactAlbumTopPadding,
             0,
             12,
           ),
@@ -222,10 +250,9 @@ class AlbumPage extends ConsumerWidget {
 }
 
 class _LoadingAlbumArtwork extends ConsumerWidget {
-  const _LoadingAlbumArtwork({required this.size, this.poster = false});
+  const _LoadingAlbumArtwork({required this.size});
 
   final double size;
-  final bool poster;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -238,7 +265,7 @@ class _LoadingAlbumArtwork extends ConsumerWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.22),
         shape: square ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius: square && !poster
+        borderRadius: square
             ? BorderRadius.circular(size * kSquareCoverRadiusFactor)
             : null,
       ),

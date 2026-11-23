@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -146,6 +147,53 @@ void main() {
     final color = harness.color;
     await tester.pump(AppMotion.long);
     expect(harness.color, color);
+  });
+
+  testWidgets('artwork top luminance separates dark and bright covers', (
+    tester,
+  ) async {
+    Future<double?> luminanceOf(ImageProvider<Object> provider) async {
+      final container = ProviderContainer(
+        overrides: [playerArtworkProvider.overrideWithValue(provider)],
+      );
+      addTearDown(container.dispose);
+      // Initialise and await the provider inside runAsync: its decode
+      // work completes on the real event loop, which the fake-async test
+      // zone would otherwise starve.
+      return tester.runAsync<double?>(() async {
+        final subscription = container.listen(
+          playerArtworkTopLuminanceProvider,
+          (_, _) {},
+        );
+        try {
+          return await container.read(playerArtworkTopLuminanceProvider.future);
+        } finally {
+          subscription.close();
+        }
+      });
+    }
+
+    // Solid dark blue cover (rgb 24, 80, 160).
+    final dark = await luminanceOf(
+      MemoryImage(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+        ),
+      ),
+    );
+    expect(dark, isNotNull);
+    expect(dark!, lessThan(kArtworkTopDarkLuminanceThreshold));
+
+    // Solid white cover.
+    final bright = await luminanceOf(
+      MemoryImage(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJklEQVR4nO3NMQ0AAAwDoPo33arYsQQMkB6LQCAQCAQCgUAg+BIMi1X0pjxKe0gAAAAASUVORK5CYII=',
+        ),
+      ),
+    );
+    expect(bright, isNotNull);
+    expect(bright!, greaterThan(kArtworkTopDarkLuminanceThreshold));
   });
 }
 

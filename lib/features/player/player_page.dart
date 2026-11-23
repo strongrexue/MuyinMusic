@@ -13,6 +13,7 @@ import 'widgets/immersive_chrome.dart';
 import 'widgets/ktv_lyrics_view.dart';
 import 'widgets/lyrics_panel.dart';
 import 'widgets/player_action_row.dart';
+import 'widgets/player_control_color.dart';
 import 'widgets/player_layout.dart';
 import 'widgets/top_chrome_row.dart';
 import 'widgets/transport_bar.dart';
@@ -49,6 +50,12 @@ class PlayerPage extends ConsumerStatefulWidget {
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _systemBarsHidden = false;
 
+  /// Continuous compact-pager position (0 = cover page, 1 = lyrics page),
+  /// shared with the background and the top chrome: the integrated
+  /// background's artwork component fades out over it, and the chrome's
+  /// adaptive foreground follows.
+  final ValueNotifier<double> _compactPageProgress = ValueNotifier(0);
+
   /// Landscape KTV is a full-screen stage, so the system bars hide while
   /// it is on screen; every other player state keeps the app-wide
   /// edge-to-edge mode set at startup. Guarded by [_systemBarsHidden] so
@@ -66,6 +73,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (_systemBarsHidden) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
+    _compactPageProgress.dispose();
     super.dispose();
   }
 
@@ -88,8 +96,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     // active page; the page stays mounted (inactive) under other routes.
     _syncKtvSystemUi(ktvChromePinned && widget.active);
     final topChromeRow = TopChromeRow(
-      onOpenEqualizer: () =>
-          widget.onDismissRequested('/settings/equalizer'),
+      onOpenEqualizer: () => widget.onDismissRequested('/settings/equalizer'),
+      compactPageProgress: _compactPageProgress,
     );
 
     ref.listen<PlayerState>(playerControllerProvider, (prev, next) {
@@ -104,66 +112,109 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       }
     });
 
+    // The status bar icons follow the top chrome's adaptive foreground:
+    // light while they float over a dark artwork top in portrait square
+    // mode, theme-appropriate otherwise. The AnnotatedRegion restores the
+    // surrounding style when the player leaves the top of the stack.
+    final squareCoverEnabled = ref.watch(
+      settingsProvider.select((s) => s.squareAlbumCoverEnabled),
+    );
+    final artworkTopLuminance = ref
+        .watch(playerArtworkTopLuminanceProvider)
+        .valueOrNull;
+    final themeDark = Theme.of(context).brightness == Brightness.dark;
+
     // Back handling and pop scoping live in AppShell: this subtree is a
     // sibling of the route content rather than the route itself, so a
     // PopScope here would register against the shell's own ModalRoute.
-    return IgnorePointer(
-      ignoring: !widget.active,
-      child: Scaffold(
-        key: PlayerTransitionScope.maybeOf(context)?.pageKey,
-        backgroundColor: Colors.transparent,
-        // The layer is pinned to the full screen height; letting the
-        // keyboard resize it would re-run the backdrop's blur pipeline.
-        resizeToAvoidBottomInset: false,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              key: const ValueKey('player-backdrop'),
-              child: FadeTransition(
-                opacity: widget.progress.drive(const PlayerPhase(0, 0.12)),
-                child: RepaintBoundary(
-                  child: ImmersiveBackground(
-                    revealProgress: widget.progress,
+    return ValueListenableBuilder<double>(
+      valueListenable: _compactPageProgress,
+      builder: (context, page, child) {
+        final lightStatusIcons =
+            themeDark ||
+            artworkChromeLightForeground(
+              squareCoverEnabled: squareCoverEnabled,
+              portrait:
+                  MediaQuery.orientationOf(context) == Orientation.portrait,
+              topLuminance: artworkTopLuminance,
+              pagerPage: page,
+            );
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: lightStatusIcons
+                ? Brightness.light
+                : Brightness.dark,
+            statusBarBrightness: lightStatusIcons
+                ? Brightness.dark
+                : Brightness.light,
+          ),
+          child: child!,
+        );
+      },
+      child: IgnorePointer(
+        ignoring: !widget.active,
+        child: Scaffold(
+          key: PlayerTransitionScope.maybeOf(context)?.pageKey,
+          backgroundColor: Colors.transparent,
+          // The layer is pinned to the full screen height; letting the
+          // keyboard resize it would re-run the backdrop's blur pipeline.
+          resizeToAvoidBottomInset: false,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                key: const ValueKey('player-backdrop'),
+                child: FadeTransition(
+                  opacity: widget.progress.drive(const PlayerPhase(0, 0.12)),
+                  child: RepaintBoundary(
+                    child: ImmersiveBackground(
+                      revealProgress: widget.progress,
+                      compactPageProgress: _compactPageProgress,
+                    ),
                   ),
                 ),
               ),
-            ),
-            FadeTransition(
-              opacity: widget.progress.drive(const PlayerPhase(0.33, 0.86)),
-              child: ImmersiveChrome(
-                active: widget.active,
-                // Landscape KTV stretches full-bleed like mainstream KTV
-                // apps: only the top chrome keeps its safe-area insets,
-                // the body reaches every screen edge.
-                child: ktvChromePinned
-                    ? Column(
-                        key: const ValueKey('player-chrome'),
-                        children: [
-                          SafeArea(bottom: false, child: topChromeRow),
-                          Expanded(
-                            child: showEmpty
-                                ? const _EmptyPlayer()
-                                : const _NowPlayingBody(),
-                          ),
-                        ],
-                      )
-                    : SafeArea(
-                        key: const ValueKey('player-chrome'),
-                        child: Column(
+              FadeTransition(
+                opacity: widget.progress.drive(const PlayerPhase(0.33, 0.86)),
+                child: ImmersiveChrome(
+                  active: widget.active,
+                  // Landscape KTV stretches full-bleed like mainstream KTV
+                  // apps: only the top chrome keeps its safe-area insets,
+                  // the body reaches every screen edge.
+                  child: ktvChromePinned
+                      ? Column(
+                          key: const ValueKey('player-chrome'),
                           children: [
-                            topChromeRow,
+                            SafeArea(bottom: false, child: topChromeRow),
                             Expanded(
                               child: showEmpty
                                   ? const _EmptyPlayer()
-                                  : const _NowPlayingBody(),
+                                  : _NowPlayingBody(
+                                      pageProgress: _compactPageProgress,
+                                    ),
                             ),
                           ],
+                        )
+                      : SafeArea(
+                          key: const ValueKey('player-chrome'),
+                          child: Column(
+                            children: [
+                              topChromeRow,
+                              Expanded(
+                                child: showEmpty
+                                    ? const _EmptyPlayer()
+                                    : _NowPlayingBody(
+                                        pageProgress: _compactPageProgress,
+                                      ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -171,7 +222,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 }
 
 class _NowPlayingBody extends ConsumerStatefulWidget {
-  const _NowPlayingBody();
+  const _NowPlayingBody({this.pageProgress});
+
+  /// Receives the compact pager's continuous position so the page-level
+  /// background and chrome can follow it.
+  final ValueNotifier<double>? pageProgress;
 
   @override
   ConsumerState<_NowPlayingBody> createState() => _NowPlayingBodyState();
@@ -191,10 +246,19 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    _pageController.addListener(_reportCompactPageProgress);
+  }
+
+  void _reportCompactPageProgress() {
+    final progress = widget.pageProgress;
+    if (progress == null || !_pageController.hasClients) return;
+    final page = _pageController.page;
+    if (page != null) progress.value = page;
   }
 
   @override
   void dispose() {
+    _pageController.removeListener(_reportCompactPageProgress);
     _pageController.dispose();
     super.dispose();
   }
@@ -282,9 +346,10 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     final landscapeLyricAlignMode = ref.watch(
       settingsProvider.select((settings) => settings.lyricAlignModeLandscape),
     );
-    // Portrait square covers become a full-bleed poster, so the compact
-    // body drops its outer insets in that mode (inner rows compensate by
-    // the same amount, keeping their on-screen positions unchanged).
+    // Portrait square covers live in the integrated background, so the
+    // compact body drops its outer insets in that mode (inner rows
+    // compensate by the same amount, keeping their on-screen positions
+    // unchanged).
     final squareCoverEnabled = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
