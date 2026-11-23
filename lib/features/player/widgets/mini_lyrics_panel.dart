@@ -16,7 +16,7 @@ import 'player_layout.dart';
 /// value for a stronger effect; the active line always stays sharp.
 const double miniLyricsInactiveBlurSigma = 0.45;
 
-const double _miniLyricLineExtent = 26;
+const double _miniLyricLineExtent = 29;
 const int _miniLyricVisibleLineCount = 3;
 const Duration _miniLyricScrollDuration = Duration(milliseconds: 380);
 // Breathing room INSIDE the list viewport so the first/last row's blur halo
@@ -324,7 +324,7 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
                     line: lines[index],
                     sungColor: scheme.primary,
                     pendingColor: scheme.onSurface,
-                    fontSize: 17,
+                    fontSize: 19,
                   )
                 : active
                 ? LyricSweepLine(
@@ -336,7 +336,7 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
                     buffering: widget.buffering,
                     style: TextStyle(
                       color: scheme.onSurface,
-                      fontSize: 17,
+                      fontSize: 19,
                       fontWeight: FontWeight.w400,
                       height: 1.3,
                     ),
@@ -353,7 +353,7 @@ class _MiniLyricsScrollerState extends State<_MiniLyricsScroller> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
-                      fontSize: 15,
+                      fontSize: 17,
                       fontWeight: FontWeight.w400,
                       height: 1.3,
                     ),

@@ -56,13 +56,6 @@ class AlbumPage extends ConsumerWidget {
     final square = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
-    // Compact cover page only: when the user picked an imported image
-    // as the portrait background, that image is the main visual and
-    // the album cover (with its round/square tap toggle) is not shown.
-    final hasImportedPortraitBackground = ref.watch(
-      settingsProvider.select((s) => s.selectedPortraitBackgroundItem != null),
-    );
-    final hideCover = !wide && hasImportedPortraitBackground;
     final track = player.track;
     // The compact column is top-anchored with the cover first, so the
     // cover never shifts when the lyrics finish loading or the
@@ -91,52 +84,85 @@ class AlbumPage extends ConsumerWidget {
         final metadataKey = track == null
             ? 'album-metadata:loading'
             : 'album-metadata:${track.id}:${track.album}';
-        final cover = SizedBox.square(
-          dimension: resolvedCoverSize,
-          // The tap recognizer coexists with the parent's vertical
-          // pull recognizer, so dragging still dismisses the page.
-          child: PlayerPullHandle(
-            child: Semantics(
-              button: true,
-              label: square ? '切换为圆形封面' : '切换为方形封面',
-              child: GestureDetector(
-                key: const ValueKey('player-cover-toggle-button'),
-                behavior: HitTestBehavior.opaque,
-                onTap: () => unawaited(
-                  ref
-                      .read(settingsProvider.notifier)
-                      .setSquareAlbumCoverEnabled(!square),
-                ),
-                child: PlayerCoverAnchor(
-                  expanded: true,
-                  child: track == null
-                      ? _LoadingAlbumArtwork(size: resolvedCoverSize)
-                      : SpinningCoverArt(
-                          track: track,
-                          size: resolvedCoverSize,
-                          placeholder: ColoredBox(
-                            color: Colors.white.withValues(alpha: 0.34),
-                            child: Center(
-                              child: Icon(
-                                Icons.album_rounded,
-                                size: 56,
-                                color: playerMuted(context),
+        Widget coverArtwork(double size, {bool poster = false}) {
+          return SizedBox.square(
+            dimension: size,
+            // The tap recognizer coexists with the parent's vertical
+            // pull recognizer, so dragging still dismisses the page.
+            child: PlayerPullHandle(
+              child: Semantics(
+                button: true,
+                label: square ? '切换为圆形封面' : '切换为方形封面',
+                child: GestureDetector(
+                  key: const ValueKey('player-cover-toggle-button'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => unawaited(
+                    ref
+                        .read(settingsProvider.notifier)
+                        .setSquareAlbumCoverEnabled(!square),
+                  ),
+                  child: PlayerCoverAnchor(
+                    expanded: true,
+                    child: track == null
+                        ? _LoadingAlbumArtwork(size: size, poster: poster)
+                        : SpinningCoverArt(
+                            track: track,
+                            size: size,
+                            poster: poster,
+                            placeholder: ColoredBox(
+                              color: Colors.white.withValues(alpha: 0.34),
+                              child: Center(
+                                child: Icon(
+                                  Icons.album_rounded,
+                                  size: 56,
+                                  color: playerMuted(context),
+                                ),
                               ),
                             ),
+                            boxShadow: poster
+                                ? null
+                                : [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                      blurRadius: 28,
+                                      offset: const Offset(0, 18),
+                                    ),
+                                  ],
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.16),
-                              blurRadius: 28,
-                              offset: const Offset(0, 18),
-                            ),
-                          ],
-                        ),
+                  ),
                 ),
               ),
             ),
-          ),
-        );
+          );
+        }
+
+        // Portrait square covers render as a full-bleed poster: it spans
+        // the whole page width directly under the top bar and its bottom
+        // edge fades out (real alpha, via dstIn) into the flowing-light
+        // background behind it.
+        final poster = !wide && square;
+        final Widget cover;
+        if (poster) {
+          final posterSize = math.min(
+            constraints.maxWidth,
+            constraints.maxHeight - 12,
+          );
+          cover = ShaderMask(
+            key: const ValueKey('player-portrait-poster'),
+            blendMode: BlendMode.dstIn,
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.white, Colors.white, Colors.transparent],
+              stops: [0.0, 0.7, 1.0],
+            ).createShader(rect),
+            child: coverArtwork(posterSize, poster: true),
+          );
+        } else {
+          cover = coverArtwork(resolvedCoverSize);
+        }
 
         if (wide) {
           return Center(
@@ -167,14 +193,18 @@ class AlbumPage extends ConsumerWidget {
         // vertical center, and the mini lyrics are centered in the space
         // left between the cover and the transport bar. The album line
         // is no longer shown here (the top bar already carries the title
-        // and artist). With an imported portrait background the cover is
-        // hidden, and the mini lyrics center in the freed space instead.
+        // and artist).
         return Padding(
-          padding: const EdgeInsets.fromLTRB(0, _compactAlbumTopPadding, 0, 12),
+          padding: EdgeInsets.fromLTRB(
+            0,
+            poster ? 0 : _compactAlbumTopPadding,
+            0,
+            12,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              if (!hideCover) cover,
+              cover,
               if (reserveMiniLyrics)
                 Expanded(
                   child: Center(
@@ -192,9 +222,10 @@ class AlbumPage extends ConsumerWidget {
 }
 
 class _LoadingAlbumArtwork extends ConsumerWidget {
-  const _LoadingAlbumArtwork({required this.size});
+  const _LoadingAlbumArtwork({required this.size, this.poster = false});
 
   final double size;
+  final bool poster;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -207,7 +238,7 @@ class _LoadingAlbumArtwork extends ConsumerWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.22),
         shape: square ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius: square
+        borderRadius: square && !poster
             ? BorderRadius.circular(size * kSquareCoverRadiusFactor)
             : null,
       ),

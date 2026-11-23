@@ -36,9 +36,6 @@ class TopChromeRow extends ConsumerWidget {
         MediaQuery.orientationOf(context) == Orientation.landscape;
     // The KTV background picker only exists on the landscape KTV page.
     final showKtvBackgroundButton = ktvModeEnabled && isLandscape;
-    // The portrait player page gets the same background entry, editing the
-    // portrait selection instead (shared library, separate selected item).
-    final showPortraitBackgroundButton = !isLandscape;
     // The built-in KTV background is a bright photo at the top, so the
     // chrome switches to dark foreground colors while it is showing.
     final darkForeground =
@@ -125,7 +122,6 @@ class TopChromeRow extends ConsumerWidget {
             _MoreMenuButton(
               darkForeground: darkForeground,
               showKtvBackground: showKtvBackgroundButton,
-              showPortraitBackground: showPortraitBackgroundButton,
               onOpenEqualizer: onOpenEqualizer,
             ),
           ],
@@ -234,13 +230,11 @@ class _MoreMenuButton extends StatefulWidget {
   const _MoreMenuButton({
     required this.darkForeground,
     required this.showKtvBackground,
-    required this.showPortraitBackground,
     required this.onOpenEqualizer,
   });
 
   final bool darkForeground;
   final bool showKtvBackground;
-  final bool showPortraitBackground;
   final VoidCallback onOpenEqualizer;
 
   @override
@@ -288,11 +282,10 @@ class _MoreMenuButtonState extends State<_MoreMenuButton> {
       ),
       popupBuilder: (_) => _MoreMenuItems(
         showKtvBackground: widget.showKtvBackground,
-        showPortraitBackground: widget.showPortraitBackground,
         onOpenSleepTimer: () =>
             _openPanel((_) => const PlayerSleepTimerPopup()),
-        onOpenBackground: (target) =>
-            _openPanel((_) => KtvBackgroundPopup(target: target)),
+        onOpenBackground: () =>
+            _openPanel((_) => const KtvBackgroundPopup()),
         onOpenEqualizer: () => _openPanel(
           (_) => PlayerEqualizerPopup(onOpenPage: widget.onOpenEqualizer),
         ),
@@ -306,16 +299,14 @@ class _MoreMenuButtonState extends State<_MoreMenuButton> {
 class _MoreMenuItems extends ConsumerWidget {
   const _MoreMenuItems({
     required this.showKtvBackground,
-    required this.showPortraitBackground,
     required this.onOpenSleepTimer,
     required this.onOpenBackground,
     required this.onOpenEqualizer,
   });
 
   final bool showKtvBackground;
-  final bool showPortraitBackground;
   final VoidCallback onOpenSleepTimer;
-  final ValueChanged<KtvBackgroundTarget> onOpenBackground;
+  final VoidCallback onOpenBackground;
   final VoidCallback onOpenEqualizer;
 
   @override
@@ -337,16 +328,12 @@ class _MoreMenuItems extends ConsumerWidget {
           executeImmediately: true,
           onPressed: onOpenSleepTimer,
         ),
-        if (showKtvBackground || showPortraitBackground)
+        if (showKtvBackground)
           prism.PopupMenuItem(
             label: '背景',
             leading: leading(Icons.image_outlined),
             executeImmediately: true,
-            onPressed: () => onOpenBackground(
-              showKtvBackground
-                  ? KtvBackgroundTarget.ktv
-                  : KtvBackgroundTarget.portrait,
-            ),
+            onPressed: onOpenBackground,
           ),
         prism.PopupMenuItem(
           label: '均衡器',

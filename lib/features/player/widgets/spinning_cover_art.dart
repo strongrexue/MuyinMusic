@@ -24,12 +24,17 @@ class SpinningCoverArt extends ConsumerStatefulWidget {
     required this.size,
     required this.placeholder,
     this.boxShadow,
+    this.poster = false,
   });
 
   final PlayerTrack track;
   final double size;
   final Widget placeholder;
   final List<BoxShadow>? boxShadow;
+
+  /// Full-bleed poster rendering (portrait square covers): no corner
+  /// radius and no shadow, the artwork reaches the widget's edges.
+  final bool poster;
 
   @override
   ConsumerState<SpinningCoverArt> createState() => _SpinningCoverArtState();
@@ -103,10 +108,10 @@ class _SpinningCoverArtState extends ConsumerState<SpinningCoverArt>
           height: widget.size,
           decoration: BoxDecoration(
             shape: square ? BoxShape.rectangle : BoxShape.circle,
-            borderRadius: square
+            borderRadius: square && !widget.poster
                 ? BorderRadius.circular(widget.size * kSquareCoverRadiusFactor)
                 : null,
-            boxShadow: widget.boxShadow,
+            boxShadow: widget.poster ? null : widget.boxShadow,
           ),
           clipBehavior: Clip.antiAlias,
           child: RepaintBoundary(

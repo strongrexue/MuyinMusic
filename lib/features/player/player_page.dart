@@ -49,12 +49,6 @@ class PlayerPage extends ConsumerStatefulWidget {
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _systemBarsHidden = false;
 
-  /// Compact pager cover-page visibility (1 = cover page, 0 = lyrics
-  /// page), driven by _NowPlayingBody's PageController and consumed by
-  /// the backdrop: the portrait image background belongs to the cover
-  /// page only and fades out as the lyrics page slides in.
-  final ValueNotifier<double> _compactCoverVisibility = ValueNotifier(1);
-
   /// Landscape KTV is a full-screen stage, so the system bars hide while
   /// it is on screen; every other player state keeps the app-wide
   /// edge-to-edge mode set at startup. Guarded by [_systemBarsHidden] so
@@ -69,7 +63,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   void dispose() {
-    _compactCoverVisibility.dispose();
     if (_systemBarsHidden) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
@@ -132,7 +125,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 child: RepaintBoundary(
                   child: ImmersiveBackground(
                     revealProgress: widget.progress,
-                    coverVisibility: _compactCoverVisibility,
                   ),
                 ),
               ),
@@ -152,7 +144,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                           Expanded(
                             child: showEmpty
                                 ? const _EmptyPlayer()
-                                : _NowPlayingBody(coverVisibility: _compactCoverVisibility),
+                                : const _NowPlayingBody(),
                           ),
                         ],
                       )
@@ -164,10 +156,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                             Expanded(
                               child: showEmpty
                                   ? const _EmptyPlayer()
-                                  : _NowPlayingBody(
-                                      coverVisibility:
-                                          _compactCoverVisibility,
-                                    ),
+                                  : const _NowPlayingBody(),
                             ),
                           ],
                         ),
@@ -182,12 +171,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 }
 
 class _NowPlayingBody extends ConsumerStatefulWidget {
-  const _NowPlayingBody({this.coverVisibility});
-
-  /// Receives the compact pager's cover-page visibility (1 on the cover
-  /// page, 0 on the lyrics page); the backdrop fades the portrait image
-  /// background with it.
-  final ValueNotifier<double>? coverVisibility;
+  const _NowPlayingBody();
 
   @override
   ConsumerState<_NowPlayingBody> createState() => _NowPlayingBodyState();
@@ -206,30 +190,13 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController()..addListener(_syncCoverVisibility);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncCoverVisibility();
-    });
+    _pageController = PageController();
   }
 
   @override
   void dispose() {
-    _pageController.removeListener(_syncCoverVisibility);
     _pageController.dispose();
     super.dispose();
-  }
-
-  /// The portrait image background belongs to the cover page only: mirror
-  /// the pager position into [widget.coverVisibility] (1 − page) so the
-  /// backdrop fades it out as the lyrics page slides in.
-  void _syncCoverVisibility() {
-    final visibility = widget.coverVisibility;
-    if (visibility == null) return;
-    final page = _pageController.hasClients
-        ? (_pageController.page ?? 0)
-        : 0.0;
-    final value = (1 - page).clamp(0.0, 1.0);
-    if (visibility.value != value) visibility.value = value;
   }
 
   void _goToPage(int page) {
@@ -315,6 +282,12 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     final landscapeLyricAlignMode = ref.watch(
       settingsProvider.select((settings) => settings.lyricAlignModeLandscape),
     );
+    // Portrait square covers become a full-bleed poster, so the compact
+    // body drops its outer insets in that mode (inner rows compensate by
+    // the same amount, keeping their on-screen positions unchanged).
+    final squareCoverEnabled = ref.watch(
+      settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
+    );
     final mediaSize = MediaQuery.sizeOf(context);
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
       return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
@@ -371,14 +344,11 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
 
     // Phone landscape (not KTV, not car/tablet): a split layout of its
     // own — cover left, lyrics right, and a merged two-line bottom
-    // stack (one slim progress line, then a single control row with
-    // the action buttons split around the transport cluster) so the
-    // body keeps as much height as possible. The lyrics panel gets
-    // landscape-scoped metrics (smaller edge fade, centred scroll
-    // anchor, tighter rows) and follows the separate landscape lyric
-    // alignment setting. The imported portrait background never
-    // applies here: the backdrop skips it in landscape and
-    // AlbumPage(wide: true) always shows the cover.
+    // stack (one slim progress line, then a single control row holding
+    // all ten buttons as one centred group) so the body keeps as much
+    // height as possible. The lyrics panel gets landscape-scoped
+    // metrics (smaller edge fade, centred scroll anchor, tighter rows)
+    // and follows the separate landscape lyric alignment setting.
     if (mediaSize.width > mediaSize.height) {
       return Padding(
         key: const ValueKey('player-phone-landscape-layout'),
@@ -427,22 +397,18 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
               key: ValueKey('player-phone-landscape-progress'),
             ),
             const SizedBox(height: 2),
+            // One centred group on a shared pitch: the action segments
+            // and the transport cluster use the same button series, so
+            // the row no longer reads as three split clusters.
             const Row(
               key: ValueKey('player-phone-landscape-controls'),
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: PlayerActionRow.leading(),
-                  ),
-                ),
+                PlayerActionRow.leading(),
+                SizedBox(width: playerLandscapeControlGap),
                 TransportBar.controlsRow(),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: PlayerActionRow.trailing(),
-                  ),
-                ),
+                SizedBox(width: playerLandscapeControlGap),
+                PlayerActionRow.trailing(),
               ],
             ),
           ],
@@ -454,12 +420,14 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     // have room before reaching the pager clips. Text starts at the same
     // position as the progress track, including the slider's own inset.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        playerCompactOuterInset,
-        4,
-        playerCompactOuterInset,
-        14,
-      ),
+      padding: squareCoverEnabled
+          ? const EdgeInsets.fromLTRB(0, 0, 0, 14)
+          : const EdgeInsets.fromLTRB(
+              playerCompactOuterInset,
+              4,
+              playerCompactOuterInset,
+              14,
+            ),
       child: Column(
         children: [
           Expanded(
@@ -492,8 +460,10 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                             key: const ValueKey('player-compact-album-clip'),
                             clipBehavior: Clip.hardEdge,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: playerContentInset,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: squareCoverEnabled
+                                    ? 0
+                                    : playerContentInset,
                               ),
                               child: AlbumPage(onOpenLyrics: _openLyricsPage),
                             ),
@@ -503,8 +473,12 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                             clipBehavior: Clip.hardEdge,
                             child: LyricsPanel(
                               edgeFadeEnabled: !_compactPagerMoving,
-                              horizontalPadding:
-                                  playerContentInset + playerProgressTrackInset,
+                              horizontalPadding: squareCoverEnabled
+                                  ? playerCompactOuterInset +
+                                        playerContentInset +
+                                        playerProgressTrackInset
+                                  : playerContentInset +
+                                        playerProgressTrackInset,
                             ),
                           ),
                         ],
@@ -515,13 +489,21 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-            child: PlayerActionRow(),
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: squareCoverEnabled
+                  ? playerCompactOuterInset + playerContentInset
+                  : playerContentInset,
+            ),
+            child: const PlayerActionRow(),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: playerContentInset),
-            child: TransportBar(),
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: squareCoverEnabled
+                  ? playerCompactOuterInset + playerContentInset
+                  : playerContentInset,
+            ),
+            child: const TransportBar(),
           ),
         ],
       ),

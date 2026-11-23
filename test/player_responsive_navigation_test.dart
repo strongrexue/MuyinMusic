@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
+import 'package:prism_ui/icons/icons.dart' as prism_glyph;
 
 import 'package:cy_shine_music/core/models/enums.dart';
 import 'package:cy_shine_music/core/models/music_info.dart';
@@ -23,7 +24,9 @@ import 'package:cy_shine_music/features/player/widgets/ktv_lyrics_view.dart';
 import 'package:cy_shine_music/features/player/widgets/lyric_line.dart';
 import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
 import 'package:cy_shine_music/features/player/widgets/playback_queue_sheet.dart';
+import 'package:cy_shine_music/features/player/widgets/spinning_cover_art.dart';
 import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
+import 'package:cy_shine_music/features/player/widgets/top_chrome_row.dart';
 import 'package:cy_shine_music/features/player/widgets/transport_bar.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
 import 'package:cy_shine_music/features/shell/shell_route_utils.dart';
@@ -320,6 +323,49 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('portrait more menu has no background entry and shows cover', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'tx:no-portrait-background',
+        kind: PlayerTrackKind.remote,
+        title: '无背景入口测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+    );
+
+    // The cover is always shown on the portrait cover page now that the
+    // imported portrait background is gone.
+    expect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('player-more-button')));
+    await _pumpUi(tester);
+    expect(
+      find.descendant(
+        of: find.byType(prism.PopupMenu),
+        matching: find.text('背景'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(prism.PopupMenu),
+        matching: find.text('均衡器'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('sleep timer popup stepper starts a custom duration', (
     tester,
   ) async {
@@ -497,7 +543,7 @@ void main() {
           .first,
     );
     expect(activeLineText.style?.fontWeight, FontWeight.w400);
-    expect(activeLineText.style?.fontSize, 17);
+    expect(activeLineText.style?.fontSize, 19);
     expect(
       tester
           .widget<ImageFiltered>(
@@ -528,9 +574,9 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 190));
-    expect(scrollState.position.pixels, inExclusiveRange(0, 26));
+    expect(scrollState.position.pixels, inExclusiveRange(0, 29));
     await tester.pumpAndSettle();
-    expect(scrollState.position.pixels, closeTo(26, 0.01));
+    expect(scrollState.position.pixels, closeTo(29, 0.01));
     expect(
       tester
           .widget<Text>(
@@ -543,7 +589,7 @@ void main() {
           )
           .style
           ?.fontSize,
-      17,
+      19,
     );
     expect(
       tester
@@ -1096,9 +1142,9 @@ void main() {
     );
 
     // The bottom stack is merged into two lines: a slim progress line
-    // pressed down against the body, then one control row with the
-    // action buttons split around the transport cluster. There is no
-    // standalone full-width action row in this layout.
+    // pressed down against the body, then one control row holding all
+    // ten buttons as a single centred group. There is no standalone
+    // full-width action row in this layout.
     expect(find.byType(PlayerActionRow), findsNWidgets(2));
     for (final key in [
       'player-action-lyric-settings',
@@ -1140,14 +1186,101 @@ void main() {
     expect(find.byTooltip('上一首'), findsOneWidget);
     expect(find.byTooltip('下一首'), findsOneWidget);
     expect(find.byType(PlaybackQueueButton), findsOneWidget);
-    // The side clusters use the compact glyph size.
-    final volumeIcon = tester.widget<Icon>(
-      find.descendant(
-        of: find.byKey(const ValueKey('player-action-volume')),
-        matching: find.byType(Icon),
-      ),
+    // The merged control row is one centred group on a shared pitch:
+    // all ten buttons share one row and one button series, with the
+    // play button one tier larger.
+    final controls = find.byKey(
+      const ValueKey('player-phone-landscape-controls'),
     );
-    expect(volumeIcon.size, 22);
+    Finder inControls(Finder matching) =>
+        find.descendant(of: controls, matching: matching);
+    final modeIcon = inControls(
+      find.byIcon(Icons.format_list_numbered_rounded),
+    );
+    final playIcon = inControls(find.byIcon(Icons.play_arrow_rounded));
+    final prevIcon = inControls(find.byIcon(Icons.skip_previous_rounded));
+    final nextIcon = inControls(find.byIcon(Icons.skip_next_rounded));
+    final buttonFinders = <Finder>[
+      find.byKey(const ValueKey('player-action-lyric-settings')),
+      find.byKey(const ValueKey('player-action-playlist')),
+      find.byKey(const ValueKey('player-action-download')),
+      find.ancestor(of: modeIcon, matching: find.byType(IconButton)),
+      find.ancestor(of: prevIcon, matching: find.byType(IconButton)),
+      find.ancestor(of: playIcon, matching: find.byType(InkWell)),
+      find.ancestor(of: nextIcon, matching: find.byType(IconButton)),
+      inControls(find.byType(PlaybackQueueButton)),
+      find.byKey(const ValueKey('player-action-like')),
+      find.byKey(const ValueKey('player-action-volume')),
+    ];
+    final centers = [
+      for (final finder in buttonFinders) tester.getCenter(finder),
+    ];
+    // One row: every centre shares the same y.
+    for (final center in centers) {
+      expect(center.dy, closeTo(centers.first.dy, 1));
+    }
+    // Uniform pitch between neighbouring centres.
+    for (var i = 1; i < centers.length; i++) {
+      expect(
+        centers[i].dx - centers[i - 1].dx,
+        closeTo(62, 2),
+        reason: 'pitch ${i - 1}->$i',
+      );
+    }
+    // The group is centred against the 915dp-wide screen: the first
+    // button's left edge (its centre minus half of the 48dp target)
+    // mirrors the last button's right edge.
+    final leftMargin = centers.first.dx - 24;
+    final rightMargin = 915 - (centers.last.dx + 24);
+    expect((leftMargin - rightMargin).abs(), lessThanOrEqualTo(4));
+    // One series: normal buttons are 48dp targets, play is 72dp.
+    for (var i = 0; i < buttonFinders.length; i++) {
+      final rect = tester.getRect(buttonFinders[i]);
+      final side = i == 5 ? 72.0 : 48.0;
+      expect(rect.width, closeTo(side, 1), reason: 'button $i width');
+      expect(rect.height, closeTo(side, 1), reason: 'button $i height');
+    }
+    // One glyph size for every normal button; the play glyph is larger.
+    double materialGlyph(Finder finder) =>
+        tester.widget<Icon>(finder).size!;
+    double prismGlyph(String key) => tester
+        .widget<prism_glyph.GlyphIcon>(
+          find.descendant(
+            of: find.byKey(ValueKey(key)),
+            matching: find.byType(prism_glyph.GlyphIcon),
+          ),
+        )
+        .size!;
+    expect(prismGlyph('player-action-lyric-settings'), 26);
+    expect(prismGlyph('player-action-playlist'), 26);
+    expect(prismGlyph('player-action-download'), 26);
+    expect(materialGlyph(modeIcon), 26);
+    expect(materialGlyph(prevIcon), 26);
+    expect(materialGlyph(nextIcon), 26);
+    expect(
+      materialGlyph(inControls(find.byIcon(Icons.queue_music_rounded))),
+      26,
+    );
+    expect(
+      materialGlyph(
+        find.descendant(
+          of: find.byKey(const ValueKey('player-action-like')),
+          matching: find.byType(Icon),
+        ),
+      ),
+      26,
+    );
+    expect(
+      materialGlyph(
+        find.descendant(
+          of: find.byKey(const ValueKey('player-action-volume')),
+          matching: find.byType(Icon),
+        ),
+      ),
+      26,
+    );
+    expect(materialGlyph(playIcon), 56);
+    expect(materialGlyph(playIcon), greaterThan(26));
 
     // The cover fits its column completely at phone-landscape height:
     // no part of it is scrolled or clipped out of the album area.
@@ -1252,6 +1385,77 @@ void main() {
       find.byKey(const ValueKey('player-compact-pager')),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait square cover renders as a full-bleed poster', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'square_album_cover_enabled': true,
+    });
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:portrait-poster-song',
+        kind: PlayerTrackKind.remote,
+        title: '竖屏海报歌曲',
+        artist: '竖屏海报歌手',
+        album: '竖屏海报专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/portrait-poster.flac',
+      ),
+    );
+
+    final poster = find.byKey(const ValueKey('player-portrait-poster'));
+    expect(poster, findsOneWidget);
+    final posterRect = tester.getRect(poster);
+    // Full-bleed: spans the whole page width, square, and its top edge
+    // sits exactly on the top chrome row's bottom edge.
+    expect(posterRect.left, closeTo(0, 0.5));
+    expect(posterRect.width, closeTo(390, 0.5));
+    expect(posterRect.height, closeTo(390, 0.5));
+    final chromeRect = tester.getRect(find.byType(TopChromeRow));
+    expect(posterRect.top, closeTo(chromeRect.bottom, 0.5));
+    // The tap-to-toggle target lives inside the poster.
+    expect(
+      find.descendant(of: poster, matching: find.byType(SpinningCoverArt)),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait round cover keeps the card and has no poster', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'wy:portrait-round-song',
+        kind: PlayerTrackKind.remote,
+        title: '竖屏圆盘歌曲',
+        artist: '竖屏圆盘歌手',
+        album: '竖屏圆盘专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/portrait-round.flac',
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('player-portrait-poster')), findsNothing);
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    // The round disc stays an inset card below the top bar.
+    expect(coverRect.left, greaterThan(0));
+    expect(coverRect.width, lessThan(390));
     expect(tester.takeException(), isNull);
   });
 

@@ -28,12 +28,17 @@ class PlaybackQueueButton extends StatelessWidget {
     required this.count,
     required this.enabled,
     required this.onPressed,
+    this.iconSize = 27,
   });
 
   final int count;
   final Color? color;
   final bool enabled;
   final VoidCallback onPressed;
+
+  /// Glyph size of the queue icon; the phone-landscape merged control
+  /// row passes the shared series size.
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +64,7 @@ class PlaybackQueueButton extends StatelessWidget {
                   child: Icon(
                     Icons.queue_music_rounded,
                     color: color,
-                    size: 27,
+                    size: iconSize,
                   ),
                 ),
                 if (enabled && count > 0)

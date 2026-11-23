@@ -36,24 +36,22 @@ enum _ActionSection { all, leading, trailing }
 /// add to playlist, download, like and volume.
 ///
 /// The phone-landscape layout uses the [PlayerActionRow.leading] /
-/// [PlayerActionRow.trailing] sections instead: the same buttons at a
-/// smaller size, split around the merged transport cluster. Every other
-/// layout uses the default full row, unchanged.
+/// [PlayerActionRow.trailing] sections instead: the same buttons at the
+/// same size, as the outer segments of its single merged control row.
+/// Every other layout uses the default full row, unchanged.
 class PlayerActionRow extends ConsumerWidget {
-  const PlayerActionRow({super.key}) : compact = false, _section = _ActionSection.all;
+  const PlayerActionRow({super.key}) : _section = _ActionSection.all;
 
   /// The first three actions (lyric settings, add to playlist,
-  /// download) at the compact size.
+  /// download), spaced on the landscape control-row pitch.
   const PlayerActionRow.leading({super.key})
-    : compact = true,
-      _section = _ActionSection.leading;
+    : _section = _ActionSection.leading;
 
-  /// The last two actions (like, volume) at the compact size.
+  /// The last two actions (like, volume), spaced on the landscape
+  /// control-row pitch.
   const PlayerActionRow.trailing({super.key})
-    : compact = true,
-      _section = _ActionSection.trailing;
+    : _section = _ActionSection.trailing;
 
-  final bool compact;
   final _ActionSection _section;
 
   @override
@@ -100,8 +98,8 @@ class PlayerActionRow extends ConsumerWidget {
           ),
         );
 
-    final targetSize = compact ? 40.0 : _playerActionTargetSize;
-    final glyphSize = compact ? 22.0 : _playerActionGlyphSize;
+    final targetSize = _playerActionTargetSize;
+    final glyphSize = _playerActionGlyphSize;
     final actions = <Widget>[
       prism.PopupAnchor(
         targetBuilder: (open) => _PlayerActionButton(
@@ -200,14 +198,25 @@ class PlayerActionRow extends ConsumerWidget {
       ),
       _ActionSection.leading => Row(
         mainAxisSize: MainAxisSize.min,
-        children: actions.sublist(0, 3),
+        children: _onLandscapePitch(actions.sublist(0, 3)),
       ),
       _ActionSection.trailing => Row(
         mainAxisSize: MainAxisSize.min,
-        children: actions.sublist(3),
+        children: _onLandscapePitch(actions.sublist(3)),
       ),
     };
   }
+}
+
+/// Interleaves [buttons] with the landscape control-row gap so their
+/// centres land on the shared pitch (see player_layout.dart).
+List<Widget> _onLandscapePitch(List<Widget> buttons) {
+  return [
+    for (var i = 0; i < buttons.length; i++) ...[
+      if (i > 0) const SizedBox(width: playerLandscapeControlGap),
+      buttons[i],
+    ],
+  ];
 }
 
 /// Adds [music] to the playlist chosen in [PlaylistAddPopup], reporting the

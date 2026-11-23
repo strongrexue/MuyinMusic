@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,18 +11,11 @@ import 'player_control_color.dart';
 import 'track_change_switcher.dart';
 
 class ImmersiveBackground extends ConsumerWidget {
-  const ImmersiveBackground({super.key, this.revealProgress, this.coverVisibility});
+  const ImmersiveBackground({super.key, this.revealProgress});
 
   /// The shell's player reveal progress, forwarded to the backdrop so its
   /// motion can hold while the page is being dragged.
   final Animation<double>? revealProgress;
-
-  /// Compact pager cover-page visibility (1 = cover page, 0 = lyrics
-  /// page). The portrait image background only belongs to the cover page,
-  /// so it fades with this value; the lyrics page keeps the plain
-  /// flowing-light backdrop, and artwork color extraction is untouched
-  /// either way (the imported image never feeds the palette).
-  final ValueListenable<double>? coverVisibility;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,12 +32,6 @@ class ImmersiveBackground extends ConsumerWidget {
     );
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
-    );
-    // 竖屏封面页选中的图片背景（与 KTV 共用图库、选中独立）：盖在流光
-    // 之上完整遮住它，清掉选中即恢复流光；滑到歌词页时按
-    // coverVisibility 淡出，歌词页只剩流光。
-    final hasPortraitBackground = ref.watch(
-      settingsProvider.select((s) => s.selectedPortraitBackgroundItem != null),
     );
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -85,29 +71,7 @@ class ImmersiveBackground extends ConsumerWidget {
                   revealProgress: revealProgress,
                 ),
         ),
-        if (!isLandscape && hasPortraitBackground)
-          _FadedPortraitBackground(visibility: coverVisibility),
       ],
-    );
-  }
-}
-
-/// [PortraitBackground] faded by the compact pager's cover-page
-/// visibility, so the imported image never reaches the lyrics page.
-class _FadedPortraitBackground extends StatelessWidget {
-  const _FadedPortraitBackground({this.visibility});
-
-  final ValueListenable<double>? visibility;
-
-  @override
-  Widget build(BuildContext context) {
-    final listenable = visibility;
-    if (listenable == null) return const PortraitBackground();
-    return ValueListenableBuilder<double>(
-      valueListenable: listenable,
-      builder: (context, value, child) =>
-          Opacity(opacity: value.clamp(0.0, 1.0), child: child),
-      child: const PortraitBackground(),
     );
   }
 }

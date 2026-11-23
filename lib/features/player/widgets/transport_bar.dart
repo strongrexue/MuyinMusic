@@ -291,12 +291,17 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             ),
           );
         }
+        // The phone-landscape controls segment normalises every normal
+        // button to one glyph size so the merged row reads as a single
+        // series; the full bar keeps its established sizes.
+        final inControlsPart = widget._part == _TransportPart.controls;
         final buttons = <Widget>[
           _PlaybackModeButton(
             color: ink,
             mode: vm.playbackMode,
             enabled: vm.hasTrack,
             onPressed: controller.cyclePlaybackMode,
+            glyphSize: inControlsPart ? 26 : null,
           ),
           IconButton(
             tooltip: '上一首',
@@ -304,7 +309,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             icon: Icon(
               Icons.skip_previous_rounded,
               color: controlColor,
-              size: 38,
+              size: inControlsPart ? 26 : 38,
             ),
           ),
           _PlayButton(
@@ -321,7 +326,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
             icon: Icon(
               Icons.skip_next_rounded,
               color: controlColor,
-              size: 38,
+              size: inControlsPart ? 26 : 38,
             ),
           ),
           prism.PopupAnchor(
@@ -331,6 +336,7 @@ class _TransportBarState extends ConsumerState<TransportBar> {
               count: vm.queueCount,
               enabled: vm.hasTrack,
               onPressed: open,
+              iconSize: inControlsPart ? 26 : 27,
             ),
             popupBuilder: (_) => const PlaybackQueuePopup(),
           ),
@@ -353,11 +359,19 @@ class _TransportBarState extends ConsumerState<TransportBar> {
           );
         }
         if (widget._part == _TransportPart.controls) {
+          // Buttons sit on the shared landscape pitch: the gaps shrink
+          // next to the wider play button so every centre is the same
+          // distance from its neighbours.
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (var i = 0; i < buttons.length; i++) ...[
-                if (i > 0) const SizedBox(width: 6),
+                if (i > 0)
+                  SizedBox(
+                    width: (i == 2 || i == 3)
+                        ? playerLandscapeControlPlayGap
+                        : playerLandscapeControlGap,
+                  ),
                 buttons[i],
               ],
             ],
@@ -464,6 +478,7 @@ class _PlaybackModeButton extends StatelessWidget {
     required this.enabled,
     required this.onPressed,
     this.compact = false,
+    this.glyphSize,
   });
 
   final PlayerPlaybackMode mode;
@@ -471,6 +486,10 @@ class _PlaybackModeButton extends StatelessWidget {
   final bool enabled;
   final VoidCallback onPressed;
   final bool compact;
+
+  /// Overrides the glyph size; the phone-landscape merged control row
+  /// passes the shared series size so the button matches its neighbours.
+  final double? glyphSize;
 
   @override
   Widget build(BuildContext context) {
@@ -499,7 +518,7 @@ class _PlaybackModeButton extends StatelessWidget {
           _playbackModeIcon(mode),
           key: ValueKey(mode),
           color: iconColor,
-          size: compact ? 24 : 25,
+          size: glyphSize ?? (compact ? 24 : 25),
         ),
       ),
     );

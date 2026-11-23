@@ -1568,9 +1568,9 @@ void main() {
 
     test('blur radius converts to the RenderScript sigma, not straight through', () {
       // AOSP's rsCpuIntrinsicBlur: sigma = 0.4 * radius + 0.6. Passing radius
-      // 25 to ImageFilter.blur as a sigma over-blurs by about 2.4x.
-      expect(kFlowingLightBlurRadius, 25);
-      expect(kFlowingLightBlurSigma, closeTo(10.6, 1e-9));
+      // 34 to ImageFilter.blur as a sigma over-blurs by about 2.4x.
+      expect(kFlowingLightBlurRadius, 34);
+      expect(kFlowingLightBlurSigma, closeTo(14.2, 1e-9));
     });
 
     test('saturation matrix matches Android ColorMatrix.setSaturation(2.5)', () {
@@ -1591,6 +1591,16 @@ void main() {
       expect(identity[0], closeTo(1, 1e-9));
       expect(identity[1], closeTo(0, 1e-9));
       expect(identity[6], closeTo(1, 1e-9));
+    });
+
+    test('wash matrix keeps the colours, scales only the alpha row', () {
+      expect(kFlowingLightWashAlpha, 0.25);
+      final wash = flowingLightWashMatrix();
+      final saturated = flowingLightSaturationMatrix(kFlowingLightSaturation);
+      // The colour rows pass through untouched...
+      expect(wash.sublist(0, 15), saturated.sublist(0, 15));
+      // ...only the alpha row is scaled down to the wash alpha.
+      expect(wash.sublist(15), [0, 0, 0, kFlowingLightWashAlpha, 0]);
     });
 
     test('holds the remaining flowing-light constants', () {

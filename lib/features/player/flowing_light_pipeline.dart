@@ -73,6 +73,24 @@ ui.Image composeFlowingLightFrame({
     canvas.scale(scale, scale);
   });
 
+  // Homogenising wash over the copies, before the scrims: the artwork
+  // once more, cover-fit and unrotated, at low alpha. The three copies
+  // are opaque, so where an offset copy's square edge crosses the buffer
+  // the visible field switches wholesale between two copies' tones and
+  // the blurred edge can read as a soft divider line. Pulling every
+  // point toward the same unrotated field shrinks the tone gap across
+  // any such edge, and the wider blur (kFlowingLightBlurRadius) spreads
+  // what remains of the transition.
+  canvas.drawImageRect(
+    artwork,
+    _coverSourceRect(artwork, bounds.size),
+    bounds,
+    Paint()
+      ..isAntiAlias = true
+      ..filterQuality = FilterQuality.low
+      ..colorFilter = _washFilter,
+  );
+
   for (final scrim in spec.dark ? _darkScrims : _lightScrims) {
     canvas.drawColor(scrim, BlendMode.srcOver);
   }
@@ -138,6 +156,29 @@ void _rotateAbout(Canvas canvas, double degrees, double x, double y) {
   canvas.translate(-x, -y);
 }
 
+/// The centred source rect that makes [artwork] cover a target of [size]
+/// without distortion (crop the longer axis, keep the middle).
+Rect _coverSourceRect(ui.Image artwork, Size size) {
+  final imageAspect = artwork.width / artwork.height;
+  final targetAspect = size.width / size.height;
+  if (imageAspect > targetAspect) {
+    final width = artwork.height * targetAspect;
+    return Rect.fromLTWH(
+      (artwork.width - width) / 2,
+      0,
+      width,
+      artwork.height.toDouble(),
+    );
+  }
+  final height = artwork.width / targetAspect;
+  return Rect.fromLTWH(
+    0,
+    (artwork.height - height) / 2,
+    artwork.width.toDouble(),
+    height,
+  );
+}
+
 /// Theme scrims, applied in order after the artwork copies and before the blur.
 const List<Color> _lightScrims = [Color(0x95FFFFFF), Color(0x2AFFFFFF)];
 const List<Color> _darkScrims = [Color(0x52000000), Color(0x1A000000)];
@@ -147,3 +188,7 @@ const List<Color> _darkScrims = [Color(0x52000000), Color(0x1A000000)];
 final ColorFilter _saturationFilter = ColorFilter.matrix(
   flowingLightSaturationMatrix(kFlowingLightSaturation),
 );
+
+/// Same derivation for the homogenising wash: saturation with the alpha
+/// row scaled down to [kFlowingLightWashAlpha].
+final ColorFilter _washFilter = ColorFilter.matrix(flowingLightWashMatrix());

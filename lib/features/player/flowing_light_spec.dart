@@ -13,6 +13,14 @@ const int kFlowingLightFeedbackAlpha = 64;
 
 const double kFlowingLightSaturation = 2.5;
 
+/// Alpha of the homogenising wash drawn over the three rotated copies
+/// (see composeFlowingLightFrame in flowing_light_pipeline.dart). The
+/// copies are opaque, so where an offset copy's edge crosses the buffer
+/// the field switches wholesale between two copies' tones; the wash
+/// pulls every point toward the same unrotated field and shrinks the
+/// tone gap across any such edge so it cannot read as a divider line.
+const double kFlowingLightWashAlpha = 0.25;
+
 /// The 4x5 colour matrix for [saturation], laid out the way `ColorFilter.matrix`
 /// wants it.
 List<double> flowingLightSaturationMatrix(double saturation) {
@@ -30,7 +38,18 @@ List<double> flowingLightSaturationMatrix(double saturation) {
   ];
 }
 
-const double kFlowingLightBlurRadius = 25;
+/// The saturation matrix with its alpha row scaled to
+/// [kFlowingLightWashAlpha], so the homogenising wash tints the composed
+/// field toward the artwork instead of replacing it.
+List<double> flowingLightWashMatrix() {
+  final matrix = flowingLightSaturationMatrix(kFlowingLightSaturation);
+  for (var i = 15; i < 19; i++) {
+    matrix[i] *= kFlowingLightWashAlpha;
+  }
+  return matrix;
+}
+
+const double kFlowingLightBlurRadius = 34;
 
 /// The same blur as a Gaussian sigma, which is what `ImageFilter.blur` wants.
 ///
