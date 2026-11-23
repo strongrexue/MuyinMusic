@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +31,7 @@ import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
 import 'package:cy_shine_music/features/player/widgets/playback_queue_sheet.dart';
 import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
 import 'package:cy_shine_music/features/player/widgets/player_control_color.dart';
+import 'package:cy_shine_music/features/player/widgets/spinning_cover_art.dart';
 import 'package:cy_shine_music/features/player/widgets/top_chrome_row.dart';
 import 'package:cy_shine_music/features/player/widgets/transport_bar.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
@@ -765,6 +768,27 @@ void main() {
     expect(tester.getRect(list), tester.getRect(viewport));
     final fadeRenderObject = tester.renderObject<RenderBox>(edgeFade);
     final lyricsListElement = tester.element(list);
+    // The shared lyrics view wraps its list in its own
+    // ScrollConfiguration hiding the platform scrollbar (the desktop
+    // bar on the panel's edge): the wrap sits inside the view, and
+    // the list's effective behaviour returns content from
+    // buildScrollbar unwrapped instead of adding a Scrollbar.
+    expect(
+      find.descendant(of: viewport, matching: find.byType(ScrollConfiguration)),
+      findsOneWidget,
+    );
+    const marker = SizedBox();
+    expect(
+      identical(
+        ScrollConfiguration.of(lyricsListElement).buildScrollbar(
+          lyricsListElement,
+          marker,
+          const ScrollableDetails.vertical(),
+        ),
+        marker,
+      ),
+      isTrue,
+    );
     expect(
       tester.widget<LyricsPanel>(find.byType(LyricsPanel)).edgeFadeEnabled,
       isTrue,
@@ -1265,15 +1289,17 @@ void main() {
     expect(materialGlyph(playIcon), greaterThan(26));
 
     // The cover sits inside its column: no part of it is scrolled or
-    // clipped out of the album area. Its vertical centre band stops
-    // at the floating bottom stack, so the cover's bottom edge never
-    // reaches the progress line floating over the plane.
+    // clipped out of the album area. Its vertical centre band runs
+    // from below the floating top chrome to the floating bottom
+    // stack, so the cover's bottom edge never reaches the progress
+    // line and its top edge never slides under the title row.
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
+    expect(coverRect.top, greaterThanOrEqualTo(albumRect.top + 60 - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(progressRect.top + 0.5));
     expect(
       coverRect.center.dy,
-      closeTo((albumRect.top + progressRect.top) / 2, 0.6),
+      closeTo((albumRect.top + 60 + progressRect.top) / 2, 0.6),
     );
     // The side follows the proportion rule — half the 412dp short
     // side — not the album area's extent.
@@ -1315,6 +1341,7 @@ void main() {
       find.byKey(const ValueKey('player-phone-landscape-progress')),
     );
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
+    expect(coverRect.top, greaterThanOrEqualTo(albumRect.top + 60 - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
     // Same centre band as the disc: the square cover's bottom edge
     // also stays above the floating progress line.
@@ -1678,8 +1705,10 @@ void main() {
     }
     expect(maxTableStep, lessThanOrEqualTo(0.15));
     // Densely sampled, the profile falls monotonically and no single
-    // 0.005 sampling step drops more than 0.02 of alpha, so no row of
-    // the poster can read as a boundary line.
+    // 0.005 sampling step drops more than 0.032 of alpha, so no row of
+    // the poster can read as a boundary line. (The dissolve zone is
+    // 26% of the layer, so the steepest table segment — 0.148 of alpha
+    // over 0.026 of height — bounds a sampling step at ~0.0285.)
     var previous = integratedArtworkDissolveAlphaAt(0);
     expect(previous, 1);
     var maxStep = 0.0;
@@ -1690,7 +1719,7 @@ void main() {
       previous = alpha;
     }
     expect(previous, 0);
-    expect(maxStep, lessThanOrEqualTo(0.02));
+    expect(maxStep, lessThanOrEqualTo(0.032));
   });
 
   testWidgets(
@@ -1843,6 +1872,169 @@ void main() {
     },
   );
 
+  testWidgets(
+    'portrait disc contact shadow is a static underlay that never '
+    'swings above the disc',
+    (tester) async {
+      final coverBytes = await tester.runAsync(_discShadowProbeCoverBytes);
+      final controller = await _pumpPlayer(
+        tester,
+        size: const Size(390, 844),
+        track: PlayerTrack(
+          id: 'wy:disc-static-shadow-song',
+          kind: PlayerTrackKind.remote,
+          title: '圆盘静态阴影歌曲',
+          artist: '圆盘静态阴影歌手',
+          album: '圆盘静态阴影专辑',
+          sourceLabel: '网易',
+          qualityLabel: '无损',
+          remoteUrl: 'https://audio.example/disc-static-shadow.flac',
+          coverBytes: coverBytes,
+        ),
+      );
+
+      // The shadow is a static disc under the artwork, concentric
+      // with it — not a decoration on the spinning artwork itself,
+      // whose offset would rotate with the disc.
+      final shadowFinder = find.byKey(
+        const ValueKey('player-disc-contact-shadow'),
+      );
+      expect(shadowFinder, findsOneWidget);
+      expect(
+        find.ancestor(
+          of: shadowFinder,
+          matching: find.byType(RotationTransition),
+        ),
+        findsNothing,
+      );
+      final coverRect = tester.getRect(
+        find.byKey(const ValueKey('player-cover-toggle-button')),
+      );
+      expect(tester.getRect(shadowFinder), coverRect);
+      final shadowDecoration =
+          tester.widget<Container>(shadowFinder).decoration as BoxDecoration;
+      expect(shadowDecoration.shape, BoxShape.circle);
+      expect(shadowDecoration.boxShadow, hasLength(1));
+      expect(shadowDecoration.boxShadow!.single.blurRadius, 28);
+      expect(shadowDecoration.boxShadow!.single.offset, const Offset(0, 18));
+      final discDecoration =
+          tester
+                  .widget<Container>(
+                    find
+                        .descendant(
+                          of: find.byType(SpinningCoverArt),
+                          matching: find.byType(Container),
+                        )
+                        .first,
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(discDecoration.boxShadow, isNull);
+
+      // Spin the disc through a full revolution in quarter turns and
+      // profile the rows above the disc at each stop. First wait for
+      // the artwork to actually decode: the image streams resolve on
+      // real async time, and until they do the disc shows its grey
+      // placeholder and the backdrop is still empty.
+      final top = coverRect.top.round();
+      final centerX = coverRect.center.dx.round();
+      Future<ByteData> captureBytes() async {
+        final image = await tester.runAsync(
+          () => captureImage(tester.element(find.byType(PlayerPage))),
+        );
+        expect(image!.width, 390);
+        expect(image.height, 844);
+        final bytes = await tester.runAsync(
+          () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
+        );
+        image.dispose();
+        return bytes!;
+      }
+
+      int pixel(ByteData bytes, int x, int y, int channel) =>
+          bytes.getUint8((y * 390 + x) * 4 + channel);
+      var artworkReady = false;
+      for (var attempt = 0; attempt < 60 && !artworkReady; attempt++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+        final bytes = await captureBytes();
+        final probeY = top + (coverRect.height * 0.25).round();
+        // The synthetic cover's upper half is green; the placeholder
+        // is neutral grey. Green dominance means the artwork is in.
+        artworkReady =
+            pixel(bytes, centerX, probeY, 1) -
+                    pixel(bytes, centerX, probeY, 0) >
+                25 &&
+            pixel(bytes, centerX, probeY, 1) -
+                    pixel(bytes, centerX, probeY, 2) >
+                25;
+      }
+      expect(artworkReady, isTrue, reason: 'cover artwork never decoded');
+      // Let the artwork/backdrop crossfades finish.
+      await tester.pump(const Duration(milliseconds: 700));
+
+      // With everything settled, the only thing that changes between
+      // captures is the disc's rotation. The rows above the disc
+      // must therefore be identical at every angle, and smooth —
+      // when the shadow rotated with the disc, the half of the
+      // revolution with its offset pointing up swung an extra
+      // ~25/255 of darkening into exactly these rows.
+      controller.setStateForTest(controller.state.copyWith(playing: true));
+      await tester.pump();
+      final profiles = <List<double>>[];
+      for (var quarter = 0; quarter < 4; quarter++) {
+        if (quarter > 0) {
+          await tester.pump(const Duration(seconds: 6));
+        }
+        final bytes = await captureBytes();
+        double rowLuminance(int y) {
+          var total = 0.0;
+          for (var x = centerX - 45; x <= centerX + 45; x++) {
+            total +=
+                0.2126 * pixel(bytes, x, y, 0) +
+                0.7152 * pixel(bytes, x, y, 1) +
+                0.0722 * pixel(bytes, x, y, 2);
+          }
+          return total / 91;
+        }
+
+        profiles.add([
+          for (var dy = 30; dy >= 2; dy--) rowLuminance(top - dy),
+        ]);
+      }
+      var maxAngleRange = 0.0;
+      var maxRowStep = 0.0;
+      for (var sample = 0; sample < profiles.first.length; sample++) {
+        final values = [for (final profile in profiles) profile[sample]];
+        maxAngleRange = math.max(
+          maxAngleRange,
+          values.reduce(math.max) - values.reduce(math.min),
+        );
+      }
+      for (final profile in profiles) {
+        for (var sample = 1; sample < profile.length; sample++) {
+          maxRowStep = math.max(
+            maxRowStep,
+            (profile[sample] - profile[sample - 1]).abs(),
+          );
+        }
+      }
+      expect(
+        maxAngleRange,
+        lessThanOrEqualTo(3.5),
+        reason: 'rows above the disc vary with the rotation angle',
+      );
+      expect(
+        maxRowStep,
+        lessThanOrEqualTo(3),
+        reason: 'a band edge remains in the rows above the disc',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('portrait square cover keeps the integrated artwork and '
       'has no blurred disc backdrop', (tester) async {
     SharedPreferences.setMockInitialValues({
@@ -1988,11 +2180,28 @@ void main() {
       find.byType(KaraokeLyricsView),
     );
     expect(view.edgeFadeExtent, 10);
-    // Long per-edge fades matched to the floating chrome: 48 + 12 at
-    // the top, 12 + 98 + 12 at the bottom, so lines dissolve before
-    // reaching the chrome instead of sliding under it still readable.
-    expect(view.edgeFadeExtentTop, 60);
-    expect(view.edgeFadeExtentBottom, 122);
+    // Dead-zoned per-edge fades: each edge's dead zone matches the
+    // floating chrome over it (48 + 12 at the top, 12 + 98 at the
+    // bottom), so a line's mask alpha is 0 throughout the chrome's
+    // span; the extent adds the ramp past the dead zone (50 top, 70
+    // bottom) where alpha returns to 1. Profile points: top alpha is
+    // 0 at 60dp from the top and 1 at 110dp; bottom alpha is 0 at
+    // 110dp from the bottom and 1 at 180dp.
+    expect(view.edgeFadeExtentTop, 110);
+    expect(view.edgeFadeExtentBottom, 180);
+    expect(view.edgeFadeDeadZoneTop, 60);
+    expect(view.edgeFadeDeadZoneBottom, 110);
+    // The shared lyrics view hides the platform scrollbar in this
+    // panel too (the desktop bar visible on the lyrics area's right
+    // edge in the Windows screenshot): its own ScrollConfiguration
+    // wrap sits inside the view.
+    expect(
+      find.descendant(
+        of: find.byType(KaraokeLyricsView),
+        matching: find.byType(ScrollConfiguration),
+      ),
+      findsOneWidget,
+    );
     expect(view.scrollAnchor, 0.5);
     expect(view.lineVerticalPadding, 4);
     expect(view.alignModeOverride, LyricAlignMode.left);
@@ -2307,6 +2516,32 @@ Future<_RouterHarness> _pumpRoutedApp(
   );
   await _pumpUi(tester);
   return _RouterHarness(router: router);
+}
+
+/// A synthetic cover for the disc-shadow profile test: solid green
+/// over solid pink with an eccentric dark blob, so the blurred
+/// backdrop stays vertically smooth above the disc while the disc's
+/// rotation remains visible in the artwork itself.
+Future<Uint8List> _discShadowProbeCoverBytes() async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  canvas.drawRect(
+    const ui.Rect.fromLTWH(0, 0, 200, 110),
+    ui.Paint()..color = const ui.Color(0xFF7CB342),
+  );
+  canvas.drawRect(
+    const ui.Rect.fromLTWH(0, 110, 200, 90),
+    ui.Paint()..color = const ui.Color(0xFFEC407A),
+  );
+  canvas.drawCircle(
+    const ui.Offset(52, 44),
+    26,
+    ui.Paint()..color = const ui.Color(0xFF263238),
+  );
+  final image = await recorder.endRecording().toImage(200, 200);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
 }
 
 Future<_SeededPlayerController> _pumpPlayer(

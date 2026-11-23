@@ -164,21 +164,21 @@ class ImmersiveBackground extends ConsumerWidget {
 /// the layer's height from its top edge.
 const List<double> integratedArtworkDissolveStops = [
   0.0,
-  0.58,
-  0.622,
-  0.664,
-  0.706,
-  0.748,
-  0.79,
-  0.832,
-  0.874,
-  0.916,
-  0.958,
+  0.74,
+  0.766,
+  0.792,
+  0.818,
+  0.844,
+  0.87,
+  0.896,
+  0.922,
+  0.948,
+  0.974,
   1.0,
 ];
 
 /// Alpha at each of [integratedArtworkDissolveStops]: fully opaque
-/// down to 58% of the layer, then a smoothstep fall to zero exactly
+/// down to 74% of the layer, then a smoothstep fall to zero exactly
 /// at the bottom edge. The fall disperses upward from the bottom —
 /// its slope grows out of zero and settles back to zero with no
 /// single knee — so no row of the poster reads as a boundary line

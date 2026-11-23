@@ -31,3 +31,13 @@ const double playerLandscapeBottomStackHeight = 98;
 
 /// Offset of the floating bottom stack from the screen's bottom edge.
 const double playerLandscapeBottomInset = 12;
+
+/// Ramp of the landscape lyrics top fade: past the dead zone covering
+/// the floating top chrome, a line travels this far before it is fully
+/// opaque again.
+const double playerLandscapeLyricFadeRampTop = 50;
+
+/// Ramp of the landscape lyrics bottom fade: past the dead zone
+/// covering the floating bottom stack, a line travels this far before
+/// it is fully opaque again.
+const double playerLandscapeLyricFadeRampBottom = 70;

@@ -54,6 +54,8 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
     this.edgeFadeExtent,
     this.edgeFadeExtentTop,
     this.edgeFadeExtentBottom,
+    this.edgeFadeDeadZoneTop,
+    this.edgeFadeDeadZoneBottom,
     this.scrollAnchor,
     this.lineVerticalPadding,
     this.listPadding,
@@ -79,6 +81,15 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
   /// sliding under it still readable.
   final double? edgeFadeExtentTop;
   final double? edgeFadeExtentBottom;
+
+  /// Per-edge fade dead zones. Within a dead zone (measured from the
+  /// edge) a line stays fully dissolved; it only fades back in over
+  /// the remaining ramp up to that edge's extent. Null keeps the plain
+  /// per-edge fade running from the edge itself; the phone-landscape
+  /// panel sets dead zones matching its floating chrome so a line is
+  /// already gone before it slides under the chrome.
+  final double? edgeFadeDeadZoneTop;
+  final double? edgeFadeDeadZoneBottom;
   final double? scrollAnchor;
   final double? lineVerticalPadding;
   final EdgeInsets? listPadding;
@@ -908,7 +919,19 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView>
         fadeExtent: widget.edgeFadeExtent ?? _kLyricEdgeFadeExtent,
         fadeExtentTop: widget.edgeFadeExtentTop,
         fadeExtentBottom: widget.edgeFadeExtentBottom,
-        child: lyricsList,
+        fadeDeadZoneTop: widget.edgeFadeDeadZoneTop,
+        fadeDeadZoneBottom: widget.edgeFadeDeadZoneBottom,
+        // The lyrics list never shows a platform scrollbar: on
+        // desktop it would sit on the panel's edge as a stray element
+        // in a view that playback scrolls, not the user. Every other
+        // scroll behaviour (drag devices, overscroll) is inherited
+        // from the ambient configuration unchanged.
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(
+            context,
+          ).copyWith(scrollbars: false),
+          child: lyricsList,
+        ),
       ),
     );
   }
@@ -921,6 +944,8 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
     required this.fadeExtent,
     this.fadeExtentTop,
     this.fadeExtentBottom,
+    this.fadeDeadZoneTop,
+    this.fadeDeadZoneBottom,
     required super.child,
   });
 
@@ -928,6 +953,8 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
   final double fadeExtent;
   final double? fadeExtentTop;
   final double? fadeExtentBottom;
+  final double? fadeDeadZoneTop;
+  final double? fadeDeadZoneBottom;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
@@ -936,6 +963,8 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
       fadeExtent: fadeExtent,
       fadeExtentTop: fadeExtentTop,
       fadeExtentBottom: fadeExtentBottom,
+      fadeDeadZoneTop: fadeDeadZoneTop,
+      fadeDeadZoneBottom: fadeDeadZoneBottom,
     );
   }
 
@@ -948,7 +977,9 @@ class _ToggleableLyricEdgeFade extends SingleChildRenderObjectWidget {
       ..enabled = enabled
       ..fadeExtent = fadeExtent
       ..fadeExtentTop = fadeExtentTop
-      ..fadeExtentBottom = fadeExtentBottom;
+      ..fadeExtentBottom = fadeExtentBottom
+      ..fadeDeadZoneTop = fadeDeadZoneTop
+      ..fadeDeadZoneBottom = fadeDeadZoneBottom;
   }
 }
 
@@ -958,19 +989,27 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
     required double fadeExtent,
     double? fadeExtentTop,
     double? fadeExtentBottom,
+    double? fadeDeadZoneTop,
+    double? fadeDeadZoneBottom,
   }) : _enabled = enabled,
        _fadeExtent = fadeExtent,
        _fadeExtentTop = fadeExtentTop,
-       _fadeExtentBottom = fadeExtentBottom;
+       _fadeExtentBottom = fadeExtentBottom,
+       _fadeDeadZoneTop = fadeDeadZoneTop,
+       _fadeDeadZoneBottom = fadeDeadZoneBottom;
 
   bool _enabled;
   double _fadeExtent;
   double? _fadeExtentTop;
   double? _fadeExtentBottom;
+  double? _fadeDeadZoneTop;
+  double? _fadeDeadZoneBottom;
   ui.Shader? _edgeShader;
   Size? _shaderSize;
   double? _shaderFadeTop;
   double? _shaderFadeBottom;
+  double? _shaderDeadTop;
+  double? _shaderDeadBottom;
 
   bool get enabled => _enabled;
 
@@ -1002,8 +1041,26 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
     markNeedsPaint();
   }
 
+  double? get fadeDeadZoneTop => _fadeDeadZoneTop;
+
+  set fadeDeadZoneTop(double? value) {
+    if (_fadeDeadZoneTop == value) return;
+    _fadeDeadZoneTop = value;
+    markNeedsPaint();
+  }
+
+  double? get fadeDeadZoneBottom => _fadeDeadZoneBottom;
+
+  set fadeDeadZoneBottom(double? value) {
+    if (_fadeDeadZoneBottom == value) return;
+    _fadeDeadZoneBottom = value;
+    markNeedsPaint();
+  }
+
   double get _effectiveFadeTop => _fadeExtentTop ?? _fadeExtent;
   double get _effectiveFadeBottom => _fadeExtentBottom ?? _fadeExtent;
+  double get _effectiveDeadTop => _fadeDeadZoneTop ?? 0;
+  double get _effectiveDeadBottom => _fadeDeadZoneBottom ?? 0;
 
   @override
   ShaderMaskLayer? get layer => super.layer as ShaderMaskLayer?;
@@ -1030,41 +1087,71 @@ class _RenderToggleableLyricEdgeFade extends RenderProxyBox {
     if (_edgeShader == null ||
         _shaderSize != size ||
         _shaderFadeTop != _effectiveFadeTop ||
-        _shaderFadeBottom != _effectiveFadeBottom) {
-      var topStop = 0.0;
-      var bottomStop = 1.0;
+        _shaderFadeBottom != _effectiveFadeBottom ||
+        _shaderDeadTop != _effectiveDeadTop ||
+        _shaderDeadBottom != _effectiveDeadBottom) {
+      var colors = const [
+        Colors.transparent,
+        Colors.white,
+        Colors.white,
+        Colors.transparent,
+      ];
+      var stops = <double>[0, 0, 1, 1];
       if (size.height > 0) {
         if (_fadeExtentTop == null && _fadeExtentBottom == null) {
           // Symmetric fade: capped so short viewports keep a
           // readable middle band.
           final edgeStop = math.min(_fadeExtent / size.height, 0.18);
-          topStop = edgeStop;
-          bottomStop = 1 - edgeStop;
-        } else {
+          stops = [0, edgeStop, 1 - edgeStop, 1];
+        } else if (_fadeDeadZoneTop == null && _fadeDeadZoneBottom == null) {
           // Per-edge fades (phone landscape): each edge dissolves
           // over its own extent, long enough to cover the floating
           // chrome floating over that edge.
-          topStop = math.min(_effectiveFadeTop / size.height, 0.45);
-          bottomStop =
-              1 - math.min(_effectiveFadeBottom / size.height, 0.45);
+          var topStop = math.min(_effectiveFadeTop / size.height, 0.45);
+          var bottomStop =
+              1.0 - math.min(_effectiveFadeBottom / size.height, 0.45);
           if (bottomStop < topStop) bottomStop = topStop;
+          stops = [0, topStop, bottomStop, 1];
+        } else {
+          // Per-edge fades with dead zones: a line stays fully
+          // dissolved throughout the dead zone at each edge (the span
+          // the floating chrome covers) and only fades back in over
+          // the remaining ramp up to that edge's full extent.
+          var topStop = math.min(_effectiveFadeTop / size.height, 0.45);
+          var bottomStop =
+              1.0 - math.min(_effectiveFadeBottom / size.height, 0.45);
+          if (bottomStop < topStop) bottomStop = topStop;
+          final topDeadStop = math.min(
+            _effectiveDeadTop / size.height,
+            topStop,
+          );
+          final bottomDeadStop = math.max(
+            1.0 - _effectiveDeadBottom / size.height,
+            bottomStop,
+          );
+          colors = const [
+            Colors.transparent,
+            Colors.transparent,
+            Colors.white,
+            Colors.white,
+            Colors.transparent,
+            Colors.transparent,
+          ];
+          stops = [0, topDeadStop, topStop, bottomStop, bottomDeadStop, 1];
         }
       }
       _edgeShader?.dispose();
       _edgeShader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: const [
-          Colors.transparent,
-          Colors.white,
-          Colors.white,
-          Colors.transparent,
-        ],
-        stops: [0, topStop, bottomStop, 1],
+        colors: colors,
+        stops: stops,
       ).createShader(Offset.zero & size);
       _shaderSize = size;
       _shaderFadeTop = _effectiveFadeTop;
       _shaderFadeBottom = _effectiveFadeBottom;
+      _shaderDeadTop = _effectiveDeadTop;
+      _shaderDeadBottom = _effectiveDeadBottom;
     }
     layer ??= ShaderMaskLayer();
     layer!

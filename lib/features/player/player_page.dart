@@ -408,12 +408,16 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                   flex: 10,
                   child: KeyedSubtree(
                     key: const ValueKey('player-phone-landscape-album'),
-                    // The cover centres over the band above the
-                    // floating bottom stack, not the full height, so
-                    // its bottom edge never slides under the progress
-                    // line floating over the plane.
+                    // The cover centres over the band between the
+                    // floating top chrome and the floating bottom
+                    // stack, so neither edge slides under the chrome
+                    // floating over the plane: its bottom stays above
+                    // the progress line and its top stays below the
+                    // title row, clear of long titles reaching over
+                    // the cover column.
                     child: Padding(
                       padding: const EdgeInsets.only(
+                        top: playerLandscapeChromeHeight + 12,
                         bottom:
                             playerLandscapeBottomInset +
                             playerLandscapeBottomStackHeight,
@@ -437,15 +441,24 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                     key: const ValueKey('player-phone-landscape-lyrics'),
                     child: LyricsPanel(
                       edgeFadeExtent: 10,
-                      // Long asymmetric fades matched to the list
-                      // insets below: a line dissolves over the full
-                      // height of the floating chrome at each edge
-                      // instead of sliding under it still readable.
-                      edgeFadeExtentTop: playerLandscapeChromeHeight + 12,
+                      // Dead-zoned fades: a line is fully dissolved
+                      // throughout the span each floating chrome piece
+                      // covers (dead zone = the chrome's own height),
+                      // and only fades back in over a ramp past it, so
+                      // it never crosses the progress line or the top
+                      // row still half readable.
+                      edgeFadeExtentTop:
+                          playerLandscapeChromeHeight +
+                          12 +
+                          playerLandscapeLyricFadeRampTop,
                       edgeFadeExtentBottom:
                           playerLandscapeBottomInset +
                           playerLandscapeBottomStackHeight +
-                          12,
+                          playerLandscapeLyricFadeRampBottom,
+                      edgeFadeDeadZoneTop: playerLandscapeChromeHeight + 12,
+                      edgeFadeDeadZoneBottom:
+                          playerLandscapeBottomInset +
+                          playerLandscapeBottomStackHeight,
                       scrollAnchor: 0.5,
                       lineVerticalPadding: 4,
                       listPadding: const EdgeInsets.fromLTRB(

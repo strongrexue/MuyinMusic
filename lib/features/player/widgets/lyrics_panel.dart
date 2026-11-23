@@ -17,6 +17,8 @@ class LyricsPanel extends ConsumerStatefulWidget {
     this.edgeFadeExtent,
     this.edgeFadeExtentTop,
     this.edgeFadeExtentBottom,
+    this.edgeFadeDeadZoneTop,
+    this.edgeFadeDeadZoneBottom,
     this.scrollAnchor,
     this.lineVerticalPadding,
     this.listPadding,
@@ -38,6 +40,13 @@ class LyricsPanel extends ConsumerStatefulWidget {
   /// extents so lines dissolve before reaching its floating chrome.
   final double? edgeFadeExtentTop;
   final double? edgeFadeExtentBottom;
+
+  /// Optional per-edge fade dead zones, forwarded like
+  /// [edgeFadeExtentTop]. Within a dead zone a line stays fully
+  /// dissolved; it only fades back in over the rest of that edge's
+  /// extent. Null (the default) keeps the plain per-edge fade.
+  final double? edgeFadeDeadZoneTop;
+  final double? edgeFadeDeadZoneBottom;
   final double? scrollAnchor;
   final double? lineVerticalPadding;
   final EdgeInsets? listPadding;
@@ -105,6 +114,8 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
               edgeFadeExtent: widget.edgeFadeExtent,
               edgeFadeExtentTop: widget.edgeFadeExtentTop,
               edgeFadeExtentBottom: widget.edgeFadeExtentBottom,
+              edgeFadeDeadZoneTop: widget.edgeFadeDeadZoneTop,
+              edgeFadeDeadZoneBottom: widget.edgeFadeDeadZoneBottom,
               scrollAnchor: widget.scrollAnchor,
               lineVerticalPadding: widget.lineVerticalPadding,
               listPadding: widget.listPadding,

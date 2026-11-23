@@ -31,6 +31,17 @@ const double _squareMiniLyricsLift = 48;
 /// cover exactly fills the space between the paddings.
 const double _wideFillCoverMargin = 16;
 
+/// The cover's contact shadow (black 0.16, blur 28, offset (0, 18)).
+/// Shared by the square cover — which carries it on the artwork
+/// itself — and the round cover's static underlay.
+final List<BoxShadow> _discContactShadow = [
+  BoxShadow(
+    color: Colors.black.withValues(alpha: 0.16),
+    blurRadius: 28,
+    offset: const Offset(0, 18),
+  ),
+];
+
 class AlbumPage extends ConsumerWidget {
   const AlbumPage({
     super.key,
@@ -145,29 +156,46 @@ class AlbumPage extends ConsumerWidget {
         }
 
         Widget coverVisual(double size) {
-          return track == null
-              ? _LoadingAlbumArtwork(size: size)
-              : SpinningCoverArt(
-                  track: track,
-                  size: size,
-                  placeholder: ColoredBox(
-                    color: Colors.white.withValues(alpha: 0.34),
-                    child: Center(
-                      child: Icon(
-                        Icons.album_rounded,
-                        size: 56,
-                        color: playerMuted(context),
-                      ),
-                    ),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.16),
-                      blurRadius: 28,
-                      offset: const Offset(0, 18),
-                    ),
-                  ],
-                );
+          if (track == null) return _LoadingAlbumArtwork(size: size);
+          final art = SpinningCoverArt(
+            track: track,
+            size: size,
+            placeholder: ColoredBox(
+              color: Colors.white.withValues(alpha: 0.34),
+              child: Center(
+                child: Icon(
+                  Icons.album_rounded,
+                  size: 56,
+                  color: playerMuted(context),
+                ),
+              ),
+            ),
+            // Square covers keep the shadow on the artwork itself:
+            // they never rotate, so its offset cannot swing. Round
+            // covers get the static underlay below instead.
+            boxShadow: square ? _discContactShadow : null,
+          );
+          if (square) return art;
+          // Round covers spin, and a shadow carried by the spinning
+          // artwork swings its offset around with the disc — for half
+          // of every revolution it sits above the disc as a dark band.
+          // The contact shadow therefore lives on a static disc
+          // underneath, concentric with the cover, its offset
+          // permanently pointing down.
+          return Stack(
+            children: [
+              Container(
+                key: const ValueKey('player-disc-contact-shadow'),
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: _discContactShadow,
+                ),
+              ),
+              art,
+            ],
+          );
         }
 
         final Widget cover;
