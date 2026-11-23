@@ -11,12 +11,14 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 import 'package:cy_shine_music/core/api/music_api.dart';
 import 'package:cy_shine_music/core/models/enums.dart';
 import 'package:cy_shine_music/core/models/music_info.dart';
+import 'package:cy_shine_music/core/models/online_collection_kind.dart';
 import 'package:cy_shine_music/core/models/playlist_info.dart';
 import 'package:cy_shine_music/core/storage/settings_store.dart';
 import 'package:cy_shine_music/features/discovery/online_playlist_detail_page.dart';
 import 'package:cy_shine_music/features/playlists/playlist_detail_page.dart';
 import 'package:cy_shine_music/features/playlists/playlist_models.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
+import 'package:cy_shine_music/features/playlists/widgets/playlist_track_tile.dart';
 
 import 'helpers/prism_test_environment.dart';
 
@@ -38,11 +40,7 @@ void main() {
     tester,
   ) async {
     await _useViewport(tester, const Size(1024, 600));
-    await _pumpLocalDetail(
-      tester,
-      playlist: _localPlaylist(),
-      carPadMode: true,
-    );
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
 
     expect(find.byKey(_wideLayoutKey), findsOneWidget);
     expect(find.byKey(_infoPaneKey), findsOneWidget);
@@ -137,7 +135,6 @@ void main() {
     tester,
   ) async {
     await _useViewport(tester, const Size(1024, 600));
-    SharedPreferences.setMockInitialValues({'car_pad_mode_enabled': true});
     final fake = _FakePlaylistApi(delayDetail: true);
     final container = _newContainer(
       await SharedPreferences.getInstance(),
@@ -170,6 +167,14 @@ void main() {
     expect(find.byKey(_skeletonKey), findsNothing);
     expect(find.text('Online track'), findsOneWidget);
     expect(find.byKey(_favoriteKey), findsOneWidget);
+    // 普通在线歌单不显示名次。
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:online-1')),
+        matching: find.text('1'),
+      ),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -177,7 +182,6 @@ void main() {
     tester,
   ) async {
     await _useViewport(tester, const Size(1024, 600));
-    SharedPreferences.setMockInitialValues({'car_pad_mode_enabled': true});
     final container = _newContainer(
       await SharedPreferences.getInstance(),
       musicApi: _FakePlaylistApi(),
@@ -271,6 +275,184 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('local detail stays compact at 839 wide', (tester) async {
+    await _useViewport(tester, const Size(839, 600));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+    expect(find.byKey(_headerKey), findsOneWidget);
+    expect(find.byKey(_wideLayoutKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('local detail splits at 840 wide', (tester) async {
+    await _useViewport(tester, const Size(840, 600));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(find.byKey(_headerKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('track rows fill the available width in compact form', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(390, 844));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+
+    // 歌曲列左右各 12dp 内边距，未触及 900 上限时用满可用宽。
+    expect(tester.getSize(find.byType(PlaylistTrackTile).first).width, 366);
+    // 操作区左右各 16dp 内边距，同样用满可用宽。
+    final actionsBox = find
+        .ancestor(
+          of: find.byKey(_playAllKey),
+          matching: find.byType(ConstrainedBox),
+        )
+        .first;
+    expect(tester.getSize(actionsBox).width, 390 - 32);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('track rows fill the right column in wide form', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(1024, 600));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+
+    // 右列宽 1024-340=684，歌曲列再减左右 12dp 内边距。
+    expect(tester.getSize(find.byType(PlaylistTrackTile).first).width, 660);
+    // 操作区落在 340 左列内：列内可用宽 340-20-12=308，不再套 900。
+    final actionsBox = find
+        .ancestor(
+          of: find.byKey(_playAllKey),
+          matching: find.byType(ConstrainedBox),
+        )
+        .first;
+    expect(tester.getSize(actionsBox).width, 308);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('track rows cap at 900 and center in an ultra-wide column', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(1600, 900));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+
+    final tile = tester.getRect(find.byType(PlaylistTrackTile).first);
+    expect(tile.width, 900);
+    // 右列为 [340, 1600]，900 上限的歌曲行在列内居中。
+    expect(tile.center.dx, 340 + (1600 - 340) / 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('online detail boundary: 839 compact, 840 wide', (tester) async {
+    await _useViewport(tester, const Size(839, 600));
+    await _pumpOnlineDetail(tester, api: _FakePlaylistApi());
+    await tester.pumpAndSettle();
+    expect(find.byKey(_headerKey), findsOneWidget);
+    expect(find.byKey(_wideLayoutKey), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await _useViewport(tester, const Size(840, 600));
+    await _pumpOnlineDetail(tester, api: _FakePlaylistApi());
+    await tester.pumpAndSettle();
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(find.byKey(_headerKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('online error state matches the data state form', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(1024, 600));
+    await _pumpOnlineDetail(tester, api: _FakePlaylistApi(failDetail: true));
+    await tester.pumpAndSettle();
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(find.byKey(_headerKey), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await _useViewport(tester, const Size(390, 844));
+    await _pumpOnlineDetail(tester, api: _FakePlaylistApi(failDetail: true));
+    await tester.pumpAndSettle();
+    expect(find.byKey(_wideLayoutKey), findsNothing);
+    expect(find.byKey(_headerKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaderboard detail splits at 840 and shows ranks', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(840, 600));
+    await _pumpOnlineDetail(
+      tester,
+      api: _FakePlaylistApi(leaderboardTotal: 3),
+      kind: OnlineCollectionKind.leaderboard,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:rank-1')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:rank-3')),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaderboard ranks continue across pages', (tester) async {
+    await _useViewport(tester, const Size(390, 844));
+    await _pumpOnlineDetail(
+      tester,
+      api: _FakePlaylistApi(leaderboardTotal: 45),
+      kind: OnlineCollectionKind.leaderboard,
+    );
+    await tester.pumpAndSettle();
+
+    // 首行名次为 1。
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:rank-1')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+
+    // 滚动触发第二页加载（首批 40 首 + 追加 5 首），名次延续累计序号。
+    for (
+      var i = 0;
+      i < 10 && find.byKey(const ValueKey('kw:rank-45')).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.fling(
+        find.byType(CustomScrollView),
+        const Offset(0, -3000),
+        6000,
+      );
+      await tester.pumpAndSettle();
+    }
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:rank-41')),
+        matching: find.text('41'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('kw:rank-45')),
+        matching: find.text('45'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 }
 
 ThemeData _theme() {
@@ -300,13 +482,9 @@ ProviderContainer _newContainer(SharedPreferences prefs, {MusicApi? musicApi}) {
   return container;
 }
 
-Future<SharedPreferences> _seedPreferences(
-  LocalPlaylist playlist, {
-  bool carPadMode = false,
-}) async {
+Future<SharedPreferences> _seedPreferences(LocalPlaylist playlist) async {
   SharedPreferences.setMockInitialValues({
     localPlaylistsStorageKey: [jsonEncode(playlist.toJson())],
-    if (carPadMode) 'car_pad_mode_enabled': true,
   });
   return SharedPreferences.getInstance();
 }
@@ -314,11 +492,8 @@ Future<SharedPreferences> _seedPreferences(
 Future<ProviderContainer> _pumpLocalDetail(
   WidgetTester tester, {
   required LocalPlaylist playlist,
-  bool carPadMode = false,
 }) async {
-  final container = _newContainer(
-    await _seedPreferences(playlist, carPadMode: carPadMode),
-  );
+  final container = _newContainer(await _seedPreferences(playlist));
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -331,6 +506,31 @@ Future<ProviderContainer> _pumpLocalDetail(
   );
   await tester.pumpAndSettle();
   return container;
+}
+
+Future<void> _pumpOnlineDetail(
+  WidgetTester tester, {
+  required MusicApi api,
+  OnlineCollectionKind kind = OnlineCollectionKind.playlist,
+}) async {
+  final container = _newContainer(
+    await SharedPreferences.getInstance(),
+    musicApi: api,
+  );
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        builder: buildPrismTestEnvironment,
+        theme: _theme(),
+        home: OnlinePlaylistDetailPage(
+          source: MusicSource.kw,
+          playlistId: '1',
+          kind: kind,
+        ),
+      ),
+    ),
+  );
 }
 
 LocalPlaylist _localPlaylist({bool online = false}) {
@@ -366,9 +566,18 @@ MusicInfo _music(String id, String name) {
 }
 
 class _FakePlaylistApi extends MusicApi {
-  _FakePlaylistApi({this.delayDetail = false});
+  _FakePlaylistApi({
+    this.delayDetail = false,
+    this.failDetail = false,
+    this.leaderboardTotal,
+  });
 
   final bool delayDetail;
+  final bool failDetail;
+
+  /// 非空时按排行榜返回：共这么多首，parsePlaylist 按 maxTracks 截断，
+  /// 模拟分页加载。
+  final int? leaderboardTotal;
   final Completer<PlaylistInfo> _detail = Completer<PlaylistInfo>();
 
   PlaylistInfo get _playlist => PlaylistInfo(
@@ -382,6 +591,20 @@ class _FakePlaylistApi extends MusicApi {
     tracks: [_music('online-1', 'Online track')],
   );
 
+  PlaylistInfo _leaderboard(int? maxTracks) {
+    final total = leaderboardTotal!;
+    final count = (maxTracks ?? total).clamp(0, total);
+    return PlaylistInfo(
+      id: '1',
+      name: '测试排行榜',
+      source: MusicSource.kw,
+      trackCount: total,
+      tracks: [
+        for (var i = 1; i <= count; i++) _music('rank-$i', 'Rank track $i'),
+      ],
+    );
+  }
+
   void completeDetail() => _detail.complete(_playlist);
 
   @override
@@ -390,6 +613,21 @@ class _FakePlaylistApi extends MusicApi {
     MusicSource source = MusicSource.all,
     int? maxTracks,
   }) {
+    if (failDetail) {
+      return Future.error(StateError('detail failed'));
+    }
     return delayDetail ? _detail.future : Future.value(_playlist);
+  }
+
+  @override
+  Future<PlaylistInfo> getLeaderboard({
+    required MusicSource source,
+    required String boardId,
+    int? maxTracks,
+  }) {
+    if (failDetail) {
+      return Future.error(StateError('detail failed'));
+    }
+    return Future.value(_leaderboard(maxTracks));
   }
 }

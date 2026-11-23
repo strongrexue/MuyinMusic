@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,10 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/playlist_summary.dart';
-import '../../../core/storage/settings_store.dart';
+import '../../../core/ui/app_breakpoints.dart';
 import '../../../core/ui/container_transform.dart';
 import '../../../core/ui/widgets/spring_artwork_hero.dart';
-import '../../../core/ui/car_display_layout.dart';
 import '../../../theme/app_motion.dart';
 import '../../playlists/playlist_favorite.dart';
 import '../../playlists/playlist_store.dart';
@@ -19,6 +17,15 @@ import 'discovery_helpers.dart';
 import 'discovery_playlist_cover.dart';
 import 'discovery_prism_surface.dart';
 import 'playlist_preview_dialog.dart';
+
+/// 瀑布流列数按网格宽决定：小于 700 两列，700–839 三列，
+/// Expanded 起按目标格宽 240 动态加列，钳制在 2–10 列。
+int masonryColumnCount(double gridWidth) {
+  if (AppBreakpoints.isExpanded(gridWidth)) {
+    return (gridWidth / 240).floor().clamp(2, 10);
+  }
+  return gridWidth >= 700 ? 3 : 2;
+}
 
 /// 发现页瀑布流，按列懒加载：每列是一个 [SliverList]，并排放在
 /// [SliverCrossAxisGroup] 里，只构建视口附近的卡片。分页追加时不会重建、
@@ -82,24 +89,13 @@ class _SliverMasonryPlaylistGridState
 
   @override
   Widget build(BuildContext context) {
-    final carPadModeEnabled = ref.watch(
-      settingsProvider.select((settings) => settings.carPadModeEnabled),
-    );
-    final carDisplay = CarDisplayLayout.enabledOf(context);
     return SliverLayoutBuilder(
       builder: (context, constraints) {
         final available = constraints.crossAxisExtent;
         final gridWidth = math.min(available, widget.maxWidth);
         final inset = (available - gridWidth) / 2;
-        final windowsWide = Platform.isWindows && gridWidth >= 840;
-        final expandedGrid = carDisplay || windowsWide;
         // 大窗口继续加列而不是把卡片等比撑大，让封面维持约 240px 的目标宽度。
-        // 车机沿用原上限 6，仅 Windows 放宽；手机端走下方原始分支。
-        final columnCount = expandedGrid
-            ? (gridWidth / 240).floor().clamp(2, windowsWide ? 10 : 6)
-            : carPadModeEnabled || gridWidth >= 700
-            ? 3
-            : 2;
+        final columnCount = masonryColumnCount(gridWidth);
         final width = (gridWidth - _gap * (columnCount - 1)) / columnCount;
         final columns = List.generate(columnCount, (_) => <_MasonryEntry>[]);
         final heights = List<double>.filled(columnCount, 0);

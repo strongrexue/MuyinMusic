@@ -13,7 +13,6 @@ import '../../core/services/batch_download_controller.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../../core/ui/widgets/batch_selection_button.dart';
 import '../downloads/download_history_store.dart';
 import '../downloads/download_progress.dart';
@@ -171,15 +170,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
 
     final artworkProvider = _artworkProviderFor(playlist);
     final artworkIdentity = _artworkIdentityFor(playlist);
-    final carPadModeEnabled =
-        ref.watch(
-          settingsProvider.select((settings) => settings.carPadModeEnabled),
-        ) ||
-        CarDisplayLayout.wideOf(context);
-    final wide = playlistDetailUsesWideLayout(
-      context,
-      carPadModeEnabled: carPadModeEnabled,
-    );
+    final wide = playlistDetailUsesWideLayout(context);
     return PlaylistArtworkTheme(
       artworkProvider: artworkProvider,
       cacheKey: 'local:${playlist.id}:$artworkIdentity',
@@ -371,10 +362,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
           sliver: SliverToBoxAdapter(
             child: Center(
               child: ConstrainedBox(
-                constraints: CarDisplayLayout.contentConstraints(
-                  context,
-                  maxWidth: 900,
-                ),
+                constraints: const BoxConstraints(maxWidth: 900),
                 child: _PlaylistTracksSummary(
                   count: filtered.length,
                   totalCount: resolved.length,
@@ -416,10 +404,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
             itemCount: filtered.length,
             separatorBuilder: (_, _) => Center(
               child: ConstrainedBox(
-                constraints: CarDisplayLayout.contentConstraints(
-                  context,
-                  maxWidth: 900,
-                ),
+                constraints: const BoxConstraints(maxWidth: 900),
                 child: const SongListDivider(),
               ),
             ),
@@ -427,10 +412,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
               final item = filtered[index];
               return Center(
                 child: ConstrainedBox(
-                  constraints: CarDisplayLayout.contentConstraints(
-                    context,
-                    maxWidth: 900,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 900),
                   child: PlaylistTrackTile(
                     playlistId: playlist.id,
                     index: index,

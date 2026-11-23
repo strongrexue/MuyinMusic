@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,31 +9,30 @@ import '../../core/models/online_collection_kind.dart';
 import '../../core/models/search_category.dart';
 import '../../core/sdk/catalog_sdk.dart';
 import '../../core/storage/settings_store.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../downloads/download_history_store.dart';
 import '../playlists/playlist_models.dart';
 import '../songs/liked_songs_store.dart';
 import 'home_feed_logic.dart';
 import 'recent_plays_store.dart';
 
-/// Windows 大窗口展示更多条目；手机端保持原有 12 首不变。
-int get _shelfCount => Platform.isWindows ? 36 : 12;
-int get _dailyPickCount => _shelfCount;
-int get _guessCount => _shelfCount;
+/// 首页货架条数按内容可用宽度决定：Expanded 起 36 首，其余 12 首，全平台一致。
+int homeShelfCountForWidth(double width) =>
+    AppBreakpoints.isExpanded(width) ? 36 : 12;
 
 /// Day number used to rotate the daily mix; the shelf only changes at midnight.
 int homeDayIndex(DateTime now) =>
-    DateTime(now.year, now.month, now.day)
-        .difference(DateTime(2024))
-        .inDays;
+    DateTime(now.year, now.month, now.day).difference(DateTime(2024)).inDays;
 
-String _dailyCacheKey(MusicSource source) =>
-    'home_daily_picks_${source.code}_v2${Platform.isWindows ? '_w$_shelfCount' : ''}';
+/// 缓存键按条数分桶：窗口跨断点时不会读到另一档的缓存。
+String homeDailyCacheKey(MusicSource source, int count) =>
+    'home_daily_picks_${source.code}_v2_c$count';
 
-String _guessCacheKey(MusicSource source, String fingerprint) =>
-    'home_guess_${source.code}_$fingerprint${Platform.isWindows ? '_w$_shelfCount' : ''}';
+String homeGuessCacheKey(MusicSource source, String fingerprint, int count) =>
+    'home_guess_${source.code}_${fingerprint}_c$count';
 
-String _guessLastKey(MusicSource source) =>
-    'home_guess_last_${source.code}${Platform.isWindows ? '_w$_shelfCount' : ''}';
+String homeGuessLastKey(MusicSource source, int count) =>
+    'home_guess_last_${source.code}_c$count';
 
 /// The home shelves use the first enabled source in the user's discovery
 /// order instead of following whatever source the discovery tab last had
@@ -51,7 +49,9 @@ MusicSource _homeFeedSource(Ref ref) {
 }
 
 DownloadHistoryEntry? _entryFor(MusicInfo music, String queueId) {
-  final entry = PlaylistTrack.fromMusicInfo(music).toQueueEntry(playlistId: queueId);
+  final entry = PlaylistTrack.fromMusicInfo(
+    music,
+  ).toQueueEntry(playlistId: queueId);
   if (entry == null) return null;
   return entry;
 }
@@ -79,15 +79,15 @@ List<DownloadHistoryEntry> _decodeEntries(Object? rows) {
 
 /// 「每日推荐」：每天从当前音源的多个榜单混采，再按本地口味（喜欢+最近播放的
 /// 歌手权重）重排，剔除已经喜欢/听过的歌；结果按天缓存。
-final dailyPicksProvider =
-    FutureProvider.autoDispose<List<DownloadHistoryEntry>>((ref) async {
+final dailyPicksProvider = FutureProvider.autoDispose
+    .family<List<DownloadHistoryEntry>, int>((ref, count) async {
       final api = ref.watch(musicApiProvider);
       final source = _homeFeedSource(ref);
       final prefs = ref.watch(sharedPreferencesProvider);
       final liked = ref.watch(likedSongsProvider);
       final recent = ref.watch(recentPlaysProvider);
       final day = homeDayIndex(DateTime.now());
-      final cacheKey = _dailyCacheKey(source);
+      final cacheKey = homeDailyCacheKey(source, count);
 
       final cached = prefs.getString(cacheKey);
       if (cached != null && cached.isNotEmpty) {
@@ -149,12 +149,12 @@ final dailyPicksProvider =
       final picks = selectDailyPicks(
         pool: pool,
         weights: weights,
-        count: _dailyPickCount,
+        count: count,
       );
       if (picks.isEmpty) return const [];
       // A clearly partial result (some boards failed) is shown but not
       // locked into the day cache, so the next visit can retry for a full one.
-      if (picks.length * 2 >= _dailyPickCount) {
+      if (picks.length * 2 >= count) {
         await prefs.setString(
           cacheKey,
           jsonEncode({
@@ -169,17 +169,19 @@ final dailyPicksProvider =
 /// 「猜你喜欢」：用最近播放（全量）和喜欢（全量）里的歌手权重取歌——优先走
 /// 歌手维度接口，否则用搜索并按歌手字段硬过滤；排除已听/已喜欢的歌，名额按
 /// 权重配额分配，结果按口味指纹缓存。没有任何听歌信号时回退到热门榜单切片。
-final guessYouLikeProvider =
-    FutureProvider.autoDispose<List<DownloadHistoryEntry>>((ref) async {
+final guessYouLikeProvider = FutureProvider.autoDispose
+    .family<List<DownloadHistoryEntry>, int>((ref, count) async {
       final api = ref.watch(musicApiProvider);
       final source = _homeFeedSource(ref);
       final prefs = ref.watch(sharedPreferencesProvider);
       final liked = ref.watch(likedSongsProvider);
       final recent = ref.watch(recentPlaysProvider);
       final weights = buildArtistWeights(recent: recent, liked: liked);
+      // count 与三个缓存键在加载开始时一并捕获，await 之后只写回捕获的键。
+      final lastKey = homeGuessLastKey(source, count);
 
       List<DownloadHistoryEntry> lastResort() {
-        final raw = prefs.getString(_guessLastKey(source));
+        final raw = prefs.getString(lastKey);
         if (raw == null || raw.isEmpty) return const [];
         try {
           final entries = _decodeEntries(jsonDecode(raw));
@@ -197,19 +199,18 @@ final guessYouLikeProvider =
           final boards = await api.getLeaderboards(source);
           if (boards.isEmpty) return lastResort();
           final hot = boards.firstWhere(
-            (board) =>
-                board.name.contains('热歌') || board.name.contains('热门'),
+            (board) => board.name.contains('热歌') || board.name.contains('热门'),
             orElse: () => boards.first,
           );
           final detail = await api.getLeaderboard(
             source: source,
             boardId: hot.boardId,
-            maxTracks: _guessCount,
+            maxTracks: count,
           );
           final entries = _entriesFor(
             detail.tracks,
             'home-guess',
-          ).take(_guessCount).toList(growable: false);
+          ).take(count).toList(growable: false);
           if (entries.isEmpty) return lastResort();
           return List<DownloadHistoryEntry>.unmodifiable(entries);
         } catch (_) {
@@ -218,7 +219,7 @@ final guessYouLikeProvider =
       }
 
       final fingerprint = artistFingerprint(weights);
-      final cacheKey = _guessCacheKey(source, fingerprint);
+      final cacheKey = homeGuessCacheKey(source, fingerprint, count);
       final cached = prefs.getString(cacheKey);
       if (cached != null && cached.isNotEmpty) {
         try {
@@ -233,10 +234,7 @@ final guessYouLikeProvider =
 
       try {
         final ranked = rankArtists(weights);
-        final quotas = allocateArtistQuotas(
-          ranked: ranked,
-          total: _guessCount,
-        );
+        final quotas = allocateArtistQuotas(ranked: ranked, total: count);
         final seen = <String>{
           for (final entry in [...liked, ...recent]) songIdentityKey(entry),
         };
@@ -300,7 +298,7 @@ final guessYouLikeProvider =
         void takeFrom(List<DownloadHistoryEntry> entries, int quota) {
           var taken = 0;
           for (final entry in entries) {
-            if (taken >= quota || picks.length >= _guessCount) return;
+            if (taken >= quota || picks.length >= count) return;
             if (!seen.add(songIdentityKey(entry))) continue;
             picks.add(entry);
             taken++;
@@ -308,7 +306,7 @@ final guessYouLikeProvider =
         }
 
         for (final artist in ranked) {
-          if (picks.length >= _guessCount) break;
+          if (picks.length >= count) break;
           final quota = quotas[artist.key];
           if (quota == null) continue;
           takeFrom(await loadArtist(artist.key), quota);
@@ -316,17 +314,17 @@ final guessYouLikeProvider =
         // Fill any leftover slots from the remaining filtered results,
         // walking further down the artist ranking if needed.
         for (final artist in ranked) {
-          if (picks.length >= _guessCount) break;
-          takeFrom(await loadArtist(artist.key), _guessCount);
+          if (picks.length >= count) break;
+          takeFrom(await loadArtist(artist.key), count);
         }
 
         if (picks.isEmpty) return lastResort();
-        final result = picks.take(_guessCount).toList(growable: false);
+        final result = picks.take(count).toList(growable: false);
         final encoded = jsonEncode([
           for (final entry in result) entry.toJson(),
         ]);
         await prefs.setString(cacheKey, encoded);
-        await prefs.setString(_guessLastKey(source), encoded);
+        await prefs.setString(lastKey, encoded);
         return List<DownloadHistoryEntry>.unmodifiable(result);
       } catch (_) {
         return lastResort();

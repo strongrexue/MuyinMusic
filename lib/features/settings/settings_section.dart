@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 enum SettingsSection {
   appearance(
     title: '外观',
-    subtitle: '主题、应用图标、车机适配与播放界面',
+    subtitle: '主题、应用图标与播放界面',
     icon: Icons.palette_outlined,
   ),
   network(

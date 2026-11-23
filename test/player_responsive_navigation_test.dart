@@ -26,6 +26,7 @@ import 'package:cy_shine_music/features/player/widgets/lyric_line.dart';
 import 'package:cy_shine_music/features/player/widgets/lyrics_panel.dart';
 import 'package:cy_shine_music/features/player/widgets/playback_queue_sheet.dart';
 import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
+import 'package:cy_shine_music/features/player/widgets/player_control_color.dart';
 import 'package:cy_shine_music/features/player/widgets/top_chrome_row.dart';
 import 'package:cy_shine_music/features/player/widgets/transport_bar.dart';
 import 'package:cy_shine_music/features/playlists/playlist_store.dart';
@@ -1029,13 +1030,12 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('wide player renders album and lyrics together without pager', (
+  testWidgets('large landscape player uses the A2 split layout', (
     tester,
   ) async {
     await _pumpPlayer(
       tester,
       size: const Size(1024, 600),
-      carPadModeEnabled: true,
       track: const PlayerTrack(
         id: 'wy:wide-song',
         kind: PlayerTrackKind.remote,
@@ -1053,36 +1053,20 @@ void main() {
       ]),
     );
 
-    expect(find.byKey(const ValueKey('player-wide-layout')), findsOneWidget);
+    // Landscape no longer has a separate wide layout: every landscape
+    // size uses the A2 split (cover left, lyrics right, unified bottom
+    // transport).
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
     expect(find.byKey(const ValueKey('player-compact-pager')), findsNothing);
     expect(find.byType(PageView), findsNothing);
-    expect(find.byType(VerticalDivider), findsNothing);
     expect(find.byType(AlbumPage), findsOneWidget);
     expect(find.byType(LyricsPanel), findsOneWidget);
-    expect(find.text('宽屏歌曲'), findsOneWidget);
-    expect(find.text('宽屏歌手'), findsOneWidget);
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsNothing);
-
-    // The action row is shared by both layouts, so the wide player shows it
-    // above the transport bar instead of hiding it behind a cover menu.
     expect(find.byKey(const ValueKey('player-action-volume')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('player-cover-menu-button')),
-      findsNothing,
-    );
-
-    await tester.tap(
-      find.byKey(const ValueKey('player-action-lyric-settings')),
-    );
-    await _pumpUi(tester);
-    final popup = find.byKey(const ValueKey('lyric-settings-popup'));
-    expect(popup, findsOneWidget);
-    expect(find.text('迷你歌词'), findsOneWidget);
-    expect(find.text('关闭歌词视图模糊'), findsOneWidget);
-    expect(find.text('歌词界面设置'), findsWidgets);
-    await tester.tapAt(const Offset(4, 4));
-    await _pumpUi(tester);
-    expect(popup, findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -1268,9 +1252,10 @@ void main() {
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
     // With the merged bottom stack the album area is 228dp tall here
-    // and the round cover takes 0.8 of it.
-    expect(coverRect.width, closeTo(182.4, 0.6));
-    expect(coverRect.height, closeTo(182.4, 0.6));
+    // and the cover fills it: the side is the area height less the
+    // scroll view's 8dp top/bottom padding (228 - 16 = 212).
+    expect(coverRect.width, closeTo(212, 0.6));
+    expect(coverRect.height, closeTo(212, 0.6));
     // The album-name line is not rendered in this layout.
     expect(find.text('横屏专辑'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -1305,37 +1290,60 @@ void main() {
     );
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
-    // Square covers scale by 1.12 over the round size.
-    expect(coverRect.width, closeTo(204.2, 0.6));
-    expect(coverRect.height, closeTo(204.2, 0.6));
+    // Square covers follow the same fill rule as the disc in this
+    // layout: the side is the album area height less 16 (212 here),
+    // with no extra square scale on top.
+    expect(coverRect.width, closeTo(212, 0.6));
+    expect(coverRect.height, closeTo(212, 0.6));
     expect(find.text('横屏方专辑'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('phone landscape with car mode keeps the wide layout', (
+  testWidgets('phone landscape cover fills the album area on large screens', (
     tester,
   ) async {
     await _pumpPlayer(
       tester,
-      size: const Size(915, 412),
-      carPadModeEnabled: true,
+      size: const Size(1280, 800),
       track: const PlayerTrack(
-        id: 'wy:phone-landscape-car-song',
+        id: 'wy:phone-landscape-large-song',
         kind: PlayerTrackKind.remote,
-        title: '横屏车载歌曲',
-        artist: '横屏车载歌手',
-        album: '横屏车载专辑',
+        title: '大屏横屏歌曲',
+        artist: '大屏横屏歌手',
+        album: '大屏横屏专辑',
         sourceLabel: '网易',
         qualityLabel: '无损',
-        remoteUrl: 'https://audio.example/phone-landscape-car-song.flac',
+        remoteUrl: 'https://audio.example/phone-landscape-large.flac',
       ),
     );
 
-    expect(find.byKey(const ValueKey('player-wide-layout')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('player-phone-landscape-layout')),
-      findsNothing,
+      findsOneWidget,
     );
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
+    final albumRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-album')),
+    );
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    // The cover fills the album area by the same rule as on phones:
+    // the side is the area's smaller extent less 16, and nothing is
+    // scrolled or clipped out of the album area. Here the album area
+    // is 567.6 x 616, so the width caps the side at 551.6.
+    final expectedSide =
+        (albumRect.width < albumRect.height
+            ? albumRect.width
+            : albumRect.height) -
+        16;
+    expect(expectedSide, closeTo(551.6, 0.6));
+    expect(coverRect.width, closeTo(expectedSide, 0.6));
+    expect(coverRect.height, closeTo(expectedSide, 0.6));
+    expect(coverRect.left, greaterThanOrEqualTo(albumRect.left - 0.5));
+    expect(coverRect.right, lessThanOrEqualTo(albumRect.right + 0.5));
+    expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
+    expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
     expect(tester.takeException(), isNull);
   });
 
@@ -1366,14 +1374,86 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('large portrait player stays on the compact pager', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(1024, 1366),
+      track: const PlayerTrack(
+        id: 'wy:large-portrait-song',
+        kind: PlayerTrackKind.remote,
+        title: '大屏竖屏歌曲',
+        artist: '大屏竖屏歌手',
+        album: '大屏竖屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/large-portrait-song.flac',
+      ),
+    );
+
+    // Portrait is compact at every size now: no wide split, no
+    // landscape split, just the cover/lyrics pager.
+    expect(find.byKey(const ValueKey('player-compact-pager')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('player-wide-layout')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'large portrait square cover folds into the integrated background',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'square_album_cover_enabled': true,
+      });
+      final coverBytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+      );
+      await _pumpPlayer(
+        tester,
+        size: const Size(1024, 1366),
+        track: PlayerTrack(
+          id: 'wy:large-portrait-poster-song',
+          kind: PlayerTrackKind.remote,
+          title: '大屏竖屏海报歌曲',
+          artist: '大屏竖屏海报歌手',
+          album: '大屏竖屏海报专辑',
+          sourceLabel: '网易',
+          qualityLabel: '无损',
+          remoteUrl: 'https://audio.example/large-portrait-poster.flac',
+          coverBytes: coverBytes,
+        ),
+        lyrics: _timedLyrics(5),
+      );
+
+      // Nothing gates the integrated artwork on large portrait screens
+      // any more: it spans the full width from the top, square as the
+      // cover itself.
+      final artwork = find.byKey(
+        const ValueKey('player-integrated-bg-artwork'),
+      );
+      expect(artwork, findsOneWidget);
+      final artworkRect = tester.getRect(artwork);
+      expect(artworkRect.left, closeTo(0, 0.5));
+      expect(artworkRect.top, closeTo(0, 0.5));
+      expect(artworkRect.width, closeTo(1024, 0.5));
+      expect(artworkRect.height, closeTo(1024, 0.5));
+      expect(find.byKey(const ValueKey('player-compact-pager')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('portrait square cover folds into the integrated background', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
       'square_album_cover_enabled': true,
     });
-    // A dark 48x48 cover (rgb 24, 80, 160), so the artwork provider is
-    // non-null and the integrated background carries the cover itself.
+    // A dark 48x48 cover (rgb 24, 80, 160) carried by the track itself,
+    // so the integrated background carries the cover itself.
     final coverBytes = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
     );
@@ -1404,6 +1484,25 @@ void main() {
     expect(artworkRect.left, closeTo(0, 0.5));
     expect(artworkRect.top, closeTo(0, 0.5));
     expect(artworkRect.width, closeTo(390, 0.5));
+    // The artwork keeps its native square aspect: exactly as tall as it
+    // is wide, so no side of the cover is cropped away.
+    expect(artworkRect.height, closeTo(390, 0.5));
+
+    // The artwork loads through the disc's own image path: the raw
+    // memory source decoded at 480px, not the backdrop's 192px
+    // downsample, so it renders as sharp as the disc's cover.
+    final artworkImages = tester.widgetList<Image>(
+      find.descendant(of: artwork, matching: find.byType(Image)),
+    );
+    expect(artworkImages, isNotEmpty);
+    for (final image in artworkImages) {
+      final provider = image.image;
+      expect(provider, isA<ResizeImage>());
+      final resize = provider as ResizeImage;
+      expect(resize.width, 480);
+      expect(resize.height, 480);
+      expect(resize.imageProvider, isA<MemoryImage>());
+    }
 
     double artworkOpacity() => tester
         .widget<Opacity>(
@@ -1439,6 +1538,54 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'integrated artwork appears from the track cover alone, independent '
+    'of the backdrop and luminance providers',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'square_album_cover_enabled': true,
+      });
+      // A plain network cover URL and nothing else: no cover bytes, the
+      // shared backdrop provider forced to null and the chrome-luminance
+      // resolution forced to unknown. The artwork component must still
+      // be part of the background — its presence depends only on the
+      // track carrying a cover, loaded through the standard image path.
+      await _pumpPlayer(
+        tester,
+        size: const Size(390, 844),
+        track: const PlayerTrack(
+          id: 'qq:url-only-cover-song',
+          kind: PlayerTrackKind.remote,
+          title: '网络封面歌曲',
+          artist: '网络封面歌手',
+          album: '网络封面专辑',
+          sourceLabel: 'QQ',
+          qualityLabel: '无损',
+          remoteUrl: 'https://audio.example/url-only-cover.flac',
+          coverUrl: 'https://covers.example.test/url-only-cover.jpg',
+        ),
+        lyrics: _timedLyrics(5),
+        extraOverrides: [
+          playerArtworkProvider.overrideWithValue(null),
+          playerArtworkTopLuminanceProvider.overrideWith(
+            (ref) async => null,
+          ),
+        ],
+      );
+
+      final artwork = find.byKey(
+        const ValueKey('player-integrated-bg-artwork'),
+      );
+      expect(artwork, findsOneWidget);
+      final artworkRect = tester.getRect(artwork);
+      expect(artworkRect.left, closeTo(0, 0.5));
+      expect(artworkRect.top, closeTo(0, 0.5));
+      expect(artworkRect.width, closeTo(390, 0.5));
+      expect(artworkRect.height, closeTo(390, 0.5));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('portrait round cover keeps the card and has no poster', (
     tester,
   ) async {
@@ -1464,14 +1611,57 @@ void main() {
       find.byKey(const ValueKey('player-integrated-bg-artwork')),
       findsNothing,
     );
-    // The disc floats in the ambience on its cover-coloured halo.
-    expect(find.byKey(const ValueKey('player-disc-glow')), findsOneWidget);
+    // The disc floats in the ambience on its contact shadow alone:
+    // no cover-coloured halo around it.
+    expect(find.byKey(const ValueKey('player-disc-glow')), findsNothing);
     final coverRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
     // The round disc stays an inset card below the top bar.
     expect(coverRect.left, greaterThan(0));
     expect(coverRect.width, lessThan(390));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait round backdrop fills the whole screen, status bar '
+      'included, while the chrome keeps its safe-area offset', (tester) async {
+    // Simulate a device status bar: the UI chrome must respect the
+    // inset, the ambience layer must not — it reaches the top of the
+    // screen so the chrome floats over the same layer as everything
+    // below it, with no flat theme-coloured band in between.
+    tester.view.padding = const FakeViewPadding(top: 100);
+    addTearDown(() => tester.view.resetPadding());
+    final coverBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+    );
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: PlayerTrack(
+        id: 'wy:round-backdrop-song',
+        kind: PlayerTrackKind.remote,
+        title: '圆盘背景歌曲',
+        artist: '圆盘背景歌手',
+        album: '圆盘背景专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/round-backdrop.flac',
+        coverBytes: coverBytes,
+      ),
+    );
+    final backdropRect = tester.getRect(
+      find.byKey(const ValueKey('player-backdrop')),
+    );
+    expect(backdropRect.top, closeTo(0, 0.5));
+    expect(backdropRect.height, closeTo(844, 0.5));
+    final flowingRect = tester.getRect(
+      find.byKey(const ValueKey('flowing-light-background')),
+    );
+    expect(flowingRect.top, closeTo(0, 0.5));
+    expect(flowingRect.height, closeTo(844, 0.5));
+    // The chrome itself still starts below the status bar.
+    final chromeRect = tester.getRect(find.byType(TopChromeRow));
+    expect(chromeRect.top, closeTo(100, 0.5));
     expect(tester.takeException(), isNull);
   });
 
@@ -1824,7 +2014,7 @@ Future<_SeededPlayerController> _pumpPlayer(
   KaraokeLyrics lyrics = const KaraokeLyrics([]),
   Duration position = Duration.zero,
   MusicInfo? currentMusic,
-  bool carPadModeEnabled = false,
+  List<Override> extraOverrides = const [],
   void Function([String? target]) onDismissRequested = _ignoreDismiss,
 }) async {
   tester.view.devicePixelRatio = 1;
@@ -1835,9 +2025,6 @@ Future<_SeededPlayerController> _pumpPlayer(
   });
 
   final preferences = await SharedPreferences.getInstance();
-  if (carPadModeEnabled) {
-    await preferences.setBool('car_pad_mode_enabled', true);
-  }
   final audioHandler = PlayerAudioHandler();
   addTearDown(() => unawaited(audioHandler.disposeHandler()));
   final initialState = PlayerState(
@@ -1860,6 +2047,7 @@ Future<_SeededPlayerController> _pumpPlayer(
             seededCurrentMusic: currentMusic,
           ),
         ),
+        ...extraOverrides,
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

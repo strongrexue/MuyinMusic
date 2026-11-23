@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/ui/car_display_layout.dart';
 
 /// 歌单详情页的主操作区：播放全部 + 收藏/取消收藏。
 ///
@@ -86,10 +85,7 @@ class PlaylistDetailActions extends StatelessWidget {
       padding: padding,
       child: Center(
         child: ConstrainedBox(
-          constraints: CarDisplayLayout.contentConstraints(
-            context,
-            maxWidth: 900,
-          ),
+          constraints: const BoxConstraints(maxWidth: 900),
           child: LayoutBuilder(
             builder: (context, constraints) {
               // 窄栏（如宽屏分栏 ~308px 的左列）里两个按钮并排放不下，

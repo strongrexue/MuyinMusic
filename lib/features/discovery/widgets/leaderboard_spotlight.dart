@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,13 +8,21 @@ import '../../../core/models/enums.dart';
 import '../../../core/models/leaderboard_info.dart';
 import '../../../core/models/music_info.dart';
 import '../../../core/models/online_collection_kind.dart';
+import '../../../core/ui/app_breakpoints.dart';
 import '../../../core/ui/container_transform.dart';
 import '../../../core/ui/widgets/spring_artwork_hero.dart';
-import '../../../core/ui/car_display_layout.dart';
 import '../../shell/shell_bottom_area.dart';
 import '../discovery_controller.dart';
 import 'leaderboard_artwork.dart';
 import 'discovery_prism_surface.dart';
+
+/// 精选卡按局部宽决定形态：Expanded 起展开排布，其余沿用紧凑卡宽。
+bool leaderboardSpotlightExpanded(double maxWidth) =>
+    AppBreakpoints.isExpanded(maxWidth);
+
+/// 展开态最多 6 张精选卡，紧凑态 4 张；实际可见数再由宽度公式钳制。
+int leaderboardSpotlightMaxCards(double maxWidth) =>
+    leaderboardSpotlightExpanded(maxWidth) ? 6 : 4;
 
 class LeaderboardSpotlight extends ConsumerWidget {
   const LeaderboardSpotlight({super.key, required this.source});
@@ -61,14 +68,13 @@ class LeaderboardSpotlight extends ConsumerWidget {
             data: (items) {
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final carDisplay = CarDisplayLayout.enabledOf(context);
-                  final windowsWide =
-                      Platform.isWindows && constraints.maxWidth >= 840;
-                  final expandedBoard = carDisplay || windowsWide;
-                  final maxCards = windowsWide ? 6 : 4;
-                  final featured = items
-                      .take(maxCards)
-                      .toList(growable: false);
+                  final expandedBoard = leaderboardSpotlightExpanded(
+                    constraints.maxWidth,
+                  );
+                  final maxCards = leaderboardSpotlightMaxCards(
+                    constraints.maxWidth,
+                  );
+                  final featured = items.take(maxCards).toList(growable: false);
                   final visibleCards = math.min(
                     (constraints.maxWidth / 300).floor().clamp(1, maxCards),
                     featured.length,

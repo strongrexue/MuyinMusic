@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/ui/app_breakpoints.dart';
 import '../../../core/ui/container_transform.dart';
 import '../../../core/ui/widgets/spring_artwork_hero.dart';
 import 'immersive_playlist_chrome.dart';
 
 /// Whether playlist and leaderboard details should use their split layout.
 ///
-/// The layout is an explicit car/Pad preference. Keeping the decision here
-/// prevents each detail page from independently reintroducing a width based
-/// automatic switch.
-bool playlistDetailUsesWideLayout(
-  BuildContext context, {
-  required bool carPadModeEnabled,
-}) {
-  return carPadModeEnabled;
+/// Purely width driven: the split layout engages once the available width
+/// reaches the expanded breakpoint, regardless of orientation or any
+/// manual display preference.
+bool playlistDetailUsesWideLayout(BuildContext context) {
+  return AppBreakpoints.isExpanded(MediaQuery.sizeOf(context).width);
 }
 
 /// 宽屏分栏骨架：顶栏横跨顶部，下方 340dp 左列（歌单信息）+ 右列

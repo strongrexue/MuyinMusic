@@ -7,7 +7,7 @@ import '../../core/models/enums.dart';
 import '../../core/models/music_info.dart';
 import '../../core/models/playlist_info.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
 import '../downloads/download_progress.dart';
@@ -71,6 +71,11 @@ class _OnlinePlaylistImportPageState
 
   @override
   Widget build(BuildContext context) {
+    // 解析结果区（歌单头与曲目行）在扩展宽度下放宽到 1040，表单恒 760。
+    final resultMaxWidth =
+        AppBreakpoints.isExpanded(MediaQuery.sizeOf(context).width)
+        ? 1040.0
+        : 760.0;
     return Scaffold(
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(
@@ -83,10 +88,7 @@ class _OnlinePlaylistImportPageState
             sliver: SliverToBoxAdapter(
               child: Center(
                 child: ConstrainedBox(
-                  constraints: CarDisplayLayout.contentConstraints(
-                    context,
-                    maxWidth: 760,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 760),
                   child: _ImportForm(
                     controller: _inputController,
                     source: _source,
@@ -128,10 +130,7 @@ class _OnlinePlaylistImportPageState
               sliver: SliverToBoxAdapter(
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: CarDisplayLayout.contentConstraints(
-                      context,
-                      maxWidth: 760,
-                    ),
+                    constraints: BoxConstraints(maxWidth: resultMaxWidth),
                     child: _ParsedPlaylistHeader(
                       playlist: _playlist!,
                       saving: _saving,
@@ -155,10 +154,7 @@ class _OnlinePlaylistImportPageState
                   final music = _playlist!.tracks[index];
                   return Center(
                     child: ConstrainedBox(
-                      constraints: CarDisplayLayout.contentConstraints(
-                        context,
-                        maxWidth: 760,
-                      ),
+                      constraints: BoxConstraints(maxWidth: resultMaxWidth),
                       child: _OnlineTrackTile(
                         music: music,
                         onDownload: () =>

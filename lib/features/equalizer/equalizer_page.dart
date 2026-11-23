@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../../theme/app_theme.dart';
 import '../playlists/playlist_name_dialog.dart';
 import '../settings/widgets/settings_action.dart';
@@ -59,10 +58,7 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
             sliver: SliverToBoxAdapter(
               child: Center(
                 child: ConstrainedBox(
-                  constraints: CarDisplayLayout.contentConstraints(
-                    context,
-                    maxWidth: 640,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 640),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

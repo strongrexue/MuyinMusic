@@ -34,6 +34,7 @@ class SearchResultTile extends ConsumerWidget {
     this.batchMode = false,
     this.selected = false,
     this.onToggleSelected,
+    this.leadingRank,
   });
 
   final MusicInfo music;
@@ -47,6 +48,9 @@ class SearchResultTile extends ConsumerWidget {
   final bool batchMode;
   final bool selected;
   final VoidCallback? onToggleSelected;
+
+  /// 排行榜名次：非空时在封面前显示固定宽度的名次位，其他列表不传。
+  final int? leadingRank;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -96,6 +100,20 @@ class SearchResultTile extends ConsumerWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  if (leadingRank != null)
+                    SizedBox(
+                      width: 36,
+                      child: Text(
+                        '$leadingRank',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
                   _Cover(
                     picUrl: coverUrl ?? music.meta.picUrl,
                     loading: coverLoading,

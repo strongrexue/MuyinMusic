@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ui/car_display_layout.dart';
 import '../../core/storage/settings_store.dart';
 import '../../theme/app_motion.dart';
 import '../shell/player_transition.dart';
@@ -357,57 +356,8 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
       return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
     }
-    final carPadModeEnabled =
-        ref.watch(
-          settingsProvider.select((settings) => settings.carPadModeEnabled),
-        ) ||
-        CarDisplayLayout.wideOf(context);
-    if (carPadModeEnabled) {
-      return Padding(
-        key: const ValueKey('player-wide-layout'),
-        padding: const EdgeInsets.fromLTRB(
-          playerWideOuterInset,
-          8,
-          playerWideOuterInset,
-          18,
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              flex: 10,
-              child: Column(
-                children: [
-                  const Expanded(
-                    child: KeyedSubtree(
-                      key: ValueKey('player-wide-album'),
-                      child: AlbumPage(wide: true),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const PlayerActionRow(),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: playerWideTransportMaxWidth,
-                    ),
-                    child: const TransportBar(),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: playerWideColumnGap),
-            const Expanded(
-              flex: 11,
-              child: KeyedSubtree(
-                key: ValueKey('player-wide-lyrics'),
-                child: LyricsPanel(),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
 
-    // Phone landscape (not KTV, not car/tablet): a split layout of its
+    // Landscape (not KTV): a split layout of its
     // own — cover left, lyrics right, and a merged two-line bottom
     // stack (one slim progress line, then a single control row holding
     // all ten buttons as one centred group) so the body keeps as much
@@ -434,7 +384,7 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
                       key: const ValueKey('player-phone-landscape-album'),
                       child: AlbumPage(
                         wide: true,
-                        wideHeightFactor: 0.8,
+                        wideFillAvailable: true,
                         wideMinCoverSize: 80,
                         wideShowMetadata: false,
                       ),

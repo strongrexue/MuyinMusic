@@ -16,7 +16,6 @@ import '../../core/services/permission_service.dart';
 import '../../core/services/storage_browser_service.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
 import '../shell/shell_toolbar_visibility.dart';
@@ -55,10 +54,7 @@ class _MusicSourcePageState extends ConsumerState<MusicSourcePage> {
           sliver: SliverToBoxAdapter(
             child: Center(
               child: ConstrainedBox(
-                constraints: CarDisplayLayout.contentConstraints(
-                  context,
-                  maxWidth: 640,
-                ),
+                constraints: const BoxConstraints(maxWidth: 640),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

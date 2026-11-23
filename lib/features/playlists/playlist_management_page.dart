@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
 import 'online_playlist_updater.dart';
@@ -62,6 +62,10 @@ class _PlaylistManagementPageState
   Widget build(BuildContext context) {
     final playlists = ref.watch(localPlaylistsProvider);
     _syncMenu();
+    final tileMaxWidth =
+        AppBreakpoints.isExpanded(MediaQuery.sizeOf(context).width)
+        ? 1040.0
+        : 760.0;
     return Scaffold(
       body: AppScrollbar(
         controller: _scrollController,
@@ -93,10 +97,7 @@ class _PlaylistManagementPageState
                     final playlist = playlists[index];
                     return Center(
                       child: ConstrainedBox(
-                        constraints: CarDisplayLayout.contentConstraints(
-                          context,
-                          maxWidth: 760,
-                        ),
+                        constraints: BoxConstraints(maxWidth: tileMaxWidth),
                         child: PlaylistLibraryTile(
                           playlist: playlist,
                           onOpen: () => context.go(

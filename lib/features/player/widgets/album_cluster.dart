@@ -9,12 +9,17 @@ import '../../shell/player_pull_scope.dart';
 import '../../shell/player_transition.dart';
 import '../player_controller.dart';
 import 'mini_lyrics_panel.dart';
-import 'player_control_color.dart';
 import 'player_palette.dart';
 import 'spinning_cover_art.dart';
 import 'track_change_switcher.dart';
 
 const double _compactAlbumTopPadding = 20;
+
+/// Total inset subtracted from the album area's extent in the
+/// phone-landscape fill sizing: the wide scroll view's 8dp top and
+/// bottom padding doubles as the cover's breathing margin, so the
+/// cover exactly fills the space between the paddings.
+const double _wideFillCoverMargin = 16;
 
 class AlbumPage extends ConsumerWidget {
   const AlbumPage({
@@ -24,15 +29,14 @@ class AlbumPage extends ConsumerWidget {
     this.wideHeightFactor,
     this.wideMinCoverSize,
     this.wideShowMetadata = true,
+    this.wideFillAvailable = false,
   });
 
   final bool wide;
   final VoidCallback? onOpenLyrics;
 
   /// Wide-layout cover sizing overrides. Null keeps the car/tablet
-  /// defaults (0.68 of the available height, at least 160dp); the
-  /// phone-landscape layout passes tighter values so the cover fits
-  /// the short body height without scrolling.
+  /// defaults (0.68 of the available height, at least 160dp).
   final double? wideHeightFactor;
   final double? wideMinCoverSize;
 
@@ -40,6 +44,13 @@ class AlbumPage extends ConsumerWidget {
   /// cover. The phone-landscape layout hides it so the cover can use
   /// the freed height; car/tablet keeps it.
   final bool wideShowMetadata;
+
+  /// Phone-landscape sizing: instead of a height fraction, the cover
+  /// side takes the album area's full extent — its height, capped by
+  /// its width — less [_wideFillCoverMargin]. Round and square covers
+  /// follow the same rule (the disc's diameter is the side length).
+  /// Car/tablet never passes this and keeps the fraction sizing.
+  final bool wideFillAvailable;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -57,10 +68,6 @@ class AlbumPage extends ConsumerWidget {
     final square = ref.watch(
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
-    final artworkBaseColor = ref
-        .watch(playerArtworkColorsProvider)
-        .valueOrNull
-        ?.baseColor;
     final track = player.track;
     // The compact column is top-anchored with the cover first, so the
     // cover never shifts when the lyrics finish loading or the
@@ -73,18 +80,22 @@ class AlbumPage extends ConsumerWidget {
       builder: (context, constraints) {
         final coverScale = square ? 1.12 : 1.0;
         final maxCoverSize = (wide ? 400.0 : 360.0) * coverScale;
-        final coverSize = math.min(
-          maxCoverSize,
-          math.min(
-                constraints.maxWidth * (wide ? 0.88 : 0.86),
-                constraints.maxHeight *
-                    (wide ? (wideHeightFactor ?? 0.68) : 0.62),
-              ) *
-              coverScale,
-        );
+        final fillAvailable = wide && wideFillAvailable;
+        final coverSize = fillAvailable
+            ? math.min(constraints.maxWidth, constraints.maxHeight) -
+                  _wideFillCoverMargin
+            : math.min(
+                maxCoverSize,
+                math.min(
+                      constraints.maxWidth * (wide ? 0.88 : 0.86),
+                      constraints.maxHeight *
+                          (wide ? (wideHeightFactor ?? 0.68) : 0.62),
+                    ) *
+                    coverScale,
+              );
         final minCoverSize = wide ? (wideMinCoverSize ?? 160.0) : 160.0;
         final resolvedCoverSize = coverSize
-            .clamp(minCoverSize, maxCoverSize)
+            .clamp(minCoverSize, fillAvailable ? double.infinity : maxCoverSize)
             .toDouble();
         final metadataKey = track == null
             ? 'album-metadata:loading'
@@ -154,36 +165,12 @@ class AlbumPage extends ConsumerWidget {
           );
           cover = coverScaffold(hotZoneSize, const SizedBox.expand());
         } else if (!wide) {
-          // Round portrait: the disc floats in the ambience. A soft
-          // cover-coloured halo around its rim, on top of its existing
-          // contact shadow, keeps it from reading as pasted onto the
-          // background.
-          final glowColor = artworkBaseColor ?? playerSurface(context);
-          cover = Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                key: const ValueKey('player-disc-glow'),
-                left: -resolvedCoverSize * 0.1,
-                top: -resolvedCoverSize * 0.1,
-                right: -resolvedCoverSize * 0.1,
-                bottom: -resolvedCoverSize * 0.1,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          glowColor.withValues(alpha: 0.55),
-                          glowColor.withValues(alpha: 0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              coverScaffold(resolvedCoverSize, coverVisual(resolvedCoverSize)),
-            ],
+          // Round portrait: the disc floats in the ambience on its
+          // contact shadow alone — no cover-coloured halo, so the
+          // background reads as one continuous layer.
+          cover = coverScaffold(
+            resolvedCoverSize,
+            coverVisual(resolvedCoverSize),
           );
         } else {
           cover = coverScaffold(

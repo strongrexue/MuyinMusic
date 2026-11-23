@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,8 +6,8 @@ import '../../core/models/enums.dart';
 import '../../core/models/playlist_category.dart';
 import '../../core/models/playlist_summary.dart';
 import '../../core/sdk/leaderboard_catalog.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../../core/ui/app_refresh_indicator.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../../theme/app_motion.dart';
 import '../shell/shell_bottom_area.dart';
 import 'discovery_browse_cache.dart';
@@ -404,8 +402,7 @@ class _DiscoveryListState extends State<_DiscoveryList> {
   @override
   Widget build(BuildContext context) {
     final viewportWidth = MediaQuery.sizeOf(context).width;
-    final wideContent = CarDisplayLayout.enabledOf(context) ||
-        (Platform.isWindows && viewportWidth >= 840);
+    final wideContent = AppBreakpoints.isExpanded(viewportWidth);
     final constraints = wideContent
         ? const BoxConstraints()
         : const BoxConstraints(maxWidth: 960);

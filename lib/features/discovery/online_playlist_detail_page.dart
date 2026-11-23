@@ -17,12 +17,10 @@ import '../../core/models/online_collection_kind.dart';
 import '../../core/models/playlist_info.dart';
 import '../../core/models/playlist_summary.dart';
 import '../../core/services/app_logger.dart';
-import '../../core/storage/settings_store.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/cover_placeholder.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../../core/ui/container_transform.dart';
 import '../../core/ui/route_settle.dart';
 import '../../core/ui/widgets/batch_selection_button.dart';
@@ -351,20 +349,10 @@ class _OnlinePlaylistDetailPageState
 
   @override
   Widget build(BuildContext context) {
-    final carPadModeEnabled =
-        ref.watch(
-          settingsProvider.select((settings) => settings.carPadModeEnabled),
-        ) ||
-        CarDisplayLayout.wideOf(context);
     final detail = ref.watch(onlinePlaylistDetailProvider(_key));
     // 加载态与歌单共用同一棵树：数据到达时只换掉歌曲列表，头图 Hero、
     // 滚动视图和主题都原地保留，不整页重建。
-    Widget loading() => _buildPlaylist(
-      context,
-      _placeholderPlaylist(),
-      carPadModeEnabled: carPadModeEnabled,
-      placeholder: true,
-    );
+    Widget loading() => _buildPlaylist(context, _placeholderPlaylist(), placeholder: true);
     if (_holdSkeleton) return loading();
     final loaded = detail.asData?.value;
     if (loaded != null) {
@@ -380,7 +368,6 @@ class _OnlinePlaylistDetailPageState
       return _buildPlaylist(
         context,
         cached,
-        carPadModeEnabled: carPadModeEnabled,
         loadingMore: detail.isLoading,
         loadMoreError: loadMoreError,
       );
@@ -394,13 +381,9 @@ class _OnlinePlaylistDetailPageState
         kind: widget.kind,
         message: _friendlyError(error),
         onRetry: () => ref.invalidate(onlinePlaylistDetailProvider(_key)),
-        carPadModeEnabled: carPadModeEnabled,
       ),
-      data: (playlist) => _buildPlaylist(
-        context,
-        _withDiscoveryArtwork(playlist),
-        carPadModeEnabled: carPadModeEnabled,
-      ),
+      data: (playlist) =>
+          _buildPlaylist(context, _withDiscoveryArtwork(playlist)),
     );
   }
 
@@ -443,7 +426,6 @@ class _OnlinePlaylistDetailPageState
   Widget _buildPlaylist(
     BuildContext context,
     PlaylistInfo playlist, {
-    required bool carPadModeEnabled,
     bool loadingMore = false,
     String? loadMoreError,
     bool placeholder = false,
@@ -480,10 +462,15 @@ class _OnlinePlaylistDetailPageState
       playlist.coverUrl,
       size: _summary == null ? 1200 : discoveryPlaylistArtworkSize,
     );
-    final wide = playlistDetailUsesWideLayout(
-      context,
-      carPadModeEnabled: carPadModeEnabled,
-    );
+    final wide = playlistDetailUsesWideLayout(context);
+    // 排行榜名次按完整榜单顺序编号：分页追加的曲目延续累计序号，
+    // 搜索过滤后仍显示其在榜单中的原始名次。
+    final rankByTrackKey = widget.kind == OnlineCollectionKind.leaderboard
+        ? <String, int>{
+            for (var i = 0; i < playlist.tracks.length; i++)
+              _trackKey(playlist.tracks[i]): i + 1,
+          }
+        : const <String, int>{};
     final title = placeholder && playlist.name.isEmpty
         ? '${widget.kind.label}详情'
         : playlist.name;
@@ -653,13 +640,11 @@ class _OnlinePlaylistDetailPageState
                           }).firstOrNull;
                           final tile = Center(
                             child: ConstrainedBox(
-                              constraints: CarDisplayLayout.contentConstraints(
-                                context,
-                                maxWidth: 900,
-                              ),
+                              constraints: const BoxConstraints(maxWidth: 900),
                               child: _OnlinePlaylistTrackTile(
                                 key: ValueKey(_trackKey(music)),
                                 music: music,
+                                rank: rankByTrackKey[_trackKey(music)],
                                 batchMode: _batchMode,
                                 selected: _selectedTrackIds.contains(
                                   _trackKey(music),
@@ -961,6 +946,7 @@ class _OnlinePlaylistTrackTile extends ConsumerStatefulWidget {
   const _OnlinePlaylistTrackTile({
     super.key,
     required this.music,
+    this.rank,
     required this.onPlay,
     required this.batchMode,
     required this.selected,
@@ -968,6 +954,7 @@ class _OnlinePlaylistTrackTile extends ConsumerStatefulWidget {
   });
 
   final MusicInfo music;
+  final int? rank;
   final VoidCallback? onPlay;
   final bool batchMode;
   final bool selected;
@@ -1011,6 +998,7 @@ class _OnlinePlaylistTrackTileState
     final coverUrl = resolved.isNotEmpty ? resolved : _embeddedCover;
     return SearchResultTile(
       music: widget.music,
+      leadingRank: widget.rank,
       coverUrl: coverUrl,
       coverLoading: fallback?.isLoading ?? false,
       onCoverError: _requestFallbackCover,
@@ -1033,7 +1021,6 @@ class _DetailError extends StatelessWidget {
     required this.kind,
     required this.message,
     required this.onRetry,
-    required this.carPadModeEnabled,
   });
 
   final PlaylistSummary? summary;
@@ -1042,7 +1029,6 @@ class _DetailError extends StatelessWidget {
   final OnlineCollectionKind kind;
   final String message;
   final VoidCallback onRetry;
-  final bool carPadModeEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1051,10 +1037,7 @@ class _DetailError extends StatelessWidget {
       item?.coverUrl,
       size: discoveryPlaylistArtworkSize,
     );
-    final wide = playlistDetailUsesWideLayout(
-      context,
-      carPadModeEnabled: carPadModeEnabled,
-    );
+    final wide = playlistDetailUsesWideLayout(context);
     final detailLabel = '${kind.label}详情';
     final title = item?.name ?? detailLabel;
     final metadata = item == null ? source.label : _summaryMetadata(item);
@@ -1194,10 +1177,7 @@ class _PlaylistTracksHeading extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Center(
         child: ConstrainedBox(
-          constraints: CarDisplayLayout.contentConstraints(
-            context,
-            maxWidth: 900,
-          ),
+          constraints: const BoxConstraints(maxWidth: 900),
           child: SizedBox(
             height: 44,
             child: Row(
@@ -1271,10 +1251,7 @@ class _LoadMoreTracksError extends StatelessWidget {
       ),
       child: Center(
         child: ConstrainedBox(
-          constraints: CarDisplayLayout.contentConstraints(
-            context,
-            maxWidth: 900,
-          ),
+          constraints: const BoxConstraints(maxWidth: 900),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1310,10 +1287,7 @@ class _DetailTrackSkeleton extends StatelessWidget {
     // 封面 44），loading → data 切换不跳动。
     return Center(
       child: ConstrainedBox(
-        constraints: CarDisplayLayout.contentConstraints(
-          context,
-          maxWidth: 900,
-        ),
+        constraints: const BoxConstraints(maxWidth: 900),
         child: SizedBox(
           key: const ValueKey('detail-track-skeleton'),
           height: 62,
@@ -1371,7 +1345,7 @@ class _DetailTrackSkeleton extends StatelessWidget {
 Widget _trackListDivider(BuildContext context, ColorScheme scheme) {
   return Center(
     child: ConstrainedBox(
-      constraints: CarDisplayLayout.contentConstraints(context, maxWidth: 900),
+      constraints: const BoxConstraints(maxWidth: 900),
       child: Divider(
         height: 1,
         indent: 56,

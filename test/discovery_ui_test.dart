@@ -94,6 +94,92 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('leaderboard grid keeps four tier columns just below 840', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(839, 1200));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      _appWithContainer(
+        container,
+        const LeaderboardsPage(source: MusicSource.kw),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final centers = _artworkCenters(tester);
+    expect(centers, hasLength(4));
+    expect(centers.map((c) => c.dx.round()).toSet(), hasLength(4));
+    expect(centers.map((c) => c.dy.round()).toSet(), hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaderboard grid switches to the width formula at 840', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(840, 1200));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      _appWithContainer(
+        container,
+        const LeaderboardsPage(source: MusicSource.kw),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 公式 (840/260) 取 3 列：第四张卡片换行，而不是分档的 4 列同行。
+    final centers = _artworkCenters(tester);
+    expect(centers, hasLength(4));
+    expect(centers.map((c) => c.dx.round()).toSet(), hasLength(3));
+    expect(centers.map((c) => c.dy.round()).toSet(), hasLength(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('discovery spotlight expands cards on wide layouts', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(1200, 1800));
+    final prefs = await _freshPreferences();
+    final fake = _FakeDiscoveryApi();
+    final container = ProviderContainer(
+      overrides: [
+        discoverySourcesProvider.overrideWithValue(_testDiscoverySources),
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        musicApiProvider.overrideWithValue(fake),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      _appWithContainer(container, const DiscoveryContent()),
+    );
+    await tester.pumpAndSettle();
+
+    final centers = _artworkCenters(tester);
+    expect(centers.length, greaterThanOrEqualTo(2));
+    // 展开态卡片按可用宽均分，相邻卡间距明显大于紧凑态的固定卡宽 336 + 间隔 10。
+    expect(centers[1].dx - centers[0].dx, greaterThan(346));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('discovery masonry uses two stable columns on phones', (
     tester,
   ) async {
@@ -1102,10 +1188,7 @@ void main() {
       var closed = 0;
 
       await tester.pumpWidget(
-        _appWithContainer(
-          container,
-          _SearchHost(onClosed: () => closed++),
-        ),
+        _appWithContainer(container, _SearchHost(onClosed: () => closed++)),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(EditableText).last, '慢搜索');
@@ -1749,6 +1832,13 @@ MusicInfo _music(MusicSource source, int id, String name) {
       ],
     },
   });
+}
+
+List<Offset> _artworkCenters(WidgetTester tester) {
+  return [
+    for (final element in find.byType(LeaderboardArtwork).evaluate())
+      tester.getCenter(find.byWidget(element.widget)),
+  ];
 }
 
 Map<String, Offset> _cardPositions(

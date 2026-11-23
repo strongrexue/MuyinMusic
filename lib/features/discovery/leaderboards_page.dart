@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,11 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/leaderboard_info.dart';
 import '../../core/models/online_collection_kind.dart';
-import '../../core/storage/settings_store.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../core/ui/container_transform.dart';
 import '../../core/ui/widgets/spring_artwork_hero.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../shell/widgets/scrolling_page_header.dart';
 import '../playlists/widgets/immersive_playlist_chrome.dart';
 import '../playlists/widgets/expanding_header_search.dart';
@@ -20,6 +17,19 @@ import 'discovery_controller.dart';
 import 'widgets/discovery_placeholders.dart';
 import 'widgets/leaderboard_artwork.dart';
 import 'widgets/discovery_prism_surface.dart';
+
+/// 排行榜网格列数按可用宽决定：Expanded 起按目标格宽 260 动态加列（2–10），
+/// 避免顶死少量列把封面撑大；其余沿用原分档（<500:2 / 500–719:3 / 720–839:4）。
+int leaderboardGridColumnCount(double width) {
+  if (AppBreakpoints.isExpanded(width)) {
+    return (width / 260).floor().clamp(2, 10);
+  }
+  return switch (width) {
+    >= 720 => 4,
+    >= 500 => 3,
+    _ => 2,
+  };
+}
 
 class LeaderboardsPage extends ConsumerStatefulWidget {
   const LeaderboardsPage({super.key, required this.source});
@@ -70,9 +80,6 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
   @override
   Widget build(BuildContext context) {
     final boards = ref.watch(leaderboardBoardsProvider(source));
-    final carPadModeEnabled = ref.watch(
-      settingsProvider.select((settings) => settings.carPadModeEnabled),
-    );
     return Scaffold(
       body: ScrollingPageHeader(
         topInset: MediaQuery.viewPaddingOf(context).top + 72,
@@ -93,12 +100,7 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
           ),
         ),
         child: Builder(
-          builder: (context) => _buildBoards(
-            context,
-            ref,
-            boards,
-            carPadModeEnabled: carPadModeEnabled,
-          ),
+          builder: (context) => _buildBoards(context, ref, boards),
         ),
       ),
     );
@@ -107,9 +109,8 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
   Widget _buildBoards(
     BuildContext context,
     WidgetRef ref,
-    AsyncValue<List<LeaderboardSummary>> boards, {
-    required bool carPadModeEnabled,
-  }) {
+    AsyncValue<List<LeaderboardSummary>> boards,
+  ) {
     return boards.when(
       loading: () => const DiscoveryLoading(),
       error: (error, _) => DiscoveryError(
@@ -140,10 +141,7 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
               SliverToBoxAdapter(
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: CarDisplayLayout.contentConstraints(
-                      context,
-                      maxWidth: 1040,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 1040),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
                       child: Row(
@@ -203,22 +201,7 @@ class _LeaderboardsPageState extends ConsumerState<LeaderboardsPage> {
               SliverLayoutBuilder(
                 builder: (context, constraints) {
                   final width = constraints.crossAxisExtent;
-                  // Windows 大窗口按目标格宽动态加列，避免顶死少量列把封面撑大；
-                  // 手机端与车机模式保持原有分档不变。
-                  final columns = Platform.isWindows && !carPadModeEnabled
-                      ? (width / 260).floor().clamp(2, 10)
-                      : carPadModeEnabled
-                      ? (width >= 1000
-                            ? 5
-                            : width >= 720
-                            ? 4
-                            : 3)
-                      : switch (width) {
-                          >= 1000 => 5,
-                          >= 720 => 4,
-                          >= 500 => 3,
-                          _ => 2,
-                        };
+                  final columns = leaderboardGridColumnCount(width);
                   return SliverPadding(
                     padding: EdgeInsets.fromLTRB(
                       12,

@@ -49,9 +49,6 @@ const String _kLyricAlignModeLandscapeKey = 'lyric_align_mode_landscape';
 const String _kSquareAlbumCoverEnabledKey = 'square_album_cover_enabled';
 const String _kLyricFontWeightKey = 'lyric_font_weight';
 const String _kLyricFontSizeKey = 'lyric_font_size';
-const String _kCarPadModeEnabledKey = 'car_pad_mode_enabled';
-const String _kCarDisplayEnabledKey = 'car_display_enabled';
-const String _kCarDisplaySizeKey = 'car_display_size';
 const String _kAutoPlayOnStartupKey = 'auto_play_on_startup';
 const String _kSkipStartupScreenKey = 'skip_startup_screen';
 const String _kCheckForUpdatesOnStartupKey = 'check_for_updates_on_startup';
@@ -221,9 +218,6 @@ class AppSettings {
     this.squareAlbumCoverEnabled = false,
     this.lyricFontWeight = kLyricFontWeightDefault,
     this.lyricFontSize = kLyricFontSizeDefault,
-    required this.carPadModeEnabled,
-    this.carDisplayEnabled = false,
-    this.carDisplaySize = 1.0,
     this.autoPlayOnStartup = false,
     this.skipStartupScreen = false,
     this.checkForUpdatesOnStartup = true,
@@ -310,14 +304,6 @@ class AppSettings {
   final double lyricFontWeight;
   final double lyricFontSize;
 
-  /// Uses the split album-and-lyrics player layout on car displays and pads.
-  /// This is deliberately manual so ordinary large screens retain phone UI.
-  final bool carPadModeEnabled;
-
-  /// Device-local car adaptation, independent of the existing Pad preference.
-  /// Deliberately excluded from appearance sync to other devices.
-  final bool carDisplayEnabled;
-  final double carDisplaySize;
   final bool autoPlayOnStartup;
   final bool skipStartupScreen;
   final bool checkForUpdatesOnStartup;
@@ -386,9 +372,6 @@ class AppSettings {
     bool? squareAlbumCoverEnabled,
     double? lyricFontWeight,
     double? lyricFontSize,
-    bool? carPadModeEnabled,
-    bool? carDisplayEnabled,
-    double? carDisplaySize,
     bool? autoPlayOnStartup,
     bool? skipStartupScreen,
     bool? checkForUpdatesOnStartup,
@@ -450,9 +433,6 @@ class AppSettings {
         squareAlbumCoverEnabled ?? this.squareAlbumCoverEnabled,
     lyricFontWeight: lyricFontWeight ?? this.lyricFontWeight,
     lyricFontSize: lyricFontSize ?? this.lyricFontSize,
-    carPadModeEnabled: carPadModeEnabled ?? this.carPadModeEnabled,
-    carDisplayEnabled: carDisplayEnabled ?? this.carDisplayEnabled,
-    carDisplaySize: carDisplaySize ?? this.carDisplaySize,
     autoPlayOnStartup: autoPlayOnStartup ?? this.autoPlayOnStartup,
     skipStartupScreen: skipStartupScreen ?? this.skipStartupScreen,
     checkForUpdatesOnStartup:
@@ -490,7 +470,6 @@ class AppSettings {
     themeMode: ThemeMode.system,
     themeSeed: SeedPalette.defaultSeed,
     flowingLightEnabled: true,
-    carPadModeEnabled: false,
     autoPlayOnStartup: false,
     skipStartupScreen: false,
     networkAdapterMode: NetworkAdapterMode.system,
@@ -622,11 +601,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
               (_prefs.get(_kLyricFontSizeKey) as num).toDouble(),
             )
           : kLyricFontSizeDefault,
-      carPadModeEnabled: _prefs.getBool(_kCarPadModeEnabledKey) ?? false,
-      carDisplayEnabled: _prefs.getBool(_kCarDisplayEnabledKey) ?? false,
-      carDisplaySize: _decodeCarDisplaySize(
-        _prefs.getDouble(_kCarDisplaySizeKey),
-      ),
       autoPlayOnStartup: _prefs.getBool(_kAutoPlayOnStartupKey) ?? false,
       skipStartupScreen: _prefs.getBool(_kSkipStartupScreenKey) ?? false,
       checkForUpdatesOnStartup:
@@ -1081,25 +1055,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
     await _prefs.setDouble(_kLyricFontWeightKey, nextWeight);
     await _prefs.setDouble(_kLyricFontSizeKey, nextSize);
-  }
-
-  Future<void> setCarPadModeEnabled(bool value) async {
-    await _prefs.setBool(_kCarPadModeEnabledKey, value);
-    state = state.copyWith(carPadModeEnabled: value);
-  }
-
-  static double _decodeCarDisplaySize(double? value) =>
-      value != null && value.isFinite ? value.clamp(0.85, 1.25) : 1.0;
-
-  Future<void> setCarDisplayEnabled(bool value) async {
-    await _prefs.setBool(_kCarDisplayEnabledKey, value);
-    state = state.copyWith(carDisplayEnabled: value);
-  }
-
-  Future<void> setCarDisplaySize(double value) async {
-    final size = _decodeCarDisplaySize(value);
-    await _prefs.setDouble(_kCarDisplaySizeKey, size);
-    state = state.copyWith(carDisplaySize: size);
   }
 
   Future<void> setAutoPlayOnStartup(bool value) async {

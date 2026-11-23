@@ -20,7 +20,6 @@ import '../../core/services/app_icon_service.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/sync/webdav_sync_controller.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../debug/widgets/log_recording_menu.dart';
 import '../shell/shell_toolbar_visibility.dart';
 import '../shell/shell_bottom_area.dart';
@@ -81,10 +80,7 @@ class SettingsPage extends ConsumerWidget {
               sliver: SliverToBoxAdapter(
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: CarDisplayLayout.contentConstraints(
-                      context,
-                      maxWidth: 640,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 640),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -629,49 +625,6 @@ class SettingsPage extends ConsumerWidget {
                                     ),
                                 ],
                               ),
-                              const SizedBox(height: 4),
-                              SettingsSwitchAction(
-                                key: const ValueKey('car-pad-mode-setting'),
-                                icon: Icons.directions_car_filled_rounded,
-                                title: '车机/Pad 模式',
-                                value: settings.carPadModeEnabled,
-                                onChanged: (value) => ref
-                                    .read(settingsProvider.notifier)
-                                    .setCarPadModeEnabled(value),
-                              ),
-                              const SizedBox(height: 4),
-                              SettingsSwitchAction(
-                                key: const ValueKey('car-display-setting'),
-                                icon: Icons.display_settings_rounded,
-                                title: '车机显示适配',
-                                value: settings.carDisplayEnabled,
-                                onChanged: (value) => ref
-                                    .read(settingsProvider.notifier)
-                                    .setCarDisplayEnabled(value),
-                              ),
-                              if (settings.carDisplayEnabled)
-                                SettingsMenuAction(
-                                  menuId: 'car-display-size-menu',
-                                  icon: Icons.format_size_rounded,
-                                  title: '车机界面大小',
-                                  options: [
-                                    for (final option in {
-                                      0.85: '紧凑',
-                                      1.0: '标准',
-                                      1.25: '更大',
-                                    }.entries)
-                                      SettingsMenuOption(
-                                        id: option.key.toString(),
-                                        label: option.value,
-                                        selected:
-                                            settings.carDisplaySize ==
-                                            option.key,
-                                        onSelected: () => ref
-                                            .read(settingsProvider.notifier)
-                                            .setCarDisplaySize(option.key),
-                                      ),
-                                  ],
-                                ),
                               const SizedBox(height: 4),
                               SettingsSwitchAction(
                                 key: const ValueKey('flowing-light-setting'),

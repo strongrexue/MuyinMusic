@@ -17,7 +17,6 @@ import 'core/storage/settings_store.dart';
 import 'core/sync/webdav_sync_controller.dart';
 import 'core/ui/app_toast.dart';
 import 'core/ui/widgets/prism_environment.dart';
-import 'core/ui/car_display_layout.dart';
 import 'features/downloads/download_history_store.dart';
 import 'core/music_sources/music_source_controller.dart';
 import 'features/music_sources/music_source_update_prompt.dart';
@@ -353,21 +352,17 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
         // this baseline only while they are visible in the layer tree.
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: overlayStyle,
-          child: CarDisplayViewport(
-            enabled: settings.carDisplayEnabled,
-            sizeFactor: settings.carDisplaySize,
-            child: PrismEnvironment(
-              mode: settings.liquidGlassMode,
-              glassConfig: glassConfig,
-              child: AppToastOverlay(
-                child: MusicSourceUpdatePrompt(
-                  navigatorKey: rootNavigatorKey,
-                  ready: _sourceUpdatePromptsReady,
-                  child: StartupGate(
-                    skipStartupScreen: settings.skipStartupScreen,
-                    onReady: _onStartupReady,
-                    child: child ?? const SizedBox.shrink(),
-                  ),
+          child: PrismEnvironment(
+            mode: settings.liquidGlassMode,
+            glassConfig: glassConfig,
+            child: AppToastOverlay(
+              child: MusicSourceUpdatePrompt(
+                navigatorKey: rootNavigatorKey,
+                ready: _sourceUpdatePromptsReady,
+                child: StartupGate(
+                  skipStartupScreen: settings.skipStartupScreen,
+                  onReady: _onStartupReady,
+                  child: child ?? const SizedBox.shrink(),
                 ),
               ),
             ),

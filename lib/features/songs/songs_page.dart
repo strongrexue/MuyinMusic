@@ -16,6 +16,7 @@ import '../../core/models/music_info.dart';
 import '../../core/services/embedded_artwork_cache.dart';
 import '../../core/services/embedded_audio_tags.dart';
 import '../../core/storage/settings_store.dart';
+import '../../core/ui/app_breakpoints.dart';
 import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/app_refresh_indicator.dart';
@@ -51,6 +52,10 @@ import 'widgets/songs_sort_sheet.dart';
 const _songSortModeKey = 'songs_sort_mode_v1';
 const _songSortAscendingKey = 'songs_sort_ascending_v1';
 
+/// 歌单封面网格列数：按可用宽以目标格宽 240 动态加列，钳制在 2–10 列。
+int songsPlaylistGridColumnCount(double gridWidth) =>
+    (gridWidth / 240).floor().clamp(2, 10);
+
 /// Footprint the floating tab capsule needs above the list: the capsule plus
 /// its top and bottom breathing room.
 const double kSongsTabBarSlot = prism.kGlassPillBarHeight + 14;
@@ -69,6 +74,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   SongSortMode _sortMode = SongSortMode.title;
   bool _ascending = true;
   bool _batchMode = false;
+  bool _playlistSortMode = false;
   String _searchQuery = '';
   bool _searchMode = false;
   double? _preSearchScrollOffset;
@@ -621,10 +627,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
           '已删除 $physicalDeletedCount 个文件'
           '${removedCount > 0 ? '，$removedCount 首仅从列表移除' : ''}'
           '，${result.failed.length} 个失败：${result.failed.values.first}',
-          type:
-              physicalDeletedCount == 0 && removedCount == 0
-                  ? AppToastType.error
-                  : AppToastType.warning,
+          type: physicalDeletedCount == 0 && removedCount == 0
+              ? AppToastType.error
+              : AppToastType.warning,
         );
       } else if (result.cancelled) {
         showAppToast(
@@ -632,7 +637,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
           physicalDeletedCount == 0 && removedCount == 0
               ? '已取消删除'
               : '已删除 $physicalDeletedCount 个文件'
-                  '${removedCount > 0 ? '，$removedCount 首仅从列表移除' : ''}，其余已取消',
+                    '${removedCount > 0 ? '，$removedCount 首仅从列表移除' : ''}，其余已取消',
         );
       } else if (removedCount > 0) {
         showAppToast(
@@ -640,10 +645,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
           physicalDeletedCount > 0
               ? '已删除 $physicalDeletedCount 个文件，$removedCount 首仅从列表移除'
               : '$removedCount 首本地文件已不在设备中，仅从列表移除',
-          type:
-              physicalDeletedCount > 0
-                  ? AppToastType.warning
-                  : AppToastType.success,
+          type: physicalDeletedCount > 0
+              ? AppToastType.warning
+              : AppToastType.success,
         );
       } else {
         showAppToast(
@@ -1025,11 +1029,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       musics.add(music);
     }
     if (musics.isEmpty) {
-      showAppToast(
-        context,
-        '所选歌曲都已在本地或正在下载',
-        type: AppToastType.warning,
-      );
+      showAppToast(context, '所选歌曲都已在本地或正在下载', type: AppToastType.warning);
       return;
     }
     final available = await ensureOnlineMusicSourcesAvailable(
@@ -1141,7 +1141,11 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       _selectedIds.clear();
       _batchMode = false;
     });
-    showAppToast(context, '已取消喜欢 ${selected.length} 首', type: AppToastType.success);
+    showAppToast(
+      context,
+      '已取消喜欢 ${selected.length} 首',
+      type: AppToastType.success,
+    );
   }
 
   void _syncToolbarState({
@@ -1272,9 +1276,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
           const SliverToBoxAdapter(child: ScrollHeaderSpacer()),
           // The tab capsule floats over the list, so the list only needs its
           // footprint kept clear here.
-          const SliverToBoxAdapter(
-            child: SizedBox(height: kSongsTabBarSlot),
-          ),
+          const SliverToBoxAdapter(child: SizedBox(height: kSongsTabBarSlot)),
           if (playlistTab) ...[
             if (!searching && !_batchMode)
               SliverPadding(
@@ -1336,6 +1338,39 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                   ),
                 ),
               ),
+            if (visiblePlaylists.isNotEmpty)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    // 与内容区同一测量口径：Expanded 且非搜索/批量态才给排序入口。
+                    final wide = AppBreakpoints.isExpanded(
+                      constraints.crossAxisExtent,
+                    );
+                    if (!wide || searching || _batchMode) {
+                      return const SliverToBoxAdapter(child: SizedBox.shrink());
+                    }
+                    return SliverToBoxAdapter(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          key: const ValueKey('playlists-sort-mode-toggle'),
+                          onPressed: () => setState(
+                            () => _playlistSortMode = !_playlistSortMode,
+                          ),
+                          icon: Icon(
+                            _playlistSortMode
+                                ? Icons.check_rounded
+                                : Icons.swap_vert_rounded,
+                            size: 18,
+                          ),
+                          label: Text(_playlistSortMode ? '完成排序' : '排序'),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             if (visiblePlaylists.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -1355,77 +1390,14 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       ? 12
                       : ShellBottomArea.contentPadding(context, 104),
                 ),
-                sliver: Platform.isWindows
-                    ? SliverLayoutBuilder(
-                        builder: (context, constraints) {
-                          // 外层 SliverPadding 已保留左右各 12 的对称留白，这里按可用宽算列数。
-                          final gridWidth = constraints.crossAxisExtent;
-                          // 与发现页封面网格一致：目标格宽 240，窗口越宽列数越多，
-                          // 避免大窗口下顶死少量列导致封面被撑得过大。
-                          final columnCount =
-                              (gridWidth / 240).floor().clamp(2, 10);
-                          const gap = 10.0;
-                          final cellWidth =
-                              (gridWidth - gap * (columnCount - 1)) /
-                              columnCount;
-                          // 卡片 = 正方形封面 + 底部元信息（padding 22 + 标题 20 + 间距 4 + meta 16）。
-                          const metaHeight = 62.0;
-                          final childAspectRatio =
-                              cellWidth / (cellWidth + metaHeight);
-                          final canReorder = !_batchMode && !searching;
-                          return SliverGrid(
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: columnCount,
-                              mainAxisSpacing: gap,
-                              crossAxisSpacing: gap,
-                              childAspectRatio: childAspectRatio,
-                            ),
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) {
-                                final playlist = visiblePlaylists[index];
-                                return WindowsPlaylistCoverCard(
-                                  playlist: playlist,
-                                  index: index,
-                                  total: visiblePlaylists.length,
-                                  batchMode: _batchMode,
-                                  selected: _selectedIds.contains(playlist.id),
-                                  canMoveUp: index > 0,
-                                  canMoveDown:
-                                      index < visiblePlaylists.length - 1,
-                                  onOpen: () =>
-                                      unawaited(_openPlaylist(playlist)),
-                                  onUnfavorite: () =>
-                                      unawaited(_unfavoritePlaylist(playlist)),
-                                  onUpdate: playlist.isOnlineImport
-                                      ? () =>
-                                          unawaited(_updatePlaylist(playlist))
-                                      : null,
-                                  updating: _updatingPlaylistIds.contains(
-                                    playlist.id,
-                                  ),
-                                  onToggleSelected: () =>
-                                      _togglePlaylistSelection(playlist.id),
-                                  // 批量/搜索态不显示排序菜单（与手机端 enabled 条件一致）。
-                                  onMoveUp: canReorder && index > 0
-                                      ? () => unawaited(
-                                          _reorderPlaylists(index, index - 1),
-                                        )
-                                      : null,
-                                  onMoveDown: canReorder &&
-                                          index < visiblePlaylists.length - 1
-                                      ? () => unawaited(
-                                          _reorderPlaylists(index, index + 1),
-                                        )
-                                      : null,
-                                );
-                              },
-                              childCount: visiblePlaylists.length,
-                            ),
-                          );
-                        },
-                      )
-                    : SliverReorderableList(
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    // 外层 SliverPadding 已保留左右各 12 的对称留白，这里按可用宽决定形态：
+                    // Expanded 起用封面网格，排序模式下切回可拖拽列表。
+                    final gridWidth = constraints.crossAxisExtent;
+                    if (!AppBreakpoints.isExpanded(gridWidth) ||
+                        _playlistSortMode) {
+                      return SliverReorderableList(
                         itemCount: visiblePlaylists.length,
                         onReorderItem: (oldIndex, newIndex) {
                           unawaited(_reorderPlaylists(oldIndex, newIndex));
@@ -1458,7 +1430,62 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                             ),
                           );
                         },
+                      );
+                    }
+                    // 与发现页封面网格一致：目标格宽 240，窗口越宽列数越多，
+                    // 避免大窗口下顶死少量列导致封面被撑得过大。
+                    final columnCount = songsPlaylistGridColumnCount(gridWidth);
+                    const gap = 10.0;
+                    final cellWidth =
+                        (gridWidth - gap * (columnCount - 1)) / columnCount;
+                    // 卡片 = 正方形封面 + 底部元信息（padding 22 + 标题 20 + 间距 4 + meta 16）。
+                    const metaHeight = 62.0;
+                    final childAspectRatio =
+                        cellWidth / (cellWidth + metaHeight);
+                    final canReorder = !_batchMode && !searching;
+                    return SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columnCount,
+                        mainAxisSpacing: gap,
+                        crossAxisSpacing: gap,
+                        childAspectRatio: childAspectRatio,
                       ),
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final playlist = visiblePlaylists[index];
+                        return WindowsPlaylistCoverCard(
+                          playlist: playlist,
+                          index: index,
+                          total: visiblePlaylists.length,
+                          batchMode: _batchMode,
+                          selected: _selectedIds.contains(playlist.id),
+                          canMoveUp: index > 0,
+                          canMoveDown: index < visiblePlaylists.length - 1,
+                          onOpen: () => unawaited(_openPlaylist(playlist)),
+                          onUnfavorite: () =>
+                              unawaited(_unfavoritePlaylist(playlist)),
+                          onUpdate: playlist.isOnlineImport
+                              ? () => unawaited(_updatePlaylist(playlist))
+                              : null,
+                          updating: _updatingPlaylistIds.contains(playlist.id),
+                          onToggleSelected: () =>
+                              _togglePlaylistSelection(playlist.id),
+                          // 批量/搜索态不显示排序菜单（与手机端 enabled 条件一致）。
+                          onMoveUp: canReorder && index > 0
+                              ? () => unawaited(
+                                  _reorderPlaylists(index, index - 1),
+                                )
+                              : null,
+                          onMoveDown:
+                              canReorder && index < visiblePlaylists.length - 1
+                              ? () => unawaited(
+                                  _reorderPlaylists(index, index + 1),
+                                )
+                              : null,
+                        );
+                      }, childCount: visiblePlaylists.length),
+                    );
+                  },
+                ),
               ),
           ] else ...[
             if (localSongs.isNotEmpty)
@@ -1574,8 +1601,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                     onDelete: selectedCount == 0
                         ? null
                         : (tab == SongsLibraryTab.liked
-                            ? () => unawaited(_unlikeSelected(songs))
-                            : () => unawaited(_confirmDeleteSelected(songs))),
+                              ? () => unawaited(_unlikeSelected(songs))
+                              : () => unawaited(_confirmDeleteSelected(songs))),
                     onAddToPlaylist: selectedCount == 0
                         ? null
                         : () => unawaited(_addSelectedToPlaylist(songs)),

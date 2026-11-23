@@ -7,7 +7,6 @@ import 'package:prism_ui/prism_ui.dart' as prism;
 import '../../core/sync/webdav_config_store.dart';
 import '../../core/sync/webdav_sync_controller.dart';
 import '../../core/ui/app_toast.dart';
-import '../../core/ui/car_display_layout.dart';
 import '../../theme/app_theme.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
@@ -82,10 +81,7 @@ class _WebDavSyncPageState extends ConsumerState<WebDavSyncPage> {
             sliver: SliverToBoxAdapter(
               child: Center(
                 child: ConstrainedBox(
-                  constraints: CarDisplayLayout.contentConstraints(
-                    context,
-                    maxWidth: 640,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 640),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

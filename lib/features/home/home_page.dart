@@ -56,57 +56,62 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final padding = ShellBottomArea.contentPadding(context, 156);
-    return AppRefreshIndicator(
-      onRefresh: () async {
-        ref.invalidate(dailyPicksProvider);
-        ref.invalidate(guessYouLikeProvider);
-        setState(_shuffleSubtitle);
-        await Future.wait([
-          ref
-              .read(dailyPicksProvider.future)
-              .catchError((_) => const <DownloadHistoryEntry>[]),
-          ref
-              .read(guessYouLikeProvider.future)
-              .catchError((_) => const <DownloadHistoryEntry>[]),
-        ]);
-      },
-      child: CustomScrollView(
-        key: const PageStorageKey('home-scroll'),
-        physics: const AlwaysScrollableScrollPhysics(
-          parent: BouncingScrollPhysics(),
-        ),
-        slivers: [
-          const SliverToBoxAdapter(child: ScrollHeaderSpacer()),
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, padding),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                Text(
-                  _greeting(DateTime.now()),
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _subtitles[_subtitleIndex],
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const HomeSearchCapsule(),
-                const SizedBox(height: 18),
-                const HomeQuickActions(),
-                const SizedBox(height: 20),
-                const _DailyPicksSection(),
-                const _GuessYouLikeSection(),
-                const _RecentPlaysSection(),
-              ]),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final shelfCount = homeShelfCountForWidth(constraints.maxWidth);
+        return AppRefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(dailyPicksProvider(shelfCount));
+            ref.invalidate(guessYouLikeProvider(shelfCount));
+            setState(_shuffleSubtitle);
+            await Future.wait([
+              ref
+                  .read(dailyPicksProvider(shelfCount).future)
+                  .catchError((_) => const <DownloadHistoryEntry>[]),
+              ref
+                  .read(guessYouLikeProvider(shelfCount).future)
+                  .catchError((_) => const <DownloadHistoryEntry>[]),
+            ]);
+          },
+          child: CustomScrollView(
+            key: const PageStorageKey('home-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
             ),
+            slivers: [
+              const SliverToBoxAdapter(child: ScrollHeaderSpacer()),
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, padding),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    Text(
+                      _greeting(DateTime.now()),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _subtitles[_subtitleIndex],
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const HomeSearchCapsule(),
+                    const SizedBox(height: 18),
+                    const HomeQuickActions(),
+                    const SizedBox(height: 20),
+                    _DailyPicksSection(shelfCount: shelfCount),
+                    _GuessYouLikeSection(shelfCount: shelfCount),
+                    const _RecentPlaysSection(),
+                  ]),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -159,11 +164,13 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _DailyPicksSection extends ConsumerWidget {
-  const _DailyPicksSection();
+  const _DailyPicksSection({required this.shelfCount});
+
+  final int shelfCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final picks = ref.watch(dailyPicksProvider);
+    final picks = ref.watch(dailyPicksProvider(shelfCount));
     return picks.when(
       loading: () => const _ShelfLoading(title: '每日推荐'),
       error: (_, _) => const SizedBox.shrink(),
@@ -193,11 +200,13 @@ class _DailyPicksSection extends ConsumerWidget {
 }
 
 class _GuessYouLikeSection extends ConsumerWidget {
-  const _GuessYouLikeSection();
+  const _GuessYouLikeSection({required this.shelfCount});
+
+  final int shelfCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final picks = ref.watch(guessYouLikeProvider);
+    final picks = ref.watch(guessYouLikeProvider(shelfCount));
     return picks.when(
       loading: () => const _ShelfLoading(title: '猜你喜欢'),
       error: (_, _) => const SizedBox.shrink(),
@@ -296,11 +305,7 @@ class _ShelfLoading extends StatelessWidget {
   }
 }
 
-void _play(
-  WidgetRef ref,
-  List<DownloadHistoryEntry> queue,
-  int index,
-) {
+void _play(WidgetRef ref, List<DownloadHistoryEntry> queue, int index) {
   if (queue.isEmpty) return;
   final safeIndex = index.clamp(0, queue.length - 1);
   ref
