@@ -206,11 +206,11 @@ class _PlayerArtworkImageState extends State<PlayerArtworkImage>
       _clearImages();
       return;
     }
-    // The main cover, mini player and shared cover resolve the same 480px key.
+    // The main cover, mini player and shared cover resolve the same 800px key.
     final stream = ResizeImage(
       source,
-      width: 480,
-      height: 480,
+      width: 800,
+      height: 800,
     ).resolve(createLocalImageConfiguration(context));
     if (_resolvedKey == stream.key) return;
     _unsubscribe();

@@ -16,7 +16,7 @@ import 'track_change_switcher.dart';
 const double _compactAlbumTopPadding = 20;
 
 /// Total inset subtracted from the album area's extent in the
-/// phone-landscape fill sizing: the wide scroll view's 8dp top and
+/// phone-landscape capped sizing: the wide scroll view's 8dp top and
 /// bottom padding doubles as the cover's breathing margin, so the
 /// cover exactly fills the space between the paddings.
 const double _wideFillCoverMargin = 16;
@@ -29,7 +29,7 @@ class AlbumPage extends ConsumerWidget {
     this.wideHeightFactor,
     this.wideMinCoverSize,
     this.wideShowMetadata = true,
-    this.wideFillAvailable = false,
+    this.wideCoverCap,
   });
 
   final bool wide;
@@ -45,12 +45,16 @@ class AlbumPage extends ConsumerWidget {
   /// the freed height; car/tablet keeps it.
   final bool wideShowMetadata;
 
-  /// Phone-landscape sizing: instead of a height fraction, the cover
-  /// side takes the album area's full extent — its height, capped by
-  /// its width — less [_wideFillCoverMargin]. Round and square covers
-  /// follow the same rule (the disc's diameter is the side length).
-  /// Car/tablet never passes this and keeps the fraction sizing.
-  final bool wideFillAvailable;
+  /// Phone-landscape sizing cap: when set, the cover side is the
+  /// album area's smaller extent (less [_wideFillCoverMargin]) capped
+  /// at this value, instead of the height-fraction sizing. The
+  /// landscape layout passes half the screen's short side, so the cap
+  /// itself is the deciding term on ordinary screens and applies
+  /// exactly, with no margin subtracted from it. Round and square
+  /// covers follow the same rule (the disc's diameter is the side
+  /// length). Car/tablet never passes this and keeps the fraction
+  /// sizing.
+  final double? wideCoverCap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -80,10 +84,13 @@ class AlbumPage extends ConsumerWidget {
       builder: (context, constraints) {
         final coverScale = square ? 1.12 : 1.0;
         final maxCoverSize = (wide ? 400.0 : 360.0) * coverScale;
-        final fillAvailable = wide && wideFillAvailable;
-        final coverSize = fillAvailable
-            ? math.min(constraints.maxWidth, constraints.maxHeight) -
-                  _wideFillCoverMargin
+        final coverCap = wide ? wideCoverCap : null;
+        final coverSize = coverCap != null
+            ? math.min(
+                math.min(constraints.maxWidth, constraints.maxHeight) -
+                    _wideFillCoverMargin,
+                coverCap,
+              )
             : math.min(
                 maxCoverSize,
                 math.min(
@@ -95,7 +102,7 @@ class AlbumPage extends ConsumerWidget {
               );
         final minCoverSize = wide ? (wideMinCoverSize ?? 160.0) : 160.0;
         final resolvedCoverSize = coverSize
-            .clamp(minCoverSize, fillAvailable ? double.infinity : maxCoverSize)
+            .clamp(minCoverSize, coverCap != null ? double.infinity : maxCoverSize)
             .toDouble();
         final metadataKey = track == null
             ? 'album-metadata:loading'
@@ -184,21 +191,34 @@ class AlbumPage extends ConsumerWidget {
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  cover,
-                  if (wideShowMetadata) ...[
-                    const SizedBox(height: 18),
-                    TrackChangeSwitcher(
-                      transitionKey: metadataKey,
-                      incomingOffset: const Offset(0.12, 0),
-                      child: track == null
-                          ? const SizedBox(height: 24)
-                          : _AlbumMetadata(track: track),
-                    ),
+              // When the cover (plus metadata) is shorter than the
+              // scroll area — the capped landscape sizing leaves most
+              // of the height empty — stretch the column to the padded
+              // viewport height so the cover stays vertically centred
+              // instead of hugging the top.
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight.isFinite
+                      ? math.max(0, constraints.maxHeight - 16)
+                      : 0,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    cover,
+                    if (wideShowMetadata) ...[
+                      const SizedBox(height: 18),
+                      TrackChangeSwitcher(
+                        transitionKey: metadataKey,
+                        incomingOffset: const Offset(0.12, 0),
+                        child: track == null
+                            ? const SizedBox(height: 24)
+                            : _AlbumMetadata(track: track),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           );

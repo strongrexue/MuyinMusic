@@ -235,6 +235,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'portrait square mode reveals without a shared cover flight',
+    (tester) async {
+      final harness = await _pumpApp(tester);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(AppShell)),
+      );
+      await container
+          .read(settingsProvider.notifier)
+          .setSquareAlbumCoverEnabled(true);
+      await _pumpUi(tester);
+
+      final gesture = await tester.startGesture(tester.getCenter(_miniPlayer));
+      await tester.pump();
+      await tester.pump();
+      final transition = tester
+          .widget<PlayerTransitionScope>(find.byType(PlayerTransitionScope))
+          .transition;
+      await gesture.moveBy(const Offset(0, -20));
+      await tester.pump();
+      await gesture.moveBy(Offset(0, -transition.travel / 2));
+      await tester.pump();
+      // The reveal is mid-flight, but portrait square mode paints no
+      // shared cover: the page's integrated background artwork is the
+      // destination surface, so a flying copy would double it.
+      expect(transition.progress.value, closeTo(.5, .001));
+      expect(transition.flying, isTrue);
+      expect(find.byKey(const ValueKey('player-shared-cover')), findsNothing);
+      await gesture.up();
+      await _pumpUi(tester);
+      expect(harness.location, '/player');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('a released closing spring does not capture another list drag', (
     tester,
   ) async {
@@ -378,7 +413,7 @@ void main() {
         );
         await tester.runAsync(
           () => precacheImage(
-            ResizeImage(MemoryImage(bytes), width: 480, height: 480),
+            ResizeImage(MemoryImage(bytes), width: 800, height: 800),
             tester.element(find.byType(MiniPlayerBar)),
           ),
         );

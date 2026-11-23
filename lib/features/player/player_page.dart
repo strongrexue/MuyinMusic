@@ -94,6 +94,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     // Hide the system bars only while landscape KTV is actually the
     // active page; the page stays mounted (inactive) under other routes.
     _syncKtvSystemUi(ktvChromePinned && widget.active);
+    // Landscape without KTV drops the three-band column: the body
+    // takes the full height and the top chrome floats over it, so the
+    // cover and lyrics read as one plane with the chrome on top.
+    final landscapeFloating =
+        !ktvChromePinned &&
+        MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
     final topChromeRow = TopChromeRow(
       onOpenEqualizer: () => widget.onDismissRequested('/settings/equalizer'),
       compactPageProgress: _compactPageProgress,
@@ -194,6 +200,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                     ),
                             ),
                           ],
+                        )
+                      : landscapeFloating
+                      ? SafeArea(
+                          key: const ValueKey('player-chrome'),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              showEmpty
+                                  ? const _EmptyPlayer()
+                                  : _NowPlayingBody(
+                                      pageProgress: _compactPageProgress,
+                                    ),
+                              Positioned(
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                child: topChromeRow,
+                              ),
+                            ],
+                          ),
                         )
                       : SafeArea(
                           key: const ValueKey('player-chrome'),
@@ -357,77 +383,95 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
       return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
     }
 
-    // Landscape (not KTV): a split layout of its
-    // own — cover left, lyrics right, and a merged two-line bottom
-    // stack (one slim progress line, then a single control row holding
-    // all ten buttons as one centred group) so the body keeps as much
-    // height as possible. The lyrics panel gets landscape-scoped
-    // metrics (smaller edge fade, centred scroll anchor, tighter rows)
-    // and follows the separate landscape lyric alignment setting.
+    // Landscape (not KTV): a single-plane floating layout of its
+    // own — cover left and lyrics right, both spanning the full
+    // height under the floating top chrome (placed by the page), and
+    // a merged bottom stack (one slim progress line, then a single
+    // control row holding all ten buttons as one centred group)
+    // floating over the same plane with no band behind it. The
+    // lyrics panel gets landscape-scoped metrics (smaller edge fade,
+    // centred scroll anchor, tighter rows) plus list insets that
+    // clear the floating chrome and bottom stack, and follows the
+    // separate landscape lyric alignment setting.
     if (mediaSize.width > mediaSize.height) {
-      return Padding(
+      return Stack(
         key: const ValueKey('player-phone-landscape-layout'),
-        padding: const EdgeInsets.fromLTRB(
-          playerWideOuterInset,
-          8,
-          playerWideOuterInset,
-          12,
-        ),
-        child: Column(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 10,
-                    child: KeyedSubtree(
-                      key: const ValueKey('player-phone-landscape-album'),
-                      child: AlbumPage(
-                        wide: true,
-                        wideFillAvailable: true,
-                        wideMinCoverSize: 80,
-                        wideShowMetadata: false,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: playerWideColumnGap),
-                  Expanded(
-                    flex: 11,
-                    child: KeyedSubtree(
-                      key: const ValueKey('player-phone-landscape-lyrics'),
-                      child: LyricsPanel(
-                        edgeFadeExtent: 10,
-                        scrollAnchor: 0.5,
-                        lineVerticalPadding: 4,
-                        listPadding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
-                        alignMode: landscapeLyricAlignMode,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+        fit: StackFit.expand,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: playerWideOuterInset,
             ),
-            const SizedBox(height: 6),
-            const TransportBar.progressLine(
-              key: ValueKey('player-phone-landscape-progress'),
-            ),
-            const SizedBox(height: 2),
-            // One centred group on a shared pitch: the action segments
-            // and the transport cluster use the same button series, so
-            // the row no longer reads as three split clusters.
-            const Row(
-              key: ValueKey('player-phone-landscape-controls'),
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Row(
               children: [
-                PlayerActionRow.leading(),
-                SizedBox(width: playerLandscapeControlGap),
-                TransportBar.controlsRow(),
-                SizedBox(width: playerLandscapeControlGap),
-                PlayerActionRow.trailing(),
+                Expanded(
+                  flex: 10,
+                  child: KeyedSubtree(
+                    key: const ValueKey('player-phone-landscape-album'),
+                    child: AlbumPage(
+                      wide: true,
+                      // The cover scales with the screen instead of
+                      // filling its area: half the short side, the
+                      // same proportion on phones and desktops.
+                      wideCoverCap: mediaSize.shortestSide * 0.5,
+                      wideMinCoverSize: 80,
+                      wideShowMetadata: false,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: playerWideColumnGap),
+                Expanded(
+                  flex: 11,
+                  child: KeyedSubtree(
+                    key: const ValueKey('player-phone-landscape-lyrics'),
+                    child: LyricsPanel(
+                      edgeFadeExtent: 10,
+                      scrollAnchor: 0.5,
+                      lineVerticalPadding: 4,
+                      listPadding: const EdgeInsets.fromLTRB(
+                        0,
+                        playerLandscapeChromeHeight + 12,
+                        0,
+                        playerLandscapeBottomInset +
+                            playerLandscapeBottomStackHeight +
+                            12,
+                      ),
+                      alignMode: landscapeLyricAlignMode,
+                    ),
+                  ),
+                ),
               ],
             ),
-          ],
-        ),
+          ),
+          // One centred group on a shared pitch: the action segments
+          // and the transport cluster use the same button series, so
+          // the row no longer reads as three split clusters.
+          const Positioned(
+            left: playerWideOuterInset,
+            right: playerWideOuterInset,
+            bottom: playerLandscapeBottomInset,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TransportBar.progressLine(
+                  key: ValueKey('player-phone-landscape-progress'),
+                ),
+                SizedBox(height: 2),
+                Row(
+                  key: ValueKey('player-phone-landscape-controls'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    PlayerActionRow.leading(),
+                    SizedBox(width: playerLandscapeControlGap),
+                    TransportBar.controlsRow(),
+                    SizedBox(width: playerLandscapeControlGap),
+                    PlayerActionRow.trailing(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       );
     }
 

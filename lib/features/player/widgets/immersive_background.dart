@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -75,12 +77,28 @@ class ImmersiveBackground extends ConsumerWidget {
         (coverUrl != null && coverUrl.isNotEmpty);
     final showIntegratedArtwork =
         squareCoverEnabled && !isLandscape && hasCoverArtwork;
+    // Portrait disc mode: the backdrop is the cover itself, blurred
+    // full-bleed, so the disc floats on its own artwork's tones instead
+    // of the flowing light's flat field — the pale top edge of a rotated
+    // cover no longer steps against an unrelated flat colour at the
+    // disc's top rim. The flowing light retires in this mode only;
+    // without a cover the page falls back to it as before.
+    final showDiscBlurBackdrop =
+        !squareCoverEnabled && !isLandscape && hasCoverArtwork;
     return Stack(
       fit: StackFit.expand,
       children: [
         ColoredBox(color: baseSurface),
         if (ktvModeEnabled && isLandscape)
           const KtvBackground()
+        else if (showDiscBlurBackdrop)
+          _DiscBlurBackdropLayer(
+            key: const ValueKey('player-disc-blur-backdrop'),
+            transitionKey: cover.id ?? coverUrl ?? '',
+            url: coverUrl,
+            bytes: cover.bytes,
+            veilColor: baseSurface,
+          )
         else
           TrackChangeSwitcher(
             // Keyed on whether there is a cover at all, not on which cover. Track
@@ -138,7 +156,7 @@ class ImmersiveBackground extends ConsumerWidget {
 /// page so only the cover's colour ambience remains there.
 ///
 /// The image loads through the same provider the disc's cover resolves —
-/// the raw memory/network source decoded at 480px — so it is exactly as
+/// the raw memory/network source decoded at 800px — so it is exactly as
 /// sharp as the disc and appears whenever the track carries a cover,
 /// independent of the backdrop's downsampled provider and of the
 /// chrome-luminance byte resolution.
@@ -156,29 +174,9 @@ class _IntegratedArtworkLayer extends StatelessWidget {
   final ValueListenable<double>? compactPageProgress;
 
   /// The disc's cover source at the disc's decode size: memory bytes
-  /// first, then the network cover, both resized to 480px on resolve.
-  ImageProvider<Object>? get _imageProvider {
-    final coverBytes = bytes;
-    if (coverBytes != null && coverBytes.isNotEmpty) {
-      return ResizeImage(
-        MemoryImage(coverBytes),
-        width: 480,
-        height: 480,
-      );
-    }
-    final coverUrl = url;
-    if (coverUrl != null && coverUrl.isNotEmpty) {
-      return ResizeImage(
-        CachedNetworkImageProvider(
-          coverUrl,
-          headers: CoverImageSource.headersFor(coverUrl),
-        ),
-        width: 480,
-        height: 480,
-      );
-    }
-    return null;
-  }
+  /// first, then the network cover, both resized to 800px on resolve.
+  ImageProvider<Object>? get _imageProvider =>
+      _playerCoverImageProvider(bytes: bytes, url: url);
 
   @override
   Widget build(BuildContext context) {
@@ -196,13 +194,12 @@ class _IntegratedArtworkLayer extends StatelessWidget {
           colors: [
             Colors.white,
             Colors.white,
-            Colors.white.withValues(alpha: 0.55),
-            Colors.white.withValues(alpha: 0.16),
+            Colors.white.withValues(alpha: 0.30),
             Colors.transparent,
           ],
-          // Recalibrated for the square box: fully opaque over the top
-          // 45%, then the same long eased dissolve to the box's bottom.
-          stops: const [0.0, 0.45, 0.67, 0.86, 1.0],
+          // Fully opaque over the top 82%, then a short dissolve over
+          // the remaining stretch to the box's bottom.
+          stops: const [0.0, 0.82, 0.95, 1.0],
         ).createShader(rect),
         child: imageProvider == null
             ? const SizedBox.expand()
@@ -239,5 +236,107 @@ class _IntegratedArtworkLayer extends StatelessWidget {
       );
     }
     return artwork;
+  }
+}
+
+/// The track cover as a full-screen backdrop source, shared by the
+/// integrated artwork layer and the disc-mode blur backdrop: memory
+/// bytes first, then the network cover, both decoded at 800px — the
+/// same resolve the disc itself uses, so every surface drawn from it
+/// stays exactly as sharp as the disc.
+ImageProvider<Object>? _playerCoverImageProvider({
+  required Uint8List? bytes,
+  required String? url,
+}) {
+  if (bytes != null && bytes.isNotEmpty) {
+    return ResizeImage(MemoryImage(bytes), width: 800, height: 800);
+  }
+  if (url != null && url.isNotEmpty) {
+    return ResizeImage(
+      CachedNetworkImageProvider(
+        url,
+        headers: CoverImageSource.headersFor(url),
+      ),
+      width: 800,
+      height: 800,
+    );
+  }
+  return null;
+}
+
+/// Portrait disc mode's backdrop: the current cover, Gaussian-blurred
+/// across the whole screen (Panghu-style), under a veil of the player's
+/// own surface colour. The disc keeps its sharp 800px artwork and its
+/// contact shadow; only the field behind it changes — from the flowing
+/// light's flat composite to the cover's own tones, so the disc's pale
+/// top rim no longer meets an unrelated flat field along a visible
+/// step. One backdrop serves both pager pages, exactly like the square
+/// mode's ambience continuation.
+class _DiscBlurBackdropLayer extends StatelessWidget {
+  const _DiscBlurBackdropLayer({
+    super.key,
+    required this.transitionKey,
+    required this.url,
+    required this.bytes,
+    required this.veilColor,
+  });
+
+  final Object transitionKey;
+  final String? url;
+  final Uint8List? bytes;
+
+  /// The player surface colour, veiled over the blur so the backdrop
+  /// keeps the player's established light/dark feel and the foreground
+  /// chrome stays on the palette it was tuned against.
+  final Color veilColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageProvider = _playerCoverImageProvider(bytes: bytes, url: url);
+    return TrackChangeSwitcher(
+      transitionKey: transitionKey,
+      incomingOffset: Offset.zero,
+      duration: const Duration(milliseconds: 500),
+      expand: true,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (imageProvider != null)
+            ImageFiltered(
+              // Sigma 50 (logical px) at the cover's 800px decode fully
+              // dissolves artwork detail into a smooth tonal field at
+              // any phone size while keeping the cover's own colour
+              // geography, so the field above the disc is the cover's
+              // top region itself, only softened.
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: 50,
+                sigmaY: 50,
+                tileMode: TileMode.clamp,
+              ),
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.cover,
+                // Keep the current cover on screen while a replacement
+                // resolves, so provider churn never blanks the backdrop.
+                gaplessPlayback: true,
+                // Transparent until the first frame arrives, then fade
+                // in; a failed load stays silently transparent.
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded) return child;
+                  return AnimatedOpacity(
+                    opacity: frame == null ? 0 : 1,
+                    duration: const Duration(milliseconds: 500),
+                    curve: const Cubic(0.4, 0, 0.2, 1),
+                    child: child,
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.expand(),
+              ),
+            ),
+          ColoredBox(color: veilColor.withValues(alpha: 0.45)),
+        ],
+      ),
+    );
   }
 }

@@ -1030,7 +1030,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('large landscape player uses the A2 split layout', (
+  testWidgets('large landscape player uses the floating split layout', (
     tester,
   ) async {
     await _pumpPlayer(
@@ -1054,8 +1054,8 @@ void main() {
     );
 
     // Landscape no longer has a separate wide layout: every landscape
-    // size uses the A2 split (cover left, lyrics right, unified bottom
-    // transport).
+    // size uses the floating split (cover left, lyrics right, unified
+    // bottom transport floating over the same plane).
     expect(
       find.byKey(const ValueKey('player-phone-landscape-layout')),
       findsOneWidget,
@@ -1067,6 +1067,13 @@ void main() {
     expect(find.byType(LyricsPanel), findsOneWidget);
     expect(find.byKey(const ValueKey('player-mini-lyrics')), findsNothing);
     expect(find.byKey(const ValueKey('player-action-volume')), findsOneWidget);
+    // The cover is sized by proportion, not by its area: half the
+    // 600dp short side.
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    expect(coverRect.width, closeTo(300, 0.6));
+    expect(coverRect.height, closeTo(300, 0.6));
     expect(tester.takeException(), isNull);
   });
 
@@ -1110,10 +1117,10 @@ void main() {
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
 
-    // The bottom stack is merged into two lines: a slim progress line
-    // pressed down against the body, then one control row holding all
-    // ten buttons as a single centred group. There is no standalone
-    // full-width action row in this layout.
+    // The bottom stack floats over the plane: a slim progress line,
+    // then one control row holding all ten buttons as a single
+    // centred group. There is no standalone full-width action row in
+    // this layout.
     expect(find.byType(PlayerActionRow), findsNWidgets(2));
     for (final key in [
       'player-action-lyric-settings',
@@ -1133,10 +1140,18 @@ void main() {
     final layoutRect = tester.getRect(
       find.byKey(const ValueKey('player-phone-landscape-layout')),
     );
-    // The progress line sits right below the body (6dp gap) and above
-    // the control row; the whole merged stack is far slimmer than the
-    // old action row + transport bar combination.
-    expect(progressRect.top - albumRect.bottom, closeTo(6, 1));
+    final lyricsRect = tester.getRect(
+      find.byKey(const ValueKey('player-phone-landscape-lyrics')),
+    );
+    // Single plane: the album and lyrics areas span the layout's full
+    // height (the top chrome floats over them instead of taking a band
+    // of its own), and the merged bottom stack floats over the same
+    // plane, far slimmer than the old action row + transport bar
+    // combination.
+    expect(albumRect.top, closeTo(layoutRect.top, 0.5));
+    expect(albumRect.bottom, closeTo(layoutRect.bottom, 0.5));
+    expect(lyricsRect.top, closeTo(layoutRect.top, 0.5));
+    expect(lyricsRect.bottom, closeTo(layoutRect.bottom, 0.5));
     expect(progressRect.bottom, lessThanOrEqualTo(controlsRect.top));
     expect(controlsRect.height - progressRect.height, greaterThan(0));
     expect(controlsRect.bottom - progressRect.top, lessThan(110));
@@ -1247,15 +1262,16 @@ void main() {
     expect(materialGlyph(playIcon), 56);
     expect(materialGlyph(playIcon), greaterThan(26));
 
-    // The cover fits its column completely at phone-landscape height:
-    // no part of it is scrolled or clipped out of the album area.
+    // The cover sits inside its full-height column: no part of it is
+    // scrolled or clipped out of the album area, and it is centred
+    // vertically over the full height.
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
-    // With the merged bottom stack the album area is 228dp tall here
-    // and the cover fills it: the side is the area height less the
-    // scroll view's 8dp top/bottom padding (228 - 16 = 212).
-    expect(coverRect.width, closeTo(212, 0.6));
-    expect(coverRect.height, closeTo(212, 0.6));
+    expect(coverRect.center.dy, closeTo(albumRect.center.dy, 0.6));
+    // The side follows the proportion rule — half the 412dp short
+    // side — not the album area's extent.
+    expect(coverRect.width, closeTo(206, 0.6));
+    expect(coverRect.height, closeTo(206, 0.6));
     // The album-name line is not rendered in this layout.
     expect(find.text('横屏专辑'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -1290,16 +1306,16 @@ void main() {
     );
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
-    // Square covers follow the same fill rule as the disc in this
-    // layout: the side is the album area height less 16 (212 here),
-    // with no extra square scale on top.
-    expect(coverRect.width, closeTo(212, 0.6));
-    expect(coverRect.height, closeTo(212, 0.6));
+    // Square covers follow the same proportion rule as the disc in
+    // this layout: half the 412dp short side (206 here), with no
+    // extra square scale on top.
+    expect(coverRect.width, closeTo(206, 0.6));
+    expect(coverRect.height, closeTo(206, 0.6));
     expect(find.text('横屏方专辑'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('phone landscape cover fills the album area on large screens', (
+  testWidgets('phone landscape cover follows the proportion on large screens', (
     tester,
   ) async {
     await _pumpPlayer(
@@ -1328,22 +1344,48 @@ void main() {
     final coverRect = tester.getRect(
       find.byKey(const ValueKey('player-cover-toggle-button')),
     );
-    // The cover fills the album area by the same rule as on phones:
-    // the side is the area's smaller extent less 16, and nothing is
-    // scrolled or clipped out of the album area. Here the album area
-    // is 567.6 x 616, so the width caps the side at 551.6.
-    final expectedSide =
-        (albumRect.width < albumRect.height
-            ? albumRect.width
-            : albumRect.height) -
-        16;
-    expect(expectedSide, closeTo(551.6, 0.6));
-    expect(coverRect.width, closeTo(expectedSide, 0.6));
-    expect(coverRect.height, closeTo(expectedSide, 0.6));
+    // The cover follows the same proportion rule as on phones: half
+    // the 800dp short side (400), even though the album area could
+    // fit far more. Nothing is scrolled or clipped out of the album
+    // area.
+    expect(coverRect.width, closeTo(400, 0.6));
+    expect(coverRect.height, closeTo(400, 0.6));
     expect(coverRect.left, greaterThanOrEqualTo(albumRect.left - 0.5));
     expect(coverRect.right, lessThanOrEqualTo(albumRect.right + 0.5));
     expect(coverRect.top, greaterThanOrEqualTo(albumRect.top - 0.5));
     expect(coverRect.bottom, lessThanOrEqualTo(albumRect.bottom + 0.5));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('desktop landscape cover follows the same proportion', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(1500, 844),
+      track: const PlayerTrack(
+        id: 'wy:phone-landscape-desktop-song',
+        kind: PlayerTrackKind.remote,
+        title: '桌面横屏歌曲',
+        artist: '桌面横屏歌手',
+        album: '桌面横屏专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/phone-landscape-desktop.flac',
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsOneWidget,
+    );
+    final coverRect = tester.getRect(
+      find.byKey(const ValueKey('player-cover-toggle-button')),
+    );
+    // Half the 844dp short side: the proportion, not the area,
+    // decides at desktop sizes too.
+    expect(coverRect.width, closeTo(422, 0.6));
+    expect(coverRect.height, closeTo(422, 0.6));
     expect(tester.takeException(), isNull);
   });
 
@@ -1489,7 +1531,7 @@ void main() {
     expect(artworkRect.height, closeTo(390, 0.5));
 
     // The artwork loads through the disc's own image path: the raw
-    // memory source decoded at 480px, not the backdrop's 192px
+    // memory source decoded at 800px, not the backdrop's 192px
     // downsample, so it renders as sharp as the disc's cover.
     final artworkImages = tester.widgetList<Image>(
       find.descendant(of: artwork, matching: find.byType(Image)),
@@ -1499,8 +1541,8 @@ void main() {
       final provider = image.image;
       expect(provider, isA<ResizeImage>());
       final resize = provider as ResizeImage;
-      expect(resize.width, 480);
-      expect(resize.height, 480);
+      expect(resize.width, 800);
+      expect(resize.height, 800);
       expect(resize.imageProvider, isA<MemoryImage>());
     }
 
@@ -1623,6 +1665,141 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'portrait round cover with artwork uses the blurred cover backdrop',
+    (tester) async {
+      final coverBytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+      );
+      await _pumpPlayer(
+        tester,
+        size: const Size(390, 844),
+        track: PlayerTrack(
+          id: 'wy:round-blur-backdrop-song',
+          kind: PlayerTrackKind.remote,
+          title: '圆盘模糊背景歌曲',
+          artist: '圆盘模糊背景歌手',
+          album: '圆盘模糊背景专辑',
+          sourceLabel: '网易',
+          qualityLabel: '无损',
+          remoteUrl: 'https://audio.example/round-blur-backdrop.flac',
+          coverBytes: coverBytes,
+        ),
+      );
+
+      // The backdrop is the cover itself, blurred full-screen: the
+      // flowing light retires in portrait disc mode when a cover
+      // exists, and no integrated artwork layer appears (that is the
+      // square mode's treatment).
+      final backdrop = find.byKey(
+        const ValueKey('player-disc-blur-backdrop'),
+      );
+      expect(backdrop, findsOneWidget);
+      final backdropRect = tester.getRect(backdrop);
+      expect(backdropRect.left, closeTo(0, 0.5));
+      expect(backdropRect.top, closeTo(0, 0.5));
+      expect(backdropRect.width, closeTo(390, 0.5));
+      expect(backdropRect.height, closeTo(844, 0.5));
+      expect(
+        find.byKey(const ValueKey('flowing-light-background')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('player-integrated-bg-artwork')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: backdrop, matching: find.byType(ImageFiltered)),
+        findsOneWidget,
+      );
+      // The backdrop resolves through the same 800px cover path as the
+      // disc itself.
+      final backdropImages = tester.widgetList<Image>(
+        find.descendant(of: backdrop, matching: find.byType(Image)),
+      );
+      expect(backdropImages, isNotEmpty);
+      for (final image in backdropImages) {
+        final provider = image.image;
+        expect(provider, isA<ResizeImage>());
+        final resize = provider as ResizeImage;
+        expect(resize.width, 800);
+        expect(resize.height, 800);
+        expect(resize.imageProvider, isA<MemoryImage>());
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('portrait square cover keeps the integrated artwork and '
+      'has no blurred disc backdrop', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'square_album_cover_enabled': true,
+    });
+    final coverBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+    );
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: PlayerTrack(
+        id: 'wy:square-no-blur-backdrop-song',
+        kind: PlayerTrackKind.remote,
+        title: '方形无模糊背景歌曲',
+        artist: '方形无模糊背景歌手',
+        album: '方形无模糊背景专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/square-no-blur-backdrop.flac',
+        coverBytes: coverBytes,
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('player-disc-blur-backdrop')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('player-integrated-bg-artwork')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('landscape round cover has no blurred disc backdrop', (
+    tester,
+  ) async {
+    final coverBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoKZCGxTstUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBLzDAagJHFpD83wAAAABJRU5ErkJggg==',
+    );
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: PlayerTrack(
+        id: 'wy:landscape-no-blur-backdrop-song',
+        kind: PlayerTrackKind.remote,
+        title: '横屏无模糊背景歌曲',
+        artist: '横屏无模糊背景歌手',
+        album: '横屏无模糊背景专辑',
+        sourceLabel: '网易',
+        qualityLabel: '无损',
+        remoteUrl: 'https://audio.example/landscape-no-blur-backdrop.flac',
+        coverBytes: coverBytes,
+      ),
+    );
+
+    // The blurred cover backdrop is a portrait-disc-only treatment;
+    // landscape keeps its existing background.
+    expect(
+      find.byKey(const ValueKey('player-disc-blur-backdrop')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('player-phone-landscape-layout')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('portrait round backdrop fills the whole screen, status bar '
       'included, while the chrome keeps its safe-area offset', (tester) async {
     // Simulate a device status bar: the UI chrome must respect the
@@ -1654,11 +1831,18 @@ void main() {
     );
     expect(backdropRect.top, closeTo(0, 0.5));
     expect(backdropRect.height, closeTo(844, 0.5));
-    final flowingRect = tester.getRect(
+    // The track carries a cover, so the backdrop is the blurred cover
+    // layer — and it too reaches the top of the screen; the flowing
+    // light no longer renders in this mode.
+    expect(
       find.byKey(const ValueKey('flowing-light-background')),
+      findsNothing,
     );
-    expect(flowingRect.top, closeTo(0, 0.5));
-    expect(flowingRect.height, closeTo(844, 0.5));
+    final blurRect = tester.getRect(
+      find.byKey(const ValueKey('player-disc-blur-backdrop')),
+    );
+    expect(blurRect.top, closeTo(0, 0.5));
+    expect(blurRect.height, closeTo(844, 0.5));
     // The chrome itself still starts below the status bar.
     final chromeRect = tester.getRect(find.byType(TopChromeRow));
     expect(chromeRect.top, closeTo(100, 0.5));

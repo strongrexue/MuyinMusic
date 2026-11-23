@@ -770,19 +770,14 @@ void main() {
     controller.seedLyricsTrack();
     await tester.pump();
 
+    // The seeded track carries a cover, so portrait disc mode's
+    // backdrop is the blurred cover layer; the flowing light no longer
+    // renders behind it.
     expect(
-      tester
-          .widget<FlowingLightBackground>(find.byType(FlowingLightBackground))
-          .brightness,
-      Brightness.dark,
+      find.byKey(const ValueKey('player-disc-blur-backdrop')),
+      findsOneWidget,
     );
-    expect(
-      find.descendant(
-        of: find.byType(FlowingLightBackground),
-        matching: find.byType(Transform),
-      ),
-      findsNothing,
-    );
+    expect(find.byType(FlowingLightBackground), findsNothing);
     final topMoreIcon = find.descendant(
       of: find.byTooltip('更多'),
       matching: find.byIcon(Icons.more_horiz_rounded),

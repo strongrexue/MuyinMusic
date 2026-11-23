@@ -18,3 +18,16 @@ const double playerLandscapeControlGap = playerLandscapeControlPitch - 48;
 /// Gap between the 72dp play button and a neighbouring 48dp button on
 /// the landscape pitch.
 const double playerLandscapeControlPlayGap = playerLandscapeControlPitch - 60;
+
+/// Height of the top chrome row floating over the landscape layout:
+/// its own 8dp top and 4dp bottom insets around the 36dp row. The
+/// lyrics list clears this much at the top so its first lines never
+/// slide under the chrome.
+const double playerLandscapeChromeHeight = 48;
+
+/// Height of the bottom stack floating over the landscape layout: the
+/// 24dp progress line, the 2dp gap and the 72dp control row.
+const double playerLandscapeBottomStackHeight = 98;
+
+/// Offset of the floating bottom stack from the screen's bottom edge.
+const double playerLandscapeBottomInset = 12;

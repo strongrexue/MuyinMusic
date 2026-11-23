@@ -876,6 +876,14 @@ class _AppShellState extends ConsumerState<AppShell>
     final square = ref.watch(
       settingsProvider.select((s) => s.squareAlbumCoverEnabled),
     );
+    // Portrait square mode has no shared cover flight: the page's own
+    // integrated background artwork (a full-width square at the top of the
+    // screen) is the destination surface, while the flight targets the
+    // cover hot-zone rect, so both covers would be on screen at once
+    // during the reveal. The page slide/fade carries the transition.
+    final suppressFlight =
+        square &&
+        MediaQuery.orientationOf(context) == Orientation.portrait;
     final track = ref.watch(playerControllerProvider.select((s) => s.track));
     final scheme = Theme.of(context).colorScheme;
     // Paint above the returning capsule background. This overlay never owns
@@ -907,7 +915,8 @@ class _AppShellState extends ConsumerState<AppShell>
             builder: (context, child) {
               final flight = track == null ? null : _transition.coverRect;
               final destination = _transition.fullCover;
-              final visible = flight != null && destination != null;
+              final visible =
+                  flight != null && destination != null && !suppressFlight;
               final artworkRect = destination ?? Rect.zero;
               return Stack(
                 children: [
