@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/ui/app_breakpoints.dart';
 import '../../../core/ui/container_transform.dart';
 import '../../../core/ui/widgets/spring_artwork_hero.dart';
 import 'immersive_playlist_chrome.dart';
 
+/// 详情页分栏的页面级宽度阈值：低于全局 expanded 断点（840），让逻辑宽
+/// 约 780–820 的手机横屏也能分栏；仅作用于歌单/排行榜详情页。
+const double playlistDetailWideMinWidth = 768;
+
 /// Whether playlist and leaderboard details should use their split layout.
 ///
-/// Purely width driven: the split layout engages once the available width
-/// reaches the expanded breakpoint, regardless of orientation or any
-/// manual display preference.
+/// Purely width driven: the split layout engages once the window width
+/// reaches the page-level [playlistDetailWideMinWidth] threshold,
+/// regardless of orientation or any manual display preference.
 bool playlistDetailUsesWideLayout(BuildContext context) {
-  return AppBreakpoints.isExpanded(MediaQuery.sizeOf(context).width);
+  return MediaQuery.sizeOf(context).width >= playlistDetailWideMinWidth;
 }
 
 /// 宽屏分栏骨架：顶栏横跨顶部，下方 340dp 左列（歌单信息）+ 右列

@@ -276,16 +276,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('local detail stays compact at 839 wide', (tester) async {
-    await _useViewport(tester, const Size(839, 600));
+  testWidgets('local detail stays compact at 767 wide', (tester) async {
+    await _useViewport(tester, const Size(767, 600));
     await _pumpLocalDetail(tester, playlist: _localPlaylist());
     expect(find.byKey(_headerKey), findsOneWidget);
     expect(find.byKey(_wideLayoutKey), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('local detail splits at 840 wide', (tester) async {
-    await _useViewport(tester, const Size(840, 600));
+  testWidgets('local detail splits at 768 wide', (tester) async {
+    await _useViewport(tester, const Size(768, 600));
     await _pumpLocalDetail(tester, playlist: _localPlaylist());
     expect(find.byKey(_wideLayoutKey), findsOneWidget);
     expect(find.byKey(_headerKey), findsNothing);
@@ -343,15 +343,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('online detail boundary: 839 compact, 840 wide', (tester) async {
-    await _useViewport(tester, const Size(839, 600));
+  testWidgets('online detail boundary: 767 compact, 768 wide', (tester) async {
+    await _useViewport(tester, const Size(767, 600));
     await _pumpOnlineDetail(tester, api: _FakePlaylistApi());
     await tester.pumpAndSettle();
     expect(find.byKey(_headerKey), findsOneWidget);
     expect(find.byKey(_wideLayoutKey), findsNothing);
     expect(tester.takeException(), isNull);
 
-    await _useViewport(tester, const Size(840, 600));
+    await _useViewport(tester, const Size(768, 600));
+    await _pumpOnlineDetail(tester, api: _FakePlaylistApi());
+    await tester.pumpAndSettle();
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(find.byKey(_headerKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('local and online details split at 800x390 landscape', (
+    tester,
+  ) async {
+    await _useViewport(tester, const Size(800, 390));
+    await _pumpLocalDetail(tester, playlist: _localPlaylist());
+    expect(find.byKey(_wideLayoutKey), findsOneWidget);
+    expect(find.byKey(_headerKey), findsNothing);
+    expect(tester.takeException(), isNull);
+
     await _pumpOnlineDetail(tester, api: _FakePlaylistApi());
     await tester.pumpAndSettle();
     expect(find.byKey(_wideLayoutKey), findsOneWidget);
@@ -377,10 +393,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('leaderboard detail splits at 840 and shows ranks', (
+  testWidgets('leaderboard detail splits at 800 wide and shows ranks', (
     tester,
   ) async {
-    await _useViewport(tester, const Size(840, 600));
+    await _useViewport(tester, const Size(800, 390));
     await _pumpOnlineDetail(
       tester,
       api: _FakePlaylistApi(leaderboardTotal: 3),
