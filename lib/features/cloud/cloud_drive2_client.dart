@@ -113,6 +113,38 @@ CloudFileItem cloudFileItemFromProto(pb.CloudDriveFile file) {
   );
 }
 
+/// Outcome categories for a connection probe, so the settings page can
+/// tell the user *why* a test failed instead of a bare yes/no.
+enum CloudConnectionStatus { connected, unreachable, unauthorized, notReady }
+
+/// Result of probing a CloudDrive2 server from the settings page.
+class CloudConnectionResult {
+  const CloudConnectionResult({
+    required this.status,
+    this.userName,
+    this.isLogin = false,
+  });
+
+  final CloudConnectionStatus status;
+
+  /// Account name reported by the server (GetSystemInfo), when available.
+  final String? userName;
+  final bool isLogin;
+
+  bool get ok => status == CloudConnectionStatus.connected;
+
+  /// User-facing summary shown inline on the settings page.
+  String get message => switch (status) {
+    CloudConnectionStatus.connected =>
+      userName == null || userName!.isEmpty
+          ? '连接成功'
+          : '连接成功 · 账号 $userName',
+    CloudConnectionStatus.unreachable => '无法连接到服务器，请检查地址与网络',
+    CloudConnectionStatus.unauthorized => 'API 令牌无效或无访问权限',
+    CloudConnectionStatus.notReady => '服务器尚未就绪，请稍后再试',
+  };
+}
+
 /// The CloudDrive2 operations MuyinMusic depends on. Tests substitute a
 /// fake implementation; production uses [GrpcCloudDrive2Client].
 abstract interface class CloudDrive2Client {
@@ -126,6 +158,12 @@ abstract interface class CloudDrive2Client {
 
   /// Lightweight reachability probe for the settings page.
   Future<bool> checkConnection();
+
+  /// Full probe for the settings page's 测试连接 button: reachability and
+  /// readiness via GetSystemInfo, then token validity via an authorized
+  /// root listing (GetSystemInfo itself is a public, unauthenticated RPC,
+  /// so it cannot detect a bad token on its own).
+  Future<CloudConnectionResult> probeConnection();
 
   Future<void> close();
 }
@@ -208,16 +246,47 @@ class GrpcCloudDrive2Client implements CloudDrive2Client {
   }
 
   @override
-  Future<bool> checkConnection() async {
+  Future<bool> checkConnection() async => (await probeConnection()).ok;
+
+  @override
+  Future<CloudConnectionResult> probeConnection() async {
+    final pb.CloudDriveSystemInfo info;
     try {
-      final info = await _service.getSystemInfo(
+      info = await _service.getSystemInfo(
         pbempty.Empty(),
         options: _authOptions,
       );
-      return info.systemReady;
-    } catch (_) {
-      return false;
+    } catch (error) {
+      return CloudConnectionResult(status: _statusForError(error));
     }
+    if (!info.systemReady) {
+      return const CloudConnectionResult(
+        status: CloudConnectionStatus.notReady,
+      );
+    }
+    // GetSystemInfo needs no authorization; verify the token with an
+    // authorized call so a wrong token is reported as such.
+    try {
+      await listFiles('/');
+    } catch (error) {
+      return CloudConnectionResult(status: _statusForError(error));
+    }
+    return CloudConnectionResult(
+      status: CloudConnectionStatus.connected,
+      userName: info.userName.isEmpty ? null : info.userName,
+      isLogin: info.isLogin,
+    );
+  }
+
+  CloudConnectionStatus _statusForError(Object error) {
+    if (error is GrpcError) {
+      return switch (error.code) {
+        StatusCode.unauthenticated ||
+        StatusCode.permissionDenied => CloudConnectionStatus.unauthorized,
+        _ => CloudConnectionStatus.unreachable,
+      };
+    }
+    return CloudConnectionStatus.unreachable;
   }
 
   @override

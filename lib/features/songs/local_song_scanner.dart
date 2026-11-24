@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/services/app_logger.dart';
 import '../../core/services/embedded_audio_tags.dart';
 import '../../core/services/media_library.dart';
 import '../../core/services/permission_service.dart';
@@ -65,6 +68,7 @@ class LocalSongScanner {
     final result = LocalSongScanResult(
       Platform.isAndroid ? 'media' : 'filesystem',
     );
+    final zeroHitRoots = <String>{};
     var fallback = directories;
     if (Platform.isAndroid) {
       try {
@@ -89,16 +93,25 @@ class LocalSongScanner {
         // Broad access is an optional fallback for unindexed USB/legacy roots.
         // A healthy indexed root never triggers a second filesystem walk.
         final wide = await PermissionService.hasExternalStorageWrite();
-        fallback = directories
-            .where(
-              (root) =>
-                  isContentLocation(root) ||
-                  (wide &&
-                      !result.files.values.any(
-                        (file) => isFileInScanDirectory(file.path, root),
-                      )),
-            )
-            .toList();
+        final hitRoots = <String>{
+          for (final root in directories)
+            if (!isContentLocation(root) &&
+                result.files.values.any(
+                  (file) => isFileInScanDirectory(file.path, root),
+                ))
+              root,
+        };
+        zeroHitRoots.addAll(
+          directories.where(
+            (root) => !isContentLocation(root) && !hitRoots.contains(root),
+          ),
+        );
+        fallback = await mediaFallbackRoots(
+          directories,
+          hitRoots: hitRoots,
+          wide: wide,
+          directoryExists: (root) => Directory(root).exists(),
+        );
       } catch (error) {
         if (cancelled()) return result;
         if (!await PermissionService.hasExternalStorageWrite()) {
@@ -119,7 +132,10 @@ class LocalSongScanner {
       }
       try {
         if (isContentLocation(root)) {
-          throw const FileSystemException('请重新选择本地扫描文件夹');
+          // 调用方本应先把 content 根解析成本地路径或剔除（见
+          // LocalSongScanCache 的根准备）；走到这里直接跳过，不再让
+          // 单个授权文件夹把整个列表打成错误态。
+          continue;
         }
         final directory = Directory(root);
         if (!await directory.exists()) {
@@ -156,7 +172,43 @@ class LocalSongScanner {
         _preserve(result, previous, [root]);
       }
     }
+    // MediaStore 零命中的本地根留一条痕：下次实机复现时能直接区分
+    // 「未被系统索引、靠兜底扫出」与「兜底也没读到」。
+    for (final root in zeroHitRoots) {
+      final count = result.files.values
+          .where((file) => isFileInScanDirectory(file.path, root))
+          .length;
+      unawaited(
+        AppLogger.write(
+          'local-library',
+          'mediastore zero-hit root=$root fallbackFiles=$count',
+        ),
+      );
+    }
     return result;
+  }
+
+  /// MediaStore 查询后决定哪些根还要走文件系统枚举：content 根恒入选
+  /// （枚举循环里会跳过，保持既有语义）；本地根已有命中时不入选；
+  /// 零命中的本地根——有全盘权限（wide）时无条件入选，只授媒体权限时
+  /// 要求目录实际存在才入选，避免对已消失的目录反复报错。
+  @visibleForTesting
+  static Future<List<String>> mediaFallbackRoots(
+    List<String> directories, {
+    required Set<String> hitRoots,
+    required bool wide,
+    required Future<bool> Function(String root) directoryExists,
+  }) async {
+    final roots = <String>[];
+    for (final root in directories) {
+      if (isContentLocation(root)) {
+        roots.add(root);
+        continue;
+      }
+      if (hitRoots.contains(root)) continue;
+      if (wide || await directoryExists(root)) roots.add(root);
+    }
+    return roots;
   }
 
   static void _preserve(

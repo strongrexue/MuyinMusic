@@ -24,3 +24,19 @@ String cloudDrive2RemotePath(String virtualPath) {
   if (!isCloudSongPath(virtualPath)) return virtualPath;
   return virtualPath.substring(kCloudDrive2PathPrefix.length);
 }
+
+/// Maps the persisted music-root setting to the remote path enumeration
+/// starts from: an empty setting means the token root (`/`).
+String cloudScanRootPath(String musicRoot) {
+  final trimmed = musicRoot.trim();
+  return trimmed.isEmpty ? '/' : trimmed;
+}
+
+/// Display name for the persisted music root: the folder name, or
+/// 「全部文件」 when scanning starts at the token root.
+String cloudMusicRootLabel(String musicRoot) {
+  final trimmed = musicRoot.trim();
+  if (trimmed.isEmpty || trimmed == '/') return '全部文件';
+  return trimmed.split('/').where((part) => part.isNotEmpty).lastOrNull ??
+      '全部文件';
+}

@@ -27,14 +27,17 @@ class LocalSongScanCache extends ChangeNotifier {
   LocalSongScanCache({
     List<String> Function()? directories,
     List<String> Function()? ignoredPaths,
+    Future<String?> Function(String location)? contentRootResolver,
   }) : _directories = directories,
-       _ignoredPaths = ignoredPaths {
+       _ignoredPaths = ignoredPaths,
+       _contentRootResolver = contentRootResolver {
     _stopListening = LocalAudioLibraryEvents.listen(_handleFileChange);
   }
 
   static const _fileName = 'local_song_scan_v1.json';
   final List<String> Function()? _directories;
   final List<String> Function()? _ignoredPaths;
+  final Future<String?> Function(String location)? _contentRootResolver;
   late final void Function() _stopListening;
   final _mutations = <String, ({int revision, LocalSongFileSnapshot? file})>{};
   final _eventRevisions = <String, int>{};
@@ -115,9 +118,9 @@ class LocalSongScanCache extends ChangeNotifier {
     String? directory,
     List<String>? directories,
   }) async {
-    final selected = _scanRoots(directory, directories);
+    final selected = await _prepareScanRoots(directory, directories);
     await ensureLoaded();
-    if (_disposed) return;
+    if (_disposed || selected.isEmpty) return;
     final current = _snapshot;
     if (current != null &&
         current.initialized &&
@@ -136,9 +139,14 @@ class LocalSongScanCache extends ChangeNotifier {
   }
 
   Future<void> refresh({String? directory, List<String>? directories}) async {
-    final selected = _scanRoots(directory, directories);
+    final selected = await _prepareScanRoots(directory, directories);
     await ensureLoaded();
     if (_disposed) return;
+    if (selected.isEmpty) {
+      // 全部扫描根都是无法解析的授权文件夹：没有可扫的根，保留现有
+      // 索引不动，也不制造错误态。
+      return;
+    }
     final running = _scanFuture;
     if (running != null && listEquals(_scanDirectories, selected)) {
       return running;
@@ -153,6 +161,41 @@ class LocalSongScanCache extends ChangeNotifier {
     );
     _scanFuture = future;
     await future;
+  }
+
+  /// 扫描器只认本地路径，content 根（SAF 授权文件夹）必须先解析。
+  /// 所有稳态扫描入口都经过 [ensureScan]/[refresh]，在此一处统一准备：
+  /// content 根解析成功换成本地路径，失败（null）则剔除——不送进扫描
+  /// 器、不产生用户可见 error。返回空列表表示没有可扫的根。
+  Future<List<String>> _prepareScanRoots(
+    String? directory,
+    List<String>? directories,
+  ) async {
+    final normalized = _scanRoots(directory, directories);
+    if (!normalized.any(isContentLocation)) return normalized;
+    final resolve =
+        _contentRootResolver ??
+        ((String location) =>
+            SafStorage.resolveLocalPath(location, requireReadable: false));
+    final prepared = <String>{};
+    for (final root in normalized) {
+      if (!isContentLocation(root)) {
+        prepared.add(root);
+        continue;
+      }
+      final local = await resolve(root);
+      if (local != null && local.trim().isNotEmpty) {
+        prepared.add(normalizeStorageLocation(local));
+      } else {
+        unawaited(
+          AppLogger.write(
+            'local-library',
+            'scan root dropped, cannot resolve ${SafStorage.label(root)}',
+          ),
+        );
+      }
+    }
+    return List.unmodifiable(prepared);
   }
 
   Future<void> _scanDirectoryContents(
@@ -239,7 +282,11 @@ class LocalSongScanCache extends ChangeNotifier {
       await save(
         directories: directories,
         files: files.values.toList(),
-        error: errors.isEmpty ? null : '无法读取本地音乐文件夹：${errors.join('\n')}',
+        // 单根失败只进日志：只要本次扫描还有歌，列表就不进错误态；
+        // error 只在列表为空时保留，供空态页提示。
+        error: errors.isEmpty || files.isNotEmpty
+            ? null
+            : '无法读取本地音乐文件夹：${errors.join('\n')}',
         backend: result.backend,
       );
       _warmMetadata();

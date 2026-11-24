@@ -125,18 +125,20 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       await ref.read(settingsProvider.notifier).setLocalMusicDirs(directories);
     }
     // 下载目录是隐含扫描根：与扫描目录用同样的 URI 解析后并入扫描集合，
-    // 但不写回 local_music_dirs 持久化。
+    // 但不写回 local_music_dirs 持久化。解析失败（null）时不并入——把
+    // 原始 content URI 送进扫描根只会让扫描器报错，稳态扫描侧的根准备
+    // 也会做同样的剔除。
     final resolvedDownloadDir = isContentLocation(downloadDir)
         ? await SafStorage.resolveLocalPath(
-                downloadDir,
-                requireReadable: false,
-              ) ??
-              downloadDir
+            downloadDir,
+            requireReadable: false,
+          )
         : downloadDir;
     if (!mounted) return;
     final scanRoots = <String>{
       ...directories,
-      if (resolvedDownloadDir.trim().isNotEmpty)
+      if (resolvedDownloadDir != null &&
+          resolvedDownloadDir.trim().isNotEmpty)
         normalizeStorageLocation(resolvedDownloadDir),
     }.toList();
     await cache.ensureScan(directories: scanRoots);

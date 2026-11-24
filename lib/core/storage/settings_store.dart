@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/storage_location.dart';
 import '../services/saf_storage.dart';
+import '../services/storage_browser_service.dart';
 import '../api/dio_factory.dart';
 import '../models/enums.dart';
 import '../../theme/glass_settings.dart';
@@ -32,10 +33,13 @@ const String _kKtvBackgroundMigratedKey =
     'player_ktv_background_items_migrated_v1';
 const String _kLocalMusicDirKey = 'local_music_dir';
 const String _kLocalMusicDirsKey = 'local_music_dirs';
+const String _kIosBookmarkedDirsKey = 'ios_bookmarked_dirs';
 const String _kLocalMusicIgnoredPathsKey = 'local_music_ignored_paths';
+const String _kLocalMusicIgnoredRecordsKey = 'local_music_ignored_records';
 const String _kCloudDrive2EnabledKey = 'cloud_drive2_enabled';
 const String _kCloudDrive2ServerKey = 'cloud_drive2_server';
 const String _kCloudDrive2TokenKey = 'cloud_drive2_api_token';
+const String _kCloudDrive2MusicRootKey = 'cloud_drive2_music_root';
 const String _kUseBuiltInSourceFilePickerKey =
     'use_built_in_source_file_picker';
 const String _kThemeModeKey = 'theme_mode';
@@ -177,6 +181,81 @@ List<KtvBackgroundItem> _decodeKtvBackgroundItems(String? encoded) {
   }
 }
 
+/// 一条忽略记录的展示信息：忽略名单本体只存路径（扫描过滤消费），
+/// 已忽略页要靠这里的标题/歌手/位置才能辨认歌曲——MediaStore 条目的
+/// 路径是 content URI，末段只是数字 ID，靠路径本身无法展示。
+@immutable
+class IgnoredLocalSongRecord {
+  const IgnoredLocalSongRecord({
+    required this.path,
+    this.title = '',
+    this.singer = '',
+    this.location = '',
+  });
+
+  /// 与忽略名单一致的匹配路径（归一化后的存储位置）。
+  final String path;
+  final String title;
+  final String singer;
+
+  /// 可读位置：有本地文件路径时是完整路径，否则是文件名/显示名。
+  final String location;
+
+  Map<String, dynamic> toJson() => {
+    'path': path,
+    'title': title,
+    'singer': singer,
+    'location': location,
+  };
+
+  static IgnoredLocalSongRecord? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final path = value['path'];
+    if (path is! String || path.trim().isEmpty) return null;
+    String text(String key) {
+      final field = value[key];
+      return field is String ? field : '';
+    }
+
+    return IgnoredLocalSongRecord(
+      path: path,
+      title: text('title'),
+      singer: text('singer'),
+      location: text('location'),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is IgnoredLocalSongRecord &&
+      other.path == path &&
+      other.title == title &&
+      other.singer == singer &&
+      other.location == location;
+
+  @override
+  int get hashCode => Object.hash(path, title, singer, location);
+}
+
+List<IgnoredLocalSongRecord> _decodeIgnoredLocalSongRecords(String? encoded) {
+  if (encoded == null) return const [];
+  try {
+    final decoded = jsonDecode(encoded);
+    if (decoded is! List) return const [];
+    return List.unmodifiable(
+      decoded
+          .map(IgnoredLocalSongRecord.fromJson)
+          .whereType<IgnoredLocalSongRecord>(),
+    );
+  } catch (_) {
+    return const [];
+  }
+}
+
+String _encodeIgnoredLocalSongRecords(
+  List<IgnoredLocalSongRecord> records,
+) => jsonEncode([for (final record in records) record.toJson()]);
+
 /// 歌词对齐方式。竖屏歌词页与手机横屏歌词面板各用一份独立设置，
 /// 共用这组选项。
 enum LyricAlignMode {
@@ -208,9 +287,11 @@ class AppSettings {
     this.portraitBackgroundSelectedId,
     required this.localMusicDirs,
     this.ignoredLocalSongPaths = const [],
+    this.ignoredLocalSongRecords = const [],
     this.cloudDrive2Enabled = false,
     this.cloudDrive2Server = '',
     this.cloudDrive2Token = '',
+    this.cloudDrive2MusicRoot = '',
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
     required this.themeSeed,
@@ -302,11 +383,21 @@ class AppSettings {
   /// 路径键过滤，名单内文件不进本地库；本机设置，不参与跨设备同步。
   final List<String> ignoredLocalSongPaths;
 
+  /// 与 [ignoredLocalSongPaths] 平行的展示信息（标题/歌手/位置），
+  /// 供已忽略页辨认歌曲。旧版本写入的名单没有记录，对应条目为空缺，
+  /// 页面回退到按路径解析。扫描过滤不消费这份数据。
+  final List<IgnoredLocalSongRecord> ignoredLocalSongRecords;
+
   /// CloudDrive2 云端音乐开关与连接配置。未启用或未配置完整时云端源
   /// 完全不工作，行为与没有此功能一致。令牌仅用于 API 请求头。
   final bool cloudDrive2Enabled;
   final String cloudDrive2Server;
   final String cloudDrive2Token;
+
+  /// 云端扫描的根文件夹（CloudDrive2 远端路径，如 `/Music`）。空字符串
+  /// 表示从令牌根目录（`/`）枚举全部文件。在云端音乐页签里选择，
+  /// 设置页不提供入口。
+  final String cloudDrive2MusicRoot;
 
   /// 配置是否齐全（启用 + 地址可解析 + 令牌非空）的判断在 cloud 层做，
   /// 这里只存原始值。
@@ -391,9 +482,11 @@ class AppSettings {
     String? localMusicDir,
     List<String>? localMusicDirs,
     List<String>? ignoredLocalSongPaths,
+    List<IgnoredLocalSongRecord>? ignoredLocalSongRecords,
     bool? cloudDrive2Enabled,
     String? cloudDrive2Server,
     String? cloudDrive2Token,
+    String? cloudDrive2MusicRoot,
     bool? useBuiltInSourceFilePicker,
     ThemeMode? themeMode,
     Color? themeSeed,
@@ -452,9 +545,12 @@ class AppSettings {
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
     ignoredLocalSongPaths: ignoredLocalSongPaths ?? this.ignoredLocalSongPaths,
+    ignoredLocalSongRecords:
+        ignoredLocalSongRecords ?? this.ignoredLocalSongRecords,
     cloudDrive2Enabled: cloudDrive2Enabled ?? this.cloudDrive2Enabled,
     cloudDrive2Server: cloudDrive2Server ?? this.cloudDrive2Server,
     cloudDrive2Token: cloudDrive2Token ?? this.cloudDrive2Token,
+    cloudDrive2MusicRoot: cloudDrive2MusicRoot ?? this.cloudDrive2MusicRoot,
     useBuiltInSourceFilePicker:
         useBuiltInSourceFilePicker ?? this.useBuiltInSourceFilePicker,
     themeMode: themeMode ?? this.themeMode,
@@ -600,9 +696,14 @@ class SettingsNotifier extends Notifier<AppSettings> {
       ignoredLocalSongPaths: _normalizeIgnoredLocalSongPaths(
         _prefs.getStringList(_kLocalMusicIgnoredPathsKey) ?? const [],
       ),
+      ignoredLocalSongRecords: _decodeIgnoredLocalSongRecords(
+        _prefs.getString(_kLocalMusicIgnoredRecordsKey),
+      ),
       cloudDrive2Enabled: _prefs.getBool(_kCloudDrive2EnabledKey) ?? false,
       cloudDrive2Server: _prefs.getString(_kCloudDrive2ServerKey) ?? '',
       cloudDrive2Token: _prefs.getString(_kCloudDrive2TokenKey) ?? '',
+      cloudDrive2MusicRoot:
+          _prefs.getString(_kCloudDrive2MusicRootKey) ?? '',
       useBuiltInSourceFilePicker:
           _prefs.getBool(_kUseBuiltInSourceFilePickerKey) ?? false,
       themeMode: _decodeThemeMode(_prefs.getString(_kThemeModeKey)),
@@ -694,6 +795,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     // 扫到靠的是 AppSettings.scanDirectories 在消费侧并入隐含根。
     await _prefs.setString(_kDownloadDirKey, value);
     state = state.copyWith(downloadDir: value);
+    _trackIosBookmarkedDirs([value]);
   }
 
   Future<void> setDownloadFileNameFormat(DownloadFileNameFormat format) async {
@@ -725,11 +827,49 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
     await _persistLocalMusicDirs(directories);
     state = state.copyWith(localMusicDirs: directories);
+    _trackIosBookmarkedDirs(directories);
   }
 
   Future<void> _persistLocalMusicDirs(List<String> directories) async {
     await _prefs.setStringList(_kLocalMusicDirsKey, directories);
     await _prefs.setString(_kLocalMusicDirKey, directories.first);
+  }
+
+  /// iOS：把带 security-scoped bookmark 的容器路径记入豁免名单。
+  /// hasBookmark 是通道异步调用、build() 必须保持同步，靠这份落盘名单
+  /// 衔接：目录被设入设置时异步核对并更新名单，启动时
+  /// _migrateIosDirectories 同步读名单跳过这些路径的 UUID 刷新。
+  void _trackIosBookmarkedDirs(Iterable<String> paths) {
+    if (!Platform.isIOS) return;
+    final candidates = paths
+        .where((path) => path.contains('/Containers/Data/Application/'))
+        .toList();
+    if (candidates.isEmpty) return;
+    unawaited(() async {
+      try {
+        final stored = (_prefs.getStringList(_kIosBookmarkedDirsKey) ?? const [])
+            .toSet();
+        var changed = false;
+        for (final path in candidates) {
+          final hasBookmark = await const StorageBrowserService().hasBookmark(
+            path,
+          );
+          if (hasBookmark) {
+            if (stored.add(path)) changed = true;
+          } else if (stored.remove(path)) {
+            changed = true;
+          }
+        }
+        if (changed) {
+          await _prefs.setStringList(
+            _kIosBookmarkedDirsKey,
+            stored.toList(),
+          );
+        }
+      } catch (_) {
+        // 豁免名单只是防误重置的辅助记录，查询失败不影响设置本身。
+      }
+    }());
   }
 
   static List<String> _normalizeLocalMusicDirs(
@@ -775,6 +915,61 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(ignoredLocalSongPaths: merged);
   }
 
+  /// 与 [ignoreLocalSongPaths] 相同，但同时带上展示信息（标题/歌手/
+  /// 位置），供已忽略页辨认歌曲。路径集合的语义与合并规则不变。
+  Future<void> ignoreLocalSongs(
+    Iterable<IgnoredLocalSongRecord> records,
+  ) async {
+    final incoming = <String, IgnoredLocalSongRecord>{};
+    for (final record in records) {
+      final trimmed = record.path.trim();
+      if (trimmed.isEmpty) continue;
+      final path = normalizeStorageLocation(trimmed);
+      incoming[path] = IgnoredLocalSongRecord(
+        path: path,
+        title: record.title.trim(),
+        singer: record.singer.trim(),
+        location: record.location.trim(),
+      );
+    }
+    if (incoming.isEmpty) return;
+    final mergedPaths = _normalizeIgnoredLocalSongPaths([
+      ...state.ignoredLocalSongPaths,
+      ...incoming.keys,
+    ]);
+    final mergedRecords = <String, IgnoredLocalSongRecord>{
+      for (final record in state.ignoredLocalSongRecords)
+        record.path: record,
+      ...incoming,
+    };
+    final nextRecords = List<IgnoredLocalSongRecord>.unmodifiable([
+      for (final path in mergedPaths)
+        if (mergedRecords.containsKey(path)) mergedRecords[path]!,
+    ]);
+    final pathsChanged =
+        mergedPaths.length != state.ignoredLocalSongPaths.length;
+    final recordsChanged =
+        nextRecords.length != state.ignoredLocalSongRecords.length ||
+        nextRecords.any(
+          (record) =>
+              !state.ignoredLocalSongRecords.contains(record),
+        );
+    if (!pathsChanged && !recordsChanged) return;
+    if (pathsChanged) {
+      await _prefs.setStringList(_kLocalMusicIgnoredPathsKey, mergedPaths);
+    }
+    if (recordsChanged) {
+      await _prefs.setString(
+        _kLocalMusicIgnoredRecordsKey,
+        _encodeIgnoredLocalSongRecords(nextRecords),
+      );
+    }
+    state = state.copyWith(
+      ignoredLocalSongPaths: mergedPaths,
+      ignoredLocalSongRecords: nextRecords,
+    );
+  }
+
   /// 把歌曲移出忽略名单；调用方随后触发重扫，歌曲才回到本地列表。
   Future<void> unignoreLocalSongPaths(Iterable<String> paths) async {
     final removed = {
@@ -787,8 +982,20 @@ class SettingsNotifier extends Notifier<AppSettings> {
         .toList();
     if (remaining.length == state.ignoredLocalSongPaths.length) return;
     await _prefs.setStringList(_kLocalMusicIgnoredPathsKey, remaining);
+    final remainingRecords = List<IgnoredLocalSongRecord>.unmodifiable(
+      state.ignoredLocalSongRecords.where(
+        (record) => !removed.contains(record.path),
+      ),
+    );
+    if (remainingRecords.length != state.ignoredLocalSongRecords.length) {
+      await _prefs.setString(
+        _kLocalMusicIgnoredRecordsKey,
+        _encodeIgnoredLocalSongRecords(remainingRecords),
+      );
+    }
     state = state.copyWith(
       ignoredLocalSongPaths: List.unmodifiable(remaining),
+      ignoredLocalSongRecords: remainingRecords,
     );
   }
 
@@ -807,6 +1014,21 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final trimmed = value.trim();
     await _prefs.setString(_kCloudDrive2TokenKey, trimmed);
     state = state.copyWith(cloudDrive2Token: trimmed);
+  }
+
+  /// 保存云端扫描根文件夹。归一化：去掉首尾空白与尾部斜杠、补齐起始
+  /// 斜杠；根目录（`/` 或空）统一存空字符串。
+  Future<void> setCloudDrive2MusicRoot(String value) async {
+    var normalized = value.trim();
+    while (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    if (normalized == '/') normalized = '';
+    if (normalized.isNotEmpty && !normalized.startsWith('/')) {
+      normalized = '/$normalized';
+    }
+    await _prefs.setString(_kCloudDrive2MusicRootKey, normalized);
+    state = state.copyWith(cloudDrive2MusicRoot: normalized);
   }
 
   Future<void> setUseBuiltInSourceFilePicker(bool value) async {
@@ -1627,6 +1849,22 @@ Set<MusicSource> _migrateQsSearchSource(
   return merged;
 }
 
+/// iOS app 容器路径是否已过期：指向的容器 UUID 与当前 App 容器不一致
+/// 即过期。但带 security-scoped bookmark 的路径是用户经系统选择器正当
+/// 选入的外部目录（如其它 App 的文件夹），不算过期、不得重置。
+bool isStaleIosContainerPath(
+  String value, {
+  required String currentUuid,
+  Set<String> bookmarkedPaths = const {},
+}) {
+  if (currentUuid.isEmpty) return false;
+  if (bookmarkedPaths.contains(value)) return false;
+  const marker = '/Containers/Data/Application/';
+  final i = value.indexOf(marker);
+  if (i < 0) return false;
+  return value.substring(i + marker.length).split('/').first != currentUuid;
+}
+
 /// iOS 存量目录迁移结果：build() 同步使用这些内存值，prefs 异步落盘。
 class _IosDirectories {
   const _IosDirectories({required this.downloadDir, required this.scanDir});
@@ -1651,18 +1889,21 @@ _IosDirectories _migrateIosDirectories(
   // 若仍指向旧 UUID：下载落到新容器、扫描却盯旧路径，saved 事件的 owner
   // 归属判断失败被静默丢弃，表现为「下载成功但扫描不到」。
   // 每次启动校验：只刷新落在沙盒容器内但 UUID 已过期的路径；用户手动选的
-  // 外部目录（不含此标记）原样保留。
+  // 外部目录原样保留——不含此标记的天然保留，含此标记但带 bookmark 的
+  // （选了其它 App 的文件夹）靠豁免名单保留（见 isStaleIosContainerPath）。
   const marker = '/Containers/Data/Application/';
   final idx = defaultScanDir.indexOf(marker);
   final currentUuid = idx < 0
       ? ''
       : defaultScanDir.substring(idx + marker.length).split('/').first;
-  bool stale(String value) {
-    if (currentUuid.isEmpty) return false;
-    final i = value.indexOf(marker);
-    if (i < 0) return false;
-    return value.substring(i + marker.length).split('/').first != currentUuid;
-  }
+  // 带 bookmark 的外部容器路径是用户正当选入的目录，不参与 UUID 刷新。
+  final bookmarkedPaths =
+      (prefs.getStringList(_kIosBookmarkedDirsKey) ?? const []).toSet();
+  bool stale(String value) => isStaleIosContainerPath(
+    value,
+    currentUuid: currentUuid,
+    bookmarkedPaths: bookmarkedPaths,
+  );
 
   if (Platform.isIOS) {
     if (downloadDir != null && stale(downloadDir)) {

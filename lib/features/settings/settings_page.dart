@@ -355,6 +355,16 @@ class SettingsPage extends ConsumerWidget {
                                 trailing: Symbols.chevron_right,
                                 destination: '/settings/webdav',
                               ),
+                              SettingsAction(
+                                key: const ValueKey('cloud-drive2-setting'),
+                                icon: Icons.cloud_outlined,
+                                title: 'CloudDrive2 云端音乐',
+                                value: settings.cloudDrive2Configured
+                                    ? '已配置'
+                                    : '未配置',
+                                trailing: Symbols.chevron_right,
+                                destination: '/settings/cloud-drive2',
+                              ),
                             ],
                           ),
                         if (section == SettingsSection.downloads)
@@ -507,82 +517,6 @@ class SettingsPage extends ConsumerWidget {
                                 title: '添加目录',
                                 trailing: Icons.add_rounded,
                                 onTap: () => _pickLocalMusicDir(context, ref),
-                              ),
-                              SettingsFooter(
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    12,
-                                    16,
-                                    16,
-                                  ),
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Wrap(
-                                      spacing: 10,
-                                      runSpacing: 8,
-                                      children: [
-                                        FilledButton.tonalIcon(
-                                          onPressed: () =>
-                                              _resetLocalMusicDir(context, ref),
-                                          icon: const Icon(
-                                            Icons.sync_rounded,
-                                            size: 18,
-                                          ),
-                                          label: const Text('仅扫描下载位置'),
-                                          style: FilledButton.styleFrom(
-                                            minimumSize: const Size(0, 40),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 20,
-                                              vertical: 10,
-                                            ),
-                                            shape: const StadiumBorder(),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (section == SettingsSection.downloads) ...[
-                          const SizedBox(height: 24),
-                          SettingsCard(
-                            title: '云端音乐',
-                            children: [
-                              SettingsSwitchAction(
-                                key: const ValueKey(
-                                  'cloud-drive2-enabled-switch',
-                                ),
-                                icon: Icons.cloud_outlined,
-                                title: 'CloudDrive2',
-                                subtitle: '把网盘中的音乐作为云端歌曲加入本地列表',
-                                value: settings.cloudDrive2Enabled,
-                                onChanged: (value) => ref
-                                    .read(settingsProvider.notifier)
-                                    .setCloudDrive2Enabled(value),
-                              ),
-                              SettingsAction(
-                                icon: Icons.dns_outlined,
-                                title: '服务器地址',
-                                value: settings.cloudDrive2Server.isEmpty
-                                    ? '未设置'
-                                    : settings.cloudDrive2Server,
-                                trailing: Symbols.chevron_right,
-                                onTap: () =>
-                                    _editCloudDrive2Server(context, ref),
-                              ),
-                              SettingsAction(
-                                icon: Icons.key_outlined,
-                                title: 'API 令牌',
-                                value: settings.cloudDrive2Token.isEmpty
-                                    ? '未设置'
-                                    : '已设置',
-                                trailing: Symbols.chevron_right,
-                                onTap: () =>
-                                    _editCloudDrive2Token(context, ref),
                               ),
                             ],
                           ),
@@ -794,71 +728,6 @@ class SettingsPage extends ConsumerWidget {
     );
     if (!context.mounted) return;
     showAppToast(context, '已恢复默认下载位置', type: AppToastType.success);
-  }
-
-  Future<void> _resetLocalMusicDir(BuildContext context, WidgetRef ref) async {
-    final downloadDir = ref.read(settingsProvider).downloadDir;
-    final localDir = await SafStorage.resolveLocalPath(
-      downloadDir,
-      requireReadable: false,
-    );
-    if (!context.mounted) return;
-    if (localDir == null) {
-      showAppToast(context, '下载位置没有可直接读取的本地路径，请选择本地扫描文件夹');
-      return;
-    }
-    final scanCache = ref.read(localSongScanCacheProvider);
-    await ref.read(settingsProvider.notifier).setLocalMusicDirs([localDir]);
-    unawaited(
-      scanCache.ensureScan(
-        directories: ref.read(settingsProvider).scanDirectories,
-      ),
-    );
-    if (!context.mounted) return;
-    showAppToast(context, '已恢复为下载位置', type: AppToastType.success);
-  }
-
-  Future<void> _editCloudDrive2Server(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final current = ref.read(settingsProvider).cloudDrive2Server;
-    final value = await showDialog<String>(
-      context: context,
-      builder: (_) => _CloudDrive2TextDialog(
-        title: 'CloudDrive2 服务器地址',
-        label: '地址',
-        hint: '例如：192.168.1.10:19798',
-        initialValue: current,
-      ),
-    );
-    if (value == null) return;
-    await ref.read(settingsProvider.notifier).setCloudDrive2Server(value);
-    if (context.mounted) {
-      showAppToast(context, '已保存服务器地址', type: AppToastType.success);
-    }
-  }
-
-  Future<void> _editCloudDrive2Token(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final current = ref.read(settingsProvider).cloudDrive2Token;
-    final value = await showDialog<String>(
-      context: context,
-      builder: (_) => _CloudDrive2TextDialog(
-        title: 'CloudDrive2 API 令牌',
-        label: 'API 令牌',
-        hint: '在 CloudDrive2 管理界面创建的 API 令牌',
-        initialValue: current,
-        obscure: true,
-      ),
-    );
-    if (value == null) return;
-    await ref.read(settingsProvider.notifier).setCloudDrive2Token(value);
-    if (context.mounted) {
-      showAppToast(context, '已保存 API 令牌', type: AppToastType.success);
-    }
   }
 
   Future<void> _pickDownloadDir(BuildContext context, WidgetRef ref) async {    String? path;
@@ -1235,70 +1104,4 @@ String _webDavSubtitle(AsyncValue<WebDavSyncState> value) {
 String _shortDateTime(DateTime value) {
   String two(int number) => number.toString().padLeft(2, '0');
   return '${value.month}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
-}
-
-/// Minimal single-line text input for the CloudDrive2 connection fields.
-class _CloudDrive2TextDialog extends StatefulWidget {
-  const _CloudDrive2TextDialog({
-    required this.title,
-    required this.label,
-    required this.hint,
-    required this.initialValue,
-    this.obscure = false,
-  });
-
-  final String title;
-  final String label;
-  final String hint;
-  final String initialValue;
-  final bool obscure;
-
-  @override
-  State<_CloudDrive2TextDialog> createState() => _CloudDrive2TextDialogState();
-}
-
-class _CloudDrive2TextDialogState extends State<_CloudDrive2TextDialog> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.of(context).pop(_controller.text.trim());
-
-  @override
-  Widget build(BuildContext context) {
-    return prism.AlertDialog(
-      title: widget.title,
-      hasFields: true,
-      actions: [
-        prism.TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        prism.FilledButton(onPressed: _submit, child: const Text('保存')),
-      ],
-      child: TextField(
-        controller: _controller,
-        autofocus: true,
-        obscureText: widget.obscure,
-        autocorrect: false,
-        enableSuggestions: !widget.obscure,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration: InputDecoration(
-          labelText: widget.label,
-          hintText: widget.hint,
-        ),
-      ),
-    );
-  }
 }

@@ -442,10 +442,20 @@ final class CyShineStorageBrowserChannel {
                             message: "无法弹出目录选择器", details: nil))
         return
       }
+      // 防重入：上一次选择还在飞时，先把旧 delegate 以取消语义收尾，
+      // 再覆写引用，避免旧 FlutterResult 永不回调。
+      if let pending = self.pickerDelegate {
+        pending.completeAsCancelled()
+        self.pickerDelegate = nil
+      }
       let delegate = FolderPickerDelegate(bookmarks: self.bookmarks, result: result)
       // UIDocumentPickerViewController.delegate 是 weak，必须强引用到回调结束。
       self.pickerDelegate = delegate
-      delegate.onDone = { [weak self] in self?.pickerDelegate = nil }
+      delegate.onDone = { [weak self, weak delegate] in
+        guard let self = self, let delegate = delegate,
+              self.pickerDelegate === delegate else { return }
+        self.pickerDelegate = nil
+      }
       let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder],
                                                   asCopy: false)
       picker.delegate = delegate
@@ -581,6 +591,7 @@ final class CyShineStorageBrowserChannel {
 final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   private let bookmarks: CyShineSecurityScopedStore
   private let result: FlutterResult
+  private var completed = false
   var onDone: (() -> Void)?
 
   init(bookmarks: CyShineSecurityScopedStore, result: @escaping FlutterResult) {
@@ -588,9 +599,19 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
     self.result = result
   }
 
+  /// 被新一次 pickDirectory 顶替时以取消语义收尾，保证 FlutterResult
+  /// 恰好被调用一次；此后本 delegate 的任何回调都不再重复完成。
+  func completeAsCancelled() {
+    guard !completed else { return }
+    completed = true
+    result(nil)
+  }
+
   func documentPicker(_ controller: UIDocumentPickerViewController,
                       didPickDocumentsAt urls: [URL]) {
     CyShineNativeLog.write("picker", "didPick count=\(urls.count) first=\(urls.first?.path ?? "nil")")
+    guard !completed else { return }
+    completed = true
     defer { onDone?() }
     guard let url = urls.first else {
       result(FlutterError(code: "CANCELLED", message: "未选择文件夹", details: nil))
@@ -605,17 +626,19 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
                                       includingResourceValuesForKeys: nil,
                                       relativeTo: nil)
       bookmarks.save(path: url.path, bookmark: data)
-      // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
-      result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
     } catch {
-      if scoped { url.stopAccessingSecurityScopedResource() }
-      result(FlutterError(code: "BOOKMARK_FAILED",
-                          message: error.localizedDescription, details: nil))
+      // 书签建立失败不让整次选择作废：scope 已开始且会话内不释放，
+      // 本次会话照常可读写该目录；跨启动授权待下次保存成功时补齐。
+      CyShineNativeLog.write("picker", "bookmark_failed error=\(error.localizedDescription)")
     }
+    // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
+    result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
     CyShineNativeLog.write("picker", "cancelled")
+    guard !completed else { return }
+    completed = true
     onDone?()
     // 取消不视为错误：返回 nil 让 Dart 层静默返回。
     result(nil)

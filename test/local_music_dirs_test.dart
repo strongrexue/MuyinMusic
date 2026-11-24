@@ -184,4 +184,156 @@ void main() {
     ]);
     expect(prefs.getStringList('local_music_ignored_paths'), ['/music/b.flac']);
   });
+
+  test('ignored records carry display info and prune on restore', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    ProviderContainer createContainer() => ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    final container = createContainer();
+    addTearDown(container.dispose);
+    final notifier = container.read(settingsProvider.notifier);
+
+    const contentPath = 'content://media/external_primary/audio/media/154346';
+    await notifier.ignoreLocalSongs(const [
+      IgnoredLocalSongRecord(
+        path: contentPath,
+        title: '麦恩莉',
+        singer: '方大同',
+        location: '/storage/emulated/0/Music/麦恩莉.mp3',
+      ),
+      IgnoredLocalSongRecord(
+        path: '/music/plain.mp3',
+        title: 'Plain',
+        location: '/music/plain.mp3',
+      ),
+    ]);
+    // 路径集合语义不变：扫描过滤消费的仍是这两个路径。
+    expect(container.read(settingsProvider).ignoredLocalSongPaths, [
+      contentPath,
+      '/music/plain.mp3',
+    ]);
+    expect(container.read(settingsProvider).ignoredLocalSongRecords, [
+      const IgnoredLocalSongRecord(
+        path: contentPath,
+        title: '麦恩莉',
+        singer: '方大同',
+        location: '/storage/emulated/0/Music/麦恩莉.mp3',
+      ),
+      const IgnoredLocalSongRecord(
+        path: '/music/plain.mp3',
+        title: 'Plain',
+        location: '/music/plain.mp3',
+      ),
+    ]);
+
+    // 模拟重启：记录与路径一起读回。
+    final restored = createContainer();
+    addTearDown(restored.dispose);
+    expect(restored.read(settingsProvider).ignoredLocalSongRecords, [
+      const IgnoredLocalSongRecord(
+        path: contentPath,
+        title: '麦恩莉',
+        singer: '方大同',
+        location: '/storage/emulated/0/Music/麦恩莉.mp3',
+      ),
+      const IgnoredLocalSongRecord(
+        path: '/music/plain.mp3',
+        title: 'Plain',
+        location: '/music/plain.mp3',
+      ),
+    ]);
+
+    await restored.read(settingsProvider.notifier).unignoreLocalSongPaths([
+      contentPath,
+    ]);
+    expect(restored.read(settingsProvider).ignoredLocalSongPaths, [
+      '/music/plain.mp3',
+    ]);
+    expect(restored.read(settingsProvider).ignoredLocalSongRecords, [
+      const IgnoredLocalSongRecord(
+        path: '/music/plain.mp3',
+        title: 'Plain',
+        location: '/music/plain.mp3',
+      ),
+    ]);
+  });
+
+  test('legacy path-only ignored list loads without records', () async {
+    SharedPreferences.setMockInitialValues({
+      'local_music_ignored_paths': ['/music/legacy.mp3'],
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(container.dispose);
+    expect(container.read(settingsProvider).ignoredLocalSongPaths, [
+      '/music/legacy.mp3',
+    ]);
+    expect(container.read(settingsProvider).ignoredLocalSongRecords, isEmpty);
+
+    // 存量条目照常可恢复。
+    await container.read(settingsProvider.notifier).unignoreLocalSongPaths([
+      '/music/legacy.mp3',
+    ]);
+    expect(container.read(settingsProvider).ignoredLocalSongPaths, isEmpty);
+  });
+
+  group('isStaleIosContainerPath', () {
+    const currentUuid = 'AAAAAAAA-1111-2222-3333-444444444444';
+    const otherAppPath =
+        '/var/mobile/Containers/Data/Application/'
+        'BBBBBBBB-5555-6666-7777-888888888888/Documents/Music';
+    const ownOldPath =
+        '/var/mobile/Containers/Data/Application/'
+        'CCCCCCCC-9999-0000-1111-222222222222/Documents/MuyinMusic';
+    const ownCurrentPath =
+        '/var/mobile/Containers/Data/Application/'
+        '$currentUuid/Documents/MuyinMusic';
+
+    test('bookmarked external container path is not stale', () {
+      expect(
+        isStaleIosContainerPath(
+          otherAppPath,
+          currentUuid: currentUuid,
+          bookmarkedPaths: const {otherAppPath},
+        ),
+        isFalse,
+      );
+    });
+
+    test('external container path without bookmark is stale', () {
+      expect(
+        isStaleIosContainerPath(otherAppPath, currentUuid: currentUuid),
+        isTrue,
+      );
+    });
+
+    test('own old container path without bookmark is stale', () {
+      expect(
+        isStaleIosContainerPath(ownOldPath, currentUuid: currentUuid),
+        isTrue,
+      );
+    });
+
+    test('current container path and non-container paths are not stale', () {
+      expect(
+        isStaleIosContainerPath(ownCurrentPath, currentUuid: currentUuid),
+        isFalse,
+      );
+      expect(
+        isStaleIosContainerPath(
+          '/var/mobile/Documents/Music',
+          currentUuid: currentUuid,
+        ),
+        isFalse,
+      );
+      expect(
+        isStaleIosContainerPath(ownOldPath, currentUuid: ''),
+        isFalse,
+      );
+    });
+  });
 }

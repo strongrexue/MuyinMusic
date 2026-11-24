@@ -48,7 +48,12 @@ class _IgnoredLocalSongsPageState extends ConsumerState<IgnoredLocalSongsPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final ignored = ref.watch(settingsProvider).ignoredLocalSongPaths;
+    final settings = ref.watch(settingsProvider);
+    final ignored = settings.ignoredLocalSongPaths;
+    final recordsByKey = <String, IgnoredLocalSongRecord>{
+      for (final record in settings.ignoredLocalSongRecords)
+        localSongPathKey(record.path): record,
+    };
     final history = ref.watch(downloadHistoryProvider);
     final historyByKey = <String, DownloadHistoryEntry>{
       for (final entry in history)
@@ -124,11 +129,26 @@ class _IgnoredLocalSongsPageState extends ConsumerState<IgnoredLocalSongsPage> {
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final path = ignored[index];
-                  final entry = historyByKey[localSongPathKey(path)];
-                  final title = entry?.name.trim().isNotEmpty == true
+                  final key = localSongPathKey(path);
+                  final record = recordsByKey[key];
+                  final entry = historyByKey[key];
+                  // 优先用移除时存下的展示记录；没有记录的存量条目才
+                  // 回退到下载历史 → 文件名解析。
+                  final hasRecord =
+                      record != null && record.title.trim().isNotEmpty;
+                  final title = hasRecord
+                      ? record.title.trim()
+                      : entry?.name.trim().isNotEmpty == true
                       ? entry!.name.trim()
                       : _titleFromFileName(p.basename(path));
-                  final singer = entry?.singer.trim() ?? '';
+                  final singer = hasRecord
+                      ? record.singer.trim()
+                      : entry?.singer.trim() ?? '';
+                  final location = hasRecord ? record.location.trim() : '';
+                  final subtitle = [
+                    if (singer.isNotEmpty) singer,
+                    if (location.isNotEmpty) location else path,
+                  ].join(' · ');
                   return ListTile(
                     contentPadding: const EdgeInsets.fromLTRB(8, 2, 4, 2),
                     title: Text(
@@ -141,7 +161,7 @@ class _IgnoredLocalSongsPageState extends ConsumerState<IgnoredLocalSongsPage> {
                       ),
                     ),
                     subtitle: Text(
-                      singer.isEmpty ? path : '$singer · $path',
+                      subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

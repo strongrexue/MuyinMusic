@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,6 +49,32 @@ void main() {
 
     expect(find.text('已忽略的本地音乐'), findsOneWidget);
     expect(find.text('Song'), findsOneWidget);
+    expect(find.text('恢复'), findsOneWidget);
+  });
+
+  testWidgets('shows stored title and singer for a MediaStore entry', (
+    tester,
+  ) async {
+    const contentPath = 'content://media/external_primary/audio/media/154346';
+    await pumpPage(tester, {
+      'local_music_ignored_paths': [contentPath],
+      'local_music_ignored_records': jsonEncode([
+        {
+          'path': contentPath,
+          'title': '麦恩莉',
+          'singer': '方大同',
+          'location': '/storage/emulated/0/Music/麦恩莉.mp3',
+        },
+      ]),
+    });
+
+    expect(find.text('麦恩莉'), findsOneWidget);
+    expect(
+      find.text('方大同 · /storage/emulated/0/Music/麦恩莉.mp3'),
+      findsOneWidget,
+    );
+    // 不再把 content URI 末段的数字 ID 当标题。
+    expect(find.text('154346'), findsNothing);
     expect(find.text('恢复'), findsOneWidget);
   });
 

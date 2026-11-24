@@ -303,6 +303,14 @@ class _FakeCloudDrive2Client implements CloudDrive2Client {
   Future<bool> checkConnection() async => true;
 
   @override
+  Future<CloudConnectionResult> probeConnection() async =>
+      const CloudConnectionResult(
+        status: CloudConnectionStatus.connected,
+        userName: 'tester',
+        isLogin: true,
+      );
+
+  @override
   Future<void> close() async {}
 }
 

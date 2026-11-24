@@ -729,7 +729,32 @@ class _SongsPageState extends ConsumerState<SongsPage> {
         .toSet();
     if (paths.isEmpty) return;
     final wasBatch = _batchMode;
-    await ref.read(settingsProvider.notifier).ignoreLocalSongPaths(paths);
+    // 忽略名单只存路径不够辨认（MediaStore 路径是 content URI、末段是
+    // 数字 ID），把移除当下条目的标题/歌手/位置一并存成展示记录。
+    final scannedByKey = <String, ScannedSongFile>{
+      for (final file in _scannedFiles ?? const <ScannedSongFile>[])
+        _pathKey(file.path): file,
+    };
+    final records = <IgnoredLocalSongRecord>[];
+    for (final entry in entries) {
+      final path = entry.savedPath;
+      if (path == null || path.isEmpty) continue;
+      final file = scannedByKey[_pathKey(path)];
+      final localPath = file?.identityPath ?? '';
+      final hasLocalPath =
+          localPath.isNotEmpty &&
+          !localPath.startsWith('content://') &&
+          !isCloudSongPath(localPath);
+      records.add(
+        IgnoredLocalSongRecord(
+          path: path,
+          title: entry.name,
+          singer: entry.singer,
+          location: hasLocalPath ? localPath : (file?.fileName ?? path),
+        ),
+      );
+    }
+    await ref.read(settingsProvider.notifier).ignoreLocalSongs(records);
     _scanCache.removePaths(paths);
     await _scanCache.flush();
     if (!mounted) return;
@@ -1153,6 +1178,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
               SongsLibraryTab.liked => '我的喜欢',
               SongsLibraryTab.playlists => '歌单',
               SongsLibraryTab.local => '本地音乐',
+              SongsLibraryTab.cloud => '云端音乐',
             },
             quality: ref.read(settingsProvider).batchDownloadQuality,
             skippedCount: skipped,
@@ -1312,14 +1338,35 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tab = ref.watch(songsLibraryTabProvider);
+    final settings = ref.watch(settingsProvider);
+    final cloudConfigured = settings.cloudDrive2Configured;
+    final selectedTab = ref.watch(songsLibraryTabProvider);
+    // 云端页签只在 CloudDrive2 配置齐全时存在；配置被清掉后残留的
+    // cloud 选中态回落到本地页签，索引本身不拆。
+    final tab =
+        selectedTab == SongsLibraryTab.cloud && !cloudConfigured
+        ? SongsLibraryTab.local
+        : selectedTab;
     final playlists = ref.watch(localPlaylistsProvider);
     final history = ref.watch(downloadHistoryProvider);
     final likedSongs = ref.watch(likedSongsProvider);
     final likedKeys = {for (final entry in likedSongs) songIdentityKey(entry)};
     final query = _searchQuery.trim();
     final searching = _searchMode && query.isNotEmpty;
-    final librarySongs = _songs(history);
+    final allSongs = _songs(history);
+    final librarySongs = switch (tab) {
+      SongsLibraryTab.cloud => [
+        for (final entry in allSongs)
+          if (entry.savedPath != null && isCloudSongPath(entry.savedPath!))
+            entry,
+      ],
+      SongsLibraryTab.local => [
+        for (final entry in allSongs)
+          if (entry.savedPath == null || !isCloudSongPath(entry.savedPath!))
+            entry,
+      ],
+      _ => allSongs,
+    };
     final localSongs = tab == SongsLibraryTab.liked
         ? _likedSongs(likedSongs, librarySongs)
         : librarySongs;
@@ -1606,7 +1653,46 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                   ),
                 ),
               ),
-            if (localSongs.isNotEmpty)
+            if (tab == SongsLibraryTab.cloud && !searching && !_batchMode)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                sliver: SliverToBoxAdapter(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _LibraryQuickAction(
+                          key: const ValueKey('cloud-folder-picker'),
+                          icon: Icons.folder_outlined,
+                          label: cloudMusicRootLabel(
+                            settings.cloudDrive2MusicRoot,
+                          ),
+                          onPressed: () =>
+                              context.push('/songs/cloud-folders'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '${localSongs.length} 首',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      _CloudRefreshButton(
+                        key: const ValueKey('cloud-refresh-button'),
+                        onPressed: () =>
+                            ref.read(cloudDrive2LibraryProvider).refresh(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            // 云端页签常态下计数在文件夹快捷行里，summary 只在搜索/批量
+            // （快捷行隐藏）时补位，避免同一数字出现两次。
+            if (localSongs.isNotEmpty &&
+                (tab != SongsLibraryTab.cloud || searching || _batchMode))
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
                 sliver: SliverToBoxAdapter(
@@ -1621,6 +1707,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                     onToggleBatch: songs.isEmpty ? null : _toggleBatchMode,
                     collectionLabel: tab == SongsLibraryTab.liked
                         ? '喜欢的歌曲'
+                        : tab == SongsLibraryTab.cloud
+                        ? '云端音乐'
                         : '本地音乐',
                   ),
                 ),
@@ -1637,6 +1725,11 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                         liked: true,
                         title: '还没有喜欢的歌曲',
                         message: '在歌曲列表点击右侧 ❤️ 即可收藏到这里',
+                      )
+                    : tab == SongsLibraryTab.cloud
+                    ? const EmptySongs(
+                        title: '还没有云端歌曲',
+                        message: '所选文件夹中的歌曲会显示在这里\n点上方文件夹可切换扫描范围',
                       )
                     : EmptySongs(error: _scanError),
               )
@@ -1728,7 +1821,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                               ? () => unawaited(_unlikeSelected(songs))
                               : () => unawaited(_confirmDeleteSelected(songs))),
                     onRemoveFromList:
-                        tab == SongsLibraryTab.local && selectedCount > 0
+                        (tab == SongsLibraryTab.local ||
+                                tab == SongsLibraryTab.cloud) &&
+                            selectedCount > 0
                         ? () => unawaited(_removeSelectedFromList(songs))
                         : null,
                     onAddToPlaylist: selectedCount == 0
@@ -1760,9 +1855,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
             right: 14,
             child: prism.SegmentedControl<SongsLibraryTab>(
               key: const ValueKey('songs-library-tabs'),
-              segments: const [
+              segments: [
                 (SongsLibraryTab.liked, '喜欢'),
                 (SongsLibraryTab.local, '本地音乐'),
+                if (cloudConfigured) (SongsLibraryTab.cloud, '云端音乐'),
                 (SongsLibraryTab.playlists, '歌单'),
               ],
               value: tab,
@@ -1790,6 +1886,54 @@ class _SongsPageState extends ConsumerState<SongsPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Circular refresh button on the cloud tab's folder row; spins while the
+/// re-enumeration it triggered is still running.
+class _CloudRefreshButton extends StatefulWidget {
+  const _CloudRefreshButton({super.key, required this.onPressed});
+
+  final Future<void> Function() onPressed;
+
+  @override
+  State<_CloudRefreshButton> createState() => _CloudRefreshButtonState();
+}
+
+class _CloudRefreshButtonState extends State<_CloudRefreshButton> {
+  bool _refreshing = false;
+
+  Future<void> _handlePressed() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await widget.onPressed();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.62),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: _refreshing ? null : () => unawaited(_handlePressed()),
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: _refreshing
+              ? const Padding(
+                  padding: EdgeInsets.all(11),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(Icons.refresh_rounded, size: 19, color: scheme.onSurface),
+        ),
       ),
     );
   }

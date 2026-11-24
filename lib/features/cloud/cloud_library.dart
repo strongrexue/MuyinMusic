@@ -79,11 +79,15 @@ class CloudDrive2Library extends ChangeNotifier
   Future<void> refresh() {
     final running = _refreshFuture;
     if (running != null) return running;
-    final future = _refresh();
-    _refreshFuture = future.whenComplete(() {
+    // 注意：whenComplete 返回的是新 future，身份比较必须对这个新
+    // future 做；对原始 future 比较永远不相等，去重标记清不掉，
+    // refresh 会变成一次性、后续配置变更再也不重扫。
+    late final Future<void> future;
+    future = _refresh().whenComplete(() {
       if (identical(_refreshFuture, future)) _refreshFuture = null;
     });
-    return _refreshFuture!;
+    _refreshFuture = future;
+    return future;
   }
 
   Future<void> _refresh() async {
@@ -95,7 +99,10 @@ class CloudDrive2Library extends ChangeNotifier
     }
     final List<LocalSongFileSnapshot> enumerated;
     try {
-      enumerated = await enumerateCloudSongs(client);
+      enumerated = await enumerateCloudSongs(
+        client,
+        rootPath: cloudScanRootPath(_settings().cloudDrive2MusicRoot),
+      );
     } catch (error) {
       unawaited(
         AppLogger.write('cloud-drive2', 'enumerate failed: $error'),
@@ -189,6 +196,38 @@ class CloudDrive2Library extends ChangeNotifier
     return client.checkConnection();
   }
 
+  /// Lists one directory level for the cloud folder browser. Throws when
+  /// CloudDrive2 is not configured or the listing fails.
+  Future<List<CloudFileItem>> listDirectory(String remotePath) async {
+    final client = _ensureClient();
+    if (client == null) {
+      throw StateError('CloudDrive2 未配置或未启用');
+    }
+    return client.listFiles(remotePath);
+  }
+
+  /// Probes a server with the values currently typed on the settings page
+  /// (not the saved settings), so the user can test before saving. The
+  /// throwaway client is closed before returning; the token only travels
+  /// in the gRPC authorization header of that client.
+  Future<CloudConnectionResult> testConnection({
+    required String server,
+    required String token,
+  }) async {
+    final config = parseCloudDrive2Config(server, token);
+    if (config == null) {
+      return const CloudConnectionResult(
+        status: CloudConnectionStatus.unreachable,
+      );
+    }
+    final client = _clientFactory(config);
+    try {
+      return await client.probeConnection();
+    } finally {
+      await client.close();
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -209,7 +248,8 @@ final cloudDrive2LibraryProvider =
         final configChanged =
             previous?.cloudDrive2Enabled != next.cloudDrive2Enabled ||
             previous?.cloudDrive2Server != next.cloudDrive2Server ||
-            previous?.cloudDrive2Token != next.cloudDrive2Token;
+            previous?.cloudDrive2Token != next.cloudDrive2Token ||
+            previous?.cloudDrive2MusicRoot != next.cloudDrive2MusicRoot;
         final ignoredChanged = !listEquals(
           previous?.ignoredLocalSongPaths,
           next.ignoredLocalSongPaths,

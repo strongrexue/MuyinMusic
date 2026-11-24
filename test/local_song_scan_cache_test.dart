@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'package:cy_shine_music/features/songs/local_song_scan_cache.dart';
+import 'package:cy_shine_music/features/songs/local_song_scanner.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -124,9 +125,24 @@ void main() {
           },
         );
         expect(cache.snapshot!.files.single.fileName, 'three.m4a');
-        expect(cache.snapshot!.error, contains(unreadable));
+        // 有歌时单根失败不写整页 error，只进扫描日志。
+        expect(cache.snapshot!.error, isNull);
       },
     );
+
+    test('an unreadable folder alone still reports an error', () async {
+      final unreadable = p.join(root.path, 'unreadable');
+      await IOOverrides.runZoned(
+        () => cache.refresh(directories: [unreadable]),
+        createDirectory: (path) {
+          if (path == unreadable) return _UnreadableDirectory(path);
+          if (path == support.path) return support;
+          throw StateError('Unexpected directory: $path');
+        },
+      );
+      expect(cache.snapshot!.files, isEmpty);
+      expect(cache.snapshot!.error, contains(unreadable));
+    });
 
     test('refreshing after a folder is removed drops its old songs', () async {
       await cache.refresh(directories: [parent.path, extra.path]);
@@ -169,6 +185,106 @@ void main() {
         restored.snapshot!.files.map((file) => file.fileName),
         unorderedEquals(['one.mp3', 'three.m4a']),
       );
+    });
+
+    const safTree =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMuyinMusic';
+
+    test('an unresolvable SAF root next to a good folder is dropped and '
+        'the scan stays error-free', () async {
+      await cache.refresh(directories: [safTree, parent.path]);
+      expect(
+        cache.snapshot!.files.map((file) => file.fileName),
+        unorderedEquals(['one.mp3', 'two.FLAC']),
+      );
+      expect(cache.snapshot!.directories, [parent.path]);
+      expect(cache.snapshot!.error, isNull);
+    });
+
+    test('a scan with only an unresolvable SAF root produces no error',
+        () async {
+      await cache.refresh(directories: [safTree]);
+      expect(cache.snapshot?.error, isNull);
+    });
+
+    test('a resolvable SAF root is scanned through its local path',
+        () async {
+      final resolvingCache = LocalSongScanCache(
+        contentRootResolver: (location) async =>
+            location == safTree ? extra.path : null,
+      );
+      addTearDown(resolvingCache.dispose);
+      await resolvingCache.refresh(directories: [safTree]);
+      expect(resolvingCache.snapshot!.files.single.fileName, 'three.m4a');
+      expect(resolvingCache.snapshot!.directories, [extra.path]);
+      expect(resolvingCache.snapshot!.error, isNull);
+    });
+  });
+
+  test('scanner silently skips content roots instead of erroring', () async {
+    final result = await LocalSongScanner.scan(
+      const [
+        'content://com.android.externalstorage.documents/'
+            'tree/primary%3AMusic',
+      ],
+      const {},
+      () => false,
+    );
+    expect(result.files, isEmpty);
+    expect(result.errors, isEmpty);
+  });
+
+  group('media fallback roots', () {
+    const local = '/storage/emulated/0/Music';
+    const other = '/storage/emulated/0/Other';
+    const content =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic';
+
+    Future<List<String>> decide(
+      List<String> directories, {
+      Set<String> hitRoots = const {},
+      bool wide = false,
+      Set<String> existing = const {},
+    }) => LocalSongScanner.mediaFallbackRoots(
+      directories,
+      hitRoots: hitRoots,
+      wide: wide,
+      directoryExists: (root) async => existing.contains(root),
+    );
+
+    test('zero-hit local root falls back without wide access when it exists',
+        () async {
+      expect(
+        await decide(const [local], existing: const {local}),
+        [local],
+      );
+    });
+
+    test('zero-hit local root is skipped without wide access when missing',
+        () async {
+      expect(await decide(const [local]), isEmpty);
+    });
+
+    test('zero-hit local root always falls back with wide access', () async {
+      expect(await decide(const [local], wide: true), [local]);
+    });
+
+    test('roots with media hits never fall back', () async {
+      expect(
+        await decide(
+          const [local, other],
+          hitRoots: const {local},
+          wide: true,
+          existing: const {local, other},
+        ),
+        [other],
+      );
+    });
+
+    test('content roots are always selected for the fallback pass', () async {
+      expect(await decide(const [content]), [content]);
     });
   });
 }
