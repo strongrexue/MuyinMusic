@@ -15,7 +15,6 @@ import '../../core/models/enums.dart';
 import '../../core/music_sources/music_source_controller.dart';
 import '../../core/services/permission_service.dart';
 import '../../core/services/saf_storage.dart';
-import '../../core/services/storage_browser_service.dart';
 import '../../core/services/storage_location.dart';
 import '../../core/services/app_icon_service.dart';
 import '../../core/storage/settings_store.dart';
@@ -355,16 +354,6 @@ class SettingsPage extends ConsumerWidget {
                                 trailing: Symbols.chevron_right,
                                 destination: '/settings/webdav',
                               ),
-                              SettingsAction(
-                                key: const ValueKey('cloud-drive2-setting'),
-                                icon: Icons.cloud_outlined,
-                                title: 'CloudDrive2 云端音乐',
-                                value: settings.cloudDrive2Configured
-                                    ? '已配置'
-                                    : '未配置',
-                                trailing: Symbols.chevron_right,
-                                destination: '/settings/cloud-drive2',
-                              ),
                             ],
                           ),
                         if (section == SettingsSection.downloads)
@@ -517,6 +506,42 @@ class SettingsPage extends ConsumerWidget {
                                 title: '添加目录',
                                 trailing: Icons.add_rounded,
                                 onTap: () => _pickLocalMusicDir(context, ref),
+                              ),
+                              SettingsFooter(
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    12,
+                                    16,
+                                    16,
+                                  ),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Wrap(
+                                      spacing: 10,
+                                      runSpacing: 8,
+                                      children: [
+                                        FilledButton.tonalIcon(
+                                          onPressed: () =>
+                                              _resetLocalMusicDir(context, ref),
+                                          icon: const Icon(
+                                            Icons.sync_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('仅扫描下载位置'),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size(0, 40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 10,
+                                            ),
+                                            shape: const StadiumBorder(),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -724,13 +749,32 @@ class SettingsPage extends ConsumerWidget {
     unawaited(
       ref
           .read(localSongScanCacheProvider)
-          .ensureScan(directories: ref.read(settingsProvider).scanDirectories),
+          .ensureScan(directories: ref.read(settingsProvider).localMusicDirs),
     );
     if (!context.mounted) return;
     showAppToast(context, '已恢复默认下载位置', type: AppToastType.success);
   }
 
-  Future<void> _pickDownloadDir(BuildContext context, WidgetRef ref) async {    String? path;
+  Future<void> _resetLocalMusicDir(BuildContext context, WidgetRef ref) async {
+    final downloadDir = ref.read(settingsProvider).downloadDir;
+    final localDir = await SafStorage.resolveLocalPath(
+      downloadDir,
+      requireReadable: false,
+    );
+    if (!context.mounted) return;
+    if (localDir == null) {
+      showAppToast(context, '下载位置没有可直接读取的本地路径，请选择本地扫描文件夹');
+      return;
+    }
+    final scanCache = ref.read(localSongScanCacheProvider);
+    await ref.read(settingsProvider.notifier).setLocalMusicDirs([localDir]);
+    unawaited(scanCache.ensureScan(directories: [localDir]));
+    if (!context.mounted) return;
+    showAppToast(context, '已恢复为下载位置', type: AppToastType.success);
+  }
+
+  Future<void> _pickDownloadDir(BuildContext context, WidgetRef ref) async {
+    String? path;
     try {
       path = await SafStorage.pickDirectory(
         writable: true,
@@ -765,7 +809,7 @@ class SettingsPage extends ConsumerWidget {
     unawaited(
       ref
           .read(localSongScanCacheProvider)
-          .ensureScan(directories: ref.read(settingsProvider).scanDirectories),
+          .ensureScan(directories: ref.read(settingsProvider).localMusicDirs),
     );
     if (!context.mounted) return;
     showAppToast(
@@ -852,11 +896,7 @@ class SettingsPage extends ConsumerWidget {
     }
     final scanCache = ref.read(localSongScanCacheProvider);
     await ref.read(settingsProvider.notifier).setLocalMusicDirs(directories);
-    unawaited(
-      scanCache.ensureScan(
-        directories: ref.read(settingsProvider).scanDirectories,
-      ),
-    );
+    unawaited(scanCache.ensureScan(directories: directories));
     if (!context.mounted) return;
     showAppToast(
       context,
@@ -875,11 +915,7 @@ class SettingsPage extends ConsumerWidget {
     directories.remove(path);
     final scanCache = ref.read(localSongScanCacheProvider);
     await ref.read(settingsProvider.notifier).setLocalMusicDirs(directories);
-    unawaited(
-      scanCache.ensureScan(
-        directories: ref.read(settingsProvider).scanDirectories,
-      ),
-    );
+    unawaited(scanCache.ensureScan(directories: directories));
     if (!context.mounted) return;
     showAppToast(context, '已移除扫描文件夹', type: AppToastType.success);
   }
@@ -906,25 +942,6 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
-  /// iOS 上所选目录已有系统授权（bookmark）但可达性探针失败时（iCloud
-  /// 未下载、文件提供方暂不可达等），探针结论不可靠：警告后照常保存，
-  /// 实际读写问题会在扫描/下载时再暴露。无 bookmark 的目录不走此降级，
-  /// 探针失败仍按原样拒绝。返回 true 表示已降级处理（调用方应放行）。
-  Future<bool> _probeDowngradedByBookmark(
-    BuildContext context,
-    String path,
-  ) async {
-    if (!Platform.isIOS) return false;
-    final hasBookmark = await const StorageBrowserService().hasBookmark(path);
-    if (!hasBookmark || !context.mounted) return false;
-    showAppToast(
-      context,
-      '暂时无法验证该文件夹，将直接保存并使用',
-      type: AppToastType.warning,
-    );
-    return true;
-  }
-
   Future<bool> _validateWritableDirectory(
     BuildContext context,
     String path,
@@ -932,8 +949,6 @@ class SettingsPage extends ConsumerWidget {
     try {
       await SafStorage.validateDirectory(path, writable: true);
     } catch (_) {
-      if (!context.mounted) return false;
-      if (await _probeDowngradedByBookmark(context, path)) return true;
       if (!context.mounted) return false;
       showAppToast(
         context,
@@ -959,8 +974,6 @@ class SettingsPage extends ConsumerWidget {
     try {
       await SafStorage.validateDirectory(path, writable: false);
     } catch (_) {
-      if (!context.mounted) return false;
-      if (await _probeDowngradedByBookmark(context, path)) return true;
       if (!context.mounted) return false;
       showAppToast(
         context,

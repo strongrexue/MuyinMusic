@@ -36,7 +36,7 @@ class _IgnoredLocalSongsPageState extends ConsumerState<IgnoredLocalSongsPage> {
     try {
       await ref.read(settingsProvider.notifier).unignoreLocalSongPaths([path]);
       await _scanCache.refresh(
-        directories: ref.read(settingsProvider).scanDirectories,
+        directories: ref.read(settingsProvider).localMusicDirs,
       );
       if (!mounted) return;
       showAppToast(context, '已恢复到本地列表', type: AppToastType.success);

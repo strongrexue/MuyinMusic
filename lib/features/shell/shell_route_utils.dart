@@ -73,7 +73,6 @@ bool isPlayerReturnLocation(String location) {
     '/settings' ||
     '/settings/sources' ||
     '/settings/webdav' ||
-    '/settings/cloud-drive2' ||
     '/settings/equalizer' ||
     '/debug' => true,
     _ => false,

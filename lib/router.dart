@@ -22,8 +22,6 @@ import 'features/playlists/playlist_management_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/settings_section.dart';
-import 'features/cloud/cloud_folder_picker_page.dart';
-import 'features/settings/cloud_drive2_settings_page.dart';
 import 'features/settings/webdav_sync_page.dart';
 import 'features/music_sources/music_source_page.dart';
 import 'features/shell/app_shell.dart';
@@ -273,15 +271,6 @@ GoRouter createAppRouter({
                     ),
                   ),
                   GoRoute(
-                    path: '/songs/cloud-folders',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      child: _shellPageContent(
-                        state,
-                        child: const CloudFolderPickerPage(),
-                      ),
-                    ),
-                  ),
-                  GoRoute(
                     path: '/playlists',
                     pageBuilder: (context, state) => NoTransitionPage(
                       child: _shellPageContent(
@@ -371,19 +360,6 @@ GoRouter createAppRouter({
                           child: _shellPageContent(
                             state,
                             child: const WebDavSyncPage(),
-                          ),
-                        ),
-                      ),
-                      GoRoute(
-                        path: 'cloud-drive2',
-                        pageBuilder: (context, state) => SettingsRoutePage(
-                          key: state.pageKey,
-                          origin: state.extra is SettingsContainerOrigin
-                              ? state.extra as SettingsContainerOrigin
-                              : null,
-                          child: _shellPageContent(
-                            state,
-                            child: const CloudDrive2SettingsPage(),
                           ),
                         ),
                       ),

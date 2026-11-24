@@ -18,8 +18,6 @@ String contentDocumentKey(String value) {
 String normalizeStorageLocation(String value) {
   final trimmed = value.trim();
   if (isContentLocation(trimmed)) return trimmed;
-  // Cloud song identities (cloud://…) are opaque keys like content URIs.
-  if (trimmed.startsWith('cloud://')) return trimmed;
   final normalized =
       (trimmed.startsWith('/') ? p.posix : p.context).normalize(trimmed);
   // iOS/macOS: /var 是 /private/var 的符号链接，指向同一目录。path_provider

@@ -1,11 +1,9 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_logger.dart';
 import 'storage_location.dart';
 import 'storage_browser_service.dart';
 import 'local_audio_library_events.dart';
@@ -49,12 +47,8 @@ class SafStorage {
         initialDirectory: initialDir,
         dialogTitle: '选择文件夹',
       );
-      if (picked == null) {
-        unawaited(AppLogger.write('picker', 'outcome=cancelled'));
-        return null;
-      }
+      if (picked == null) return null;
       final name = p.basename(picked);
-      unawaited(AppLogger.write('picker', 'outcome=selected name=$name'));
       _labels[picked] = name;
       await (await SharedPreferences.getInstance()).setString(
         '$_labelPrefix$picked',
@@ -76,23 +70,13 @@ class SafStorage {
       );
       return path;
     }
-    final Map<String, dynamic>? selected;
-    try {
-      selected = await _channel.invokeMapMethod<String, dynamic>(
-        'pickDirectory',
-        {'writable': writable, 'initialUri': initialLocation},
-      );
-    } on PlatformException catch (error) {
-      unawaited(AppLogger.write('picker', 'outcome=error code=${error.code}'));
-      rethrow;
-    }
-    if (selected == null) {
-      unawaited(AppLogger.write('picker', 'outcome=cancelled'));
-      return null;
-    }
+    final selected = await _channel.invokeMapMethod<String, dynamic>(
+      'pickDirectory',
+      {'writable': writable, 'initialUri': initialLocation},
+    );
+    if (selected == null) return null;
     final uri = selected['uri'] as String;
     final name = selected['name'] as String;
-    unawaited(AppLogger.write('picker', 'outcome=selected name=$name'));
     _labels[uri] = name;
     await (await SharedPreferences.getInstance()).setString(
       '$_labelPrefix$uri',

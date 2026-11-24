@@ -1588,7 +1588,6 @@ class _FakeAudioHandler extends PlayerAudioHandler {
     required MediaItem item,
     required Uri sourceUri,
     int? queueIndex,
-    Map<String, String> headers = const {},
   }) async {
     loadedUris.add(sourceUri);
     await loadGate?.future;

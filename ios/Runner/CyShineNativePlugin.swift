@@ -365,16 +365,6 @@ final class CyShineStorageBrowserChannel {
       // 让绝对路径的扫描/播放沿用既有代码。
       result(acquireAllAccess())
 
-    case "hasBookmark":
-      // Dart 侧选目录后校验探针降级用：该路径已有 bookmark 授权时，
-      // 探针失败不拒绝保存。先按路径键查，再回退旧的文件夹名键条目。
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String, !path.isEmpty else {
-        result(false)
-        return
-      }
-      result(bookmarks.hasBookmark(forPath: path))
-
     case "listChildren":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String, !path.isEmpty else {
@@ -406,17 +396,7 @@ final class CyShineStorageBrowserChannel {
         result(FlutterError(code: "INVALID_ARGS", message: "缺少 name/bookmark", details: nil))
         return
       }
-      // 优先按解析出的目录路径存键（同名文件夹不互相顶授权）；
-      // 解析失败才回退旧的文件夹名键。
-      var isStale = false
-      if let url = try? URL(resolvingBookmarkData: data,
-                            options: [.withoutUI],
-                            relativeTo: nil,
-                            bookmarkDataIsStale: &isStale) {
-        bookmarks.save(path: url.path, bookmark: data)
-      } else {
-        bookmarks.save(name: name, bookmark: data)
-      }
+      bookmarks.save(name: name, bookmark: data)
       result(true)
 
     case "removeRoot":
@@ -442,20 +422,10 @@ final class CyShineStorageBrowserChannel {
                             message: "无法弹出目录选择器", details: nil))
         return
       }
-      // 防重入：上一次选择还在飞时，先把旧 delegate 以取消语义收尾，
-      // 再覆写引用，避免旧 FlutterResult 永不回调。
-      if let pending = self.pickerDelegate {
-        pending.completeAsCancelled()
-        self.pickerDelegate = nil
-      }
       let delegate = FolderPickerDelegate(bookmarks: self.bookmarks, result: result)
       // UIDocumentPickerViewController.delegate 是 weak，必须强引用到回调结束。
       self.pickerDelegate = delegate
-      delegate.onDone = { [weak self, weak delegate] in
-        guard let self = self, let delegate = delegate,
-              self.pickerDelegate === delegate else { return }
-        self.pickerDelegate = nil
-      }
+      delegate.onDone = { [weak self] in self?.pickerDelegate = nil }
       let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder],
                                                   asCopy: false)
       picker.delegate = delegate
@@ -591,7 +561,6 @@ final class CyShineStorageBrowserChannel {
 final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   private let bookmarks: CyShineSecurityScopedStore
   private let result: FlutterResult
-  private var completed = false
   var onDone: (() -> Void)?
 
   init(bookmarks: CyShineSecurityScopedStore, result: @escaping FlutterResult) {
@@ -599,19 +568,9 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
     self.result = result
   }
 
-  /// 被新一次 pickDirectory 顶替时以取消语义收尾，保证 FlutterResult
-  /// 恰好被调用一次；此后本 delegate 的任何回调都不再重复完成。
-  func completeAsCancelled() {
-    guard !completed else { return }
-    completed = true
-    result(nil)
-  }
-
   func documentPicker(_ controller: UIDocumentPickerViewController,
                       didPickDocumentsAt urls: [URL]) {
     CyShineNativeLog.write("picker", "didPick count=\(urls.count) first=\(urls.first?.path ?? "nil")")
-    guard !completed else { return }
-    completed = true
     defer { onDone?() }
     guard let url = urls.first else {
       result(FlutterError(code: "CANCELLED", message: "未选择文件夹", details: nil))
@@ -625,20 +584,18 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
       let data = try url.bookmarkData(options: [],
                                       includingResourceValuesForKeys: nil,
                                       relativeTo: nil)
-      bookmarks.save(path: url.path, bookmark: data)
+      bookmarks.save(name: url.lastPathComponent, bookmark: data)
+      // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
+      result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
     } catch {
-      // 书签建立失败不让整次选择作废：scope 已开始且会话内不释放，
-      // 本次会话照常可读写该目录；跨启动授权待下次保存成功时补齐。
-      CyShineNativeLog.write("picker", "bookmark_failed error=\(error.localizedDescription)")
+      if scoped { url.stopAccessingSecurityScopedResource() }
+      result(FlutterError(code: "BOOKMARK_FAILED",
+                          message: error.localizedDescription, details: nil))
     }
-    // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
-    result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
     CyShineNativeLog.write("picker", "cancelled")
-    guard !completed else { return }
-    completed = true
     onDone?()
     // 取消不视为错误：返回 nil 让 Dart 层静默返回。
     result(nil)
@@ -662,26 +619,10 @@ final class CyShineSecurityScopedStore {
     defaults.dictionary(forKey: Self.defaultsKey) as? [String: String] ?? [:]
   }
 
-  /// 按目录完整路径存键：两个同名文件夹（如两处「Music」）不再互相
-  /// 顶掉授权。旧条目按文件夹名存键，读取时仍兼容（见 resolvedRoots）。
-  func save(path: String, bookmark: Data) {
-    var stored = load()
-    stored[path] = bookmark.base64EncodedString()
-    defaults.set(stored, forKey: Self.defaultsKey)
-  }
-
-  /// 旧版按文件夹名存键的写法，仅保留给解析不出路径时的兜底。
   func save(name: String, bookmark: Data) {
     var stored = load()
     stored[name] = bookmark.base64EncodedString()
     defaults.set(stored, forKey: Self.defaultsKey)
-  }
-
-  /// 该路径是否已有授权：先按路径键直查，未命中再解析全部存量条目
-  /// 比对解析出的路径（兼容旧版按文件夹名存键的条目）。
-  func hasBookmark(forPath path: String) -> Bool {
-    if load()[path] != nil { return true }
-    return resolvedRoots().contains { $0.url.path == path }
   }
 
   func remove(path: String) {
@@ -701,14 +642,7 @@ final class CyShineSecurityScopedStore {
     for (name, encoded) in load() {
       guard let data = Data(base64Encoded: encoded) else { continue }
       if let resolved = try? resolve(data) {
-        // 新条目的键是完整路径，展示名取解析出 URL 的末段；旧条目的键
-        // 是文件夹名，原样用作展示名。
-        let displayName = name.hasPrefix("/")
-          ? (resolved.url.lastPathComponent.isEmpty
-              ? name
-              : resolved.url.lastPathComponent)
-          : name
-        roots.append(Root(name: displayName, url: resolved.url))
+        roots.append(Root(name: name, url: resolved.url))
         if !resolved.isStale { stillValid[name] = encoded }
       }
     }

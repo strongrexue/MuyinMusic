@@ -42,13 +42,6 @@ void main() {
         '/music/a',
         '/music/b',
       ]);
-      // 下载目录作为隐含扫描根出现在 scanDirectories，但不落盘。
-      expect(container.read(settingsProvider).scanDirectories, [
-        '/music/a',
-        '/music/b',
-        '/new-downloads',
-      ]);
-      expect(prefs.getStringList('local_music_dirs'), ['/music/a', '/music/b']);
 
       final restored = createContainer();
       addTearDown(restored.dispose);
@@ -66,7 +59,7 @@ void main() {
   );
 
   test(
-    'changing the download folder never rewrites the scan folder list',
+    'default scan folder follows the download folder until multiple roots are configured',
     () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
@@ -75,69 +68,15 @@ void main() {
       );
       addTearDown(container.dispose);
       final notifier = container.read(settingsProvider.notifier);
-      final defaultDir = container.read(settingsProvider).downloadDir;
-      expect(container.read(settingsProvider).localMusicDirs, [defaultDir]);
-      expect(container.read(settingsProvider).scanDirectories, [defaultDir]);
-
-      // 出厂同值情形：改下载目录也不再连带改写扫描目录。
-      await notifier.setDownloadDir('/downloads');
-      expect(container.read(settingsProvider).localMusicDirs, [defaultDir]);
-      // 扫描列表从未被写盘：local_music_dirs 仍不存在。
-      expect(prefs.getStringList('local_music_dirs'), isNull);
-      // 下载目录只作为隐含根参与扫描集合，不写进 local_music_dirs。
-      expect(container.read(settingsProvider).scanDirectories, [
-        defaultDir,
-        '/downloads',
+      expect(container.read(settingsProvider).localMusicDirs, [
+        container.read(settingsProvider).downloadDir,
       ]);
-
+      await notifier.setDownloadDir('/downloads');
+      expect(container.read(settingsProvider).localMusicDirs, ['/downloads']);
       await notifier.setLocalMusicDirs(['/downloads', '/other']);
       await notifier.setDownloadDir('/new-downloads');
       expect(container.read(settingsProvider).localMusicDirs, [
         '/downloads',
-        '/other',
-      ]);
-      expect(container.read(settingsProvider).scanDirectories, [
-        '/downloads',
-        '/other',
-        '/new-downloads',
-      ]);
-      expect(prefs.getStringList('local_music_dirs'), [
-        '/downloads',
-        '/other',
-      ]);
-    },
-  );
-
-  test('build preserves a stored external download directory', () async {
-    SharedPreferences.setMockInitialValues({
-      'download_dir': '/external/Downloads',
-      'local_music_dirs': ['/music'],
-    });
-    final prefs = await SharedPreferences.getInstance();
-    final container = ProviderContainer(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
-    );
-    addTearDown(container.dispose);
-    final settings = container.read(settingsProvider);
-    expect(settings.downloadDir, '/external/Downloads');
-    expect(settings.localMusicDirs, ['/music']);
-    expect(settings.scanDirectories, ['/music', '/external/Downloads']);
-  });
-
-  test(
-    'scan roots deduplicate a download folder already in the scan list',
-    () async {
-      SharedPreferences.setMockInitialValues({
-        'download_dir': '/music',
-        'local_music_dirs': ['/music', '/other'],
-      });
-      final prefs = await SharedPreferences.getInstance();
-      final container = ProviderContainer(
-        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
-      );
-      addTearDown(container.dispose);
-      expect(container.read(settingsProvider).scanDirectories, [
-        '/music',
         '/other',
       ]);
     },
@@ -279,61 +218,5 @@ void main() {
       '/music/legacy.mp3',
     ]);
     expect(container.read(settingsProvider).ignoredLocalSongPaths, isEmpty);
-  });
-
-  group('isStaleIosContainerPath', () {
-    const currentUuid = 'AAAAAAAA-1111-2222-3333-444444444444';
-    const otherAppPath =
-        '/var/mobile/Containers/Data/Application/'
-        'BBBBBBBB-5555-6666-7777-888888888888/Documents/Music';
-    const ownOldPath =
-        '/var/mobile/Containers/Data/Application/'
-        'CCCCCCCC-9999-0000-1111-222222222222/Documents/MuyinMusic';
-    const ownCurrentPath =
-        '/var/mobile/Containers/Data/Application/'
-        '$currentUuid/Documents/MuyinMusic';
-
-    test('bookmarked external container path is not stale', () {
-      expect(
-        isStaleIosContainerPath(
-          otherAppPath,
-          currentUuid: currentUuid,
-          bookmarkedPaths: const {otherAppPath},
-        ),
-        isFalse,
-      );
-    });
-
-    test('external container path without bookmark is stale', () {
-      expect(
-        isStaleIosContainerPath(otherAppPath, currentUuid: currentUuid),
-        isTrue,
-      );
-    });
-
-    test('own old container path without bookmark is stale', () {
-      expect(
-        isStaleIosContainerPath(ownOldPath, currentUuid: currentUuid),
-        isTrue,
-      );
-    });
-
-    test('current container path and non-container paths are not stale', () {
-      expect(
-        isStaleIosContainerPath(ownCurrentPath, currentUuid: currentUuid),
-        isFalse,
-      );
-      expect(
-        isStaleIosContainerPath(
-          '/var/mobile/Documents/Music',
-          currentUuid: currentUuid,
-        ),
-        isFalse,
-      );
-      expect(
-        isStaleIosContainerPath(ownOldPath, currentUuid: ''),
-        isFalse,
-      );
-    });
   });
 }

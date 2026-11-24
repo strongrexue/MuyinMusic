@@ -59,7 +59,6 @@ String? settingsParentLocation(String location) {
   return switch (location) {
     '/settings/sources' => SettingsSection.network.location,
     '/settings/webdav' => SettingsSection.sync.location,
-    '/settings/cloud-drive2' => SettingsSection.sync.location,
     '/settings/equalizer' => SettingsSection.playback.location,
     '/debug' => SettingsSection.debug.location,
     _ => null,

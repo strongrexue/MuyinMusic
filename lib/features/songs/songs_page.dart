@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,9 +21,6 @@ import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../theme/app_motion.dart';
-import '../cloud/cloud_download_service.dart';
-import '../cloud/cloud_library.dart';
-import '../cloud/cloud_song_path.dart';
 import '../downloads/download_history_store.dart';
 import '../downloads/download_progress.dart';
 import '../music_sources/music_source_action_guard.dart';
@@ -97,7 +93,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   String? _lxImportProgress;
   List<ScannedSongFile>? _scannedFiles;
   String? _scanError;
-  ProviderSubscription<AppSettings>? _localMusicDirSubscription;
+  ProviderSubscription<List<String>>? _localMusicDirSubscription;
   late final StateController<SongsToolbarState> _toolbarStateController;
   late final StateController<bool> _shellToolbarController;
   late final LocalSongScanCache _scanCache;
@@ -116,15 +112,13 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     _scanCache.addListener(_handleScanCacheChanged);
     if (_searchMode) _enableSearchFocusHandling();
     _localMusicDirSubscription = ref.listenManual(
-      settingsProvider,
+      settingsProvider.select((settings) => settings.localMusicDirs),
       (previous, next) {
-        if (previous == null) return;
-        final directories = next.scanDirectories;
-        if (listEquals(previous.scanDirectories, directories)) return;
+        if (previous == null || previous == next) return;
         // Keep the currently rendered library in place while the new folders are
         // scanned, then swap the result in one frame. This avoids a loading
         // flash when the local music folder changes from Settings.
-        unawaited(_scanCache.ensureScan(directories: directories));
+        unawaited(_scanCache.ensureScan(directories: next));
       },
     );
     unawaited(_initializeScan());
@@ -136,7 +130,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     final snapshot = _scanCache.snapshot;
     if (snapshot == null ||
         !snapshot.matchesDirectories(
-          ref.read(settingsProvider).scanDirectories,
+          ref.read(settingsProvider).localMusicDirs,
         )) {
       return;
     }
@@ -160,9 +154,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _initializeScan() async {
     await _scanCache.ensureScan(
-      directories: ref.read(settingsProvider).scanDirectories,
+      directories: ref.read(settingsProvider).localMusicDirs,
     );
-    unawaited(ref.read(cloudDrive2LibraryProvider).refresh());
     if (mounted) _handleScanCacheChanged();
   }
 
@@ -231,7 +224,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     if (!mounted) return;
     final snapshot = _scanCache.snapshot;
     if (snapshot == null) return;
-    final currentDirectories = ref.read(settingsProvider).scanDirectories;
+    final currentDirectories = ref.read(settingsProvider).localMusicDirs;
     if (!snapshot.matchesDirectories(currentDirectories)) return;
 
     final files = [
@@ -243,11 +236,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     });
   }
 
-  Future<void> _scanLocalMusicFolder() async {
-    await _scanCache.refresh(
-      directories: ref.read(settingsProvider).scanDirectories,
+  Future<void> _scanLocalMusicFolder() {
+    return _scanCache.refresh(
+      directories: ref.read(settingsProvider).localMusicDirs,
     );
-    await ref.read(cloudDrive2LibraryProvider).refresh();
   }
 
   List<DownloadHistoryEntry> _songs(List<DownloadHistoryEntry> history) {
@@ -338,13 +330,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     bool replaceQueue = true,
   }) async {
     final path = entry.savedPath;
-    final isCloud = path != null && isCloudSongPath(path);
     final hasLocalFile =
-        !isCloud &&
-        path != null &&
-        path.isNotEmpty &&
-        isLocalAudioSourceAvailable(path);
-    if (!isCloud && !hasLocalFile && entry.musicInfo == null) {
+        path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path);
+    if (!hasLocalFile && entry.musicInfo == null) {
       showAppToast(context, '文件不存在，可能已被移动或删除', type: AppToastType.warning);
       return;
     }
@@ -499,13 +487,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _addNext(DownloadHistoryEntry entry) async {
     final path = entry.savedPath;
-    final isCloud = path != null && isCloudSongPath(path);
     final hasLocalFile =
-        !isCloud &&
-        path != null &&
-        path.isNotEmpty &&
-        isLocalAudioSourceAvailable(path);
-    if (!isCloud && !hasLocalFile && entry.musicInfo == null) {
+        path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path);
+    if (!hasLocalFile && entry.musicInfo == null) {
       showAppToast(context, '文件不存在，无法加入队列', type: AppToastType.warning);
       return;
     }
@@ -560,22 +544,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _deleteSongs(List<DownloadHistoryEntry> entries) async {
     if (_deletingFiles) return;
-    // 云端条目在本机没有文件可删：一律走「仅从本地列表移除」。
-    final cloudEntries = entries
-        .where(
-          (e) => e.savedPath != null && isCloudSongPath(e.savedPath!),
-        )
-        .toList(growable: false);
-    if (cloudEntries.isNotEmpty) {
-      await _removeSongsFromList(cloudEntries);
-      if (!mounted) return;
-      entries = entries
-          .where(
-            (e) => e.savedPath == null || !isCloudSongPath(e.savedPath!),
-          )
-          .toList(growable: false);
-      if (entries.isEmpty) return;
-    }
     final paths = entries
         .map((e) => e.savedPath)
         .whereType<String>()
@@ -697,28 +665,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     }
   }
 
-  /// 云端歌曲「下载」：落盘到下载目录并登记，完成后即普通本地歌。
-  Future<void> _downloadCloudSong(DownloadHistoryEntry entry) async {
-    final path = entry.savedPath;
-    if (path == null || !isCloudSongPath(path)) return;
-    final row = _scanCache.snapshot?.files
-        .where((file) => file.key == _pathKey(path))
-        .firstOrNull;
-    if (row == null) {
-      showAppToast(context, '云端歌曲信息已失效，请下拉刷新', type: AppToastType.warning);
-      return;
-    }
-    showAppToast(context, '开始下载「${entry.name}」');
-    try {
-      await ref.read(cloudDownloadServiceProvider).downloadToLocal(row);
-      if (!mounted) return;
-      showAppToast(context, '已下载到本地', type: AppToastType.success);
-    } catch (error) {
-      if (!mounted) return;
-      showAppToast(context, '下载失败：$error', type: AppToastType.error);
-    }
-  }
-
   /// 「仅从本地列表移除」：文件保留，路径写入忽略名单，扫描不再收录；
   /// 提示带撤销，撤销即恢复（移出名单并重扫回填）。
   Future<void> _removeSongsFromList(List<DownloadHistoryEntry> entries) async {
@@ -742,9 +688,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
       final file = scannedByKey[_pathKey(path)];
       final localPath = file?.identityPath ?? '';
       final hasLocalPath =
-          localPath.isNotEmpty &&
-          !localPath.startsWith('content://') &&
-          !isCloudSongPath(localPath);
+          localPath.isNotEmpty && !localPath.startsWith('content://');
       records.add(
         IgnoredLocalSongRecord(
           path: path,
@@ -792,7 +736,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   Future<void> _restoreIgnoredSongs(Iterable<String> paths) async {
     await ref.read(settingsProvider.notifier).unignoreLocalSongPaths(paths);
     await _scanCache.refresh(
-      directories: ref.read(settingsProvider).scanDirectories,
+      directories: ref.read(settingsProvider).localMusicDirs,
     );
   }
 
@@ -1178,7 +1122,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
               SongsLibraryTab.liked => '我的喜欢',
               SongsLibraryTab.playlists => '歌单',
               SongsLibraryTab.local => '本地音乐',
-              SongsLibraryTab.cloud => '云端音乐',
             },
             quality: ref.read(settingsProvider).batchDownloadQuality,
             skippedCount: skipped,
@@ -1338,35 +1281,14 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(settingsProvider);
-    final cloudConfigured = settings.cloudDrive2Configured;
-    final selectedTab = ref.watch(songsLibraryTabProvider);
-    // 云端页签只在 CloudDrive2 配置齐全时存在；配置被清掉后残留的
-    // cloud 选中态回落到本地页签，索引本身不拆。
-    final tab =
-        selectedTab == SongsLibraryTab.cloud && !cloudConfigured
-        ? SongsLibraryTab.local
-        : selectedTab;
+    final tab = ref.watch(songsLibraryTabProvider);
     final playlists = ref.watch(localPlaylistsProvider);
     final history = ref.watch(downloadHistoryProvider);
     final likedSongs = ref.watch(likedSongsProvider);
     final likedKeys = {for (final entry in likedSongs) songIdentityKey(entry)};
     final query = _searchQuery.trim();
     final searching = _searchMode && query.isNotEmpty;
-    final allSongs = _songs(history);
-    final librarySongs = switch (tab) {
-      SongsLibraryTab.cloud => [
-        for (final entry in allSongs)
-          if (entry.savedPath != null && isCloudSongPath(entry.savedPath!))
-            entry,
-      ],
-      SongsLibraryTab.local => [
-        for (final entry in allSongs)
-          if (entry.savedPath == null || !isCloudSongPath(entry.savedPath!))
-            entry,
-      ],
-      _ => allSongs,
-    };
+    final librarySongs = _songs(history);
     final localSongs = tab == SongsLibraryTab.liked
         ? _likedSongs(likedSongs, librarySongs)
         : librarySongs;
@@ -1653,46 +1575,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                   ),
                 ),
               ),
-            if (tab == SongsLibraryTab.cloud && !searching && !_batchMode)
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-                sliver: SliverToBoxAdapter(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _LibraryQuickAction(
-                          key: const ValueKey('cloud-folder-picker'),
-                          icon: Icons.folder_outlined,
-                          label: cloudMusicRootLabel(
-                            settings.cloudDrive2MusicRoot,
-                          ),
-                          onPressed: () =>
-                              context.push('/songs/cloud-folders'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        '${localSongs.length} 首',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      _CloudRefreshButton(
-                        key: const ValueKey('cloud-refresh-button'),
-                        onPressed: () =>
-                            ref.read(cloudDrive2LibraryProvider).refresh(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            // 云端页签常态下计数在文件夹快捷行里，summary 只在搜索/批量
-            // （快捷行隐藏）时补位，避免同一数字出现两次。
-            if (localSongs.isNotEmpty &&
-                (tab != SongsLibraryTab.cloud || searching || _batchMode))
+            if (localSongs.isNotEmpty)
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
                 sliver: SliverToBoxAdapter(
@@ -1707,8 +1590,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                     onToggleBatch: songs.isEmpty ? null : _toggleBatchMode,
                     collectionLabel: tab == SongsLibraryTab.liked
                         ? '喜欢的歌曲'
-                        : tab == SongsLibraryTab.cloud
-                        ? '云端音乐'
                         : '本地音乐',
                   ),
                 ),
@@ -1725,11 +1606,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                         liked: true,
                         title: '还没有喜欢的歌曲',
                         message: '在歌曲列表点击右侧 ❤️ 即可收藏到这里',
-                      )
-                    : tab == SongsLibraryTab.cloud
-                    ? const EmptySongs(
-                        title: '还没有云端歌曲',
-                        message: '所选文件夹中的歌曲会显示在这里\n点上方文件夹可切换扫描范围',
                       )
                     : EmptySongs(error: _scanError),
               )
@@ -1770,7 +1646,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       playing: playing,
                       playingActive: playing && playbackIdentity.playing,
                       batchMode: _batchMode,
-                      cloudMode: path != null && isCloudSongPath(path),
                       selected: _selectedIds.contains(entry.id),
                       liked: likedKeys.contains(songIdentityKey(entry)),
                       onToggleLike: () => _toggleLike(entry),
@@ -1778,10 +1653,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       onAddNext: () => _addNext(entry),
                       onAddToPlaylist: () =>
                           unawaited(_selectPlaylistForSong(entry)),
-                      onDownload:
-                          path != null && isCloudSongPath(path)
-                          ? () => unawaited(_downloadCloudSong(entry))
-                          : entry.musicInfo == null
+                      onDownload: entry.musicInfo == null
                           ? null
                           : () => showQualityPickerSheet(
                               context,
@@ -1821,9 +1693,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                               ? () => unawaited(_unlikeSelected(songs))
                               : () => unawaited(_confirmDeleteSelected(songs))),
                     onRemoveFromList:
-                        (tab == SongsLibraryTab.local ||
-                                tab == SongsLibraryTab.cloud) &&
-                            selectedCount > 0
+                        tab == SongsLibraryTab.local && selectedCount > 0
                         ? () => unawaited(_removeSelectedFromList(songs))
                         : null,
                     onAddToPlaylist: selectedCount == 0
@@ -1855,10 +1725,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
             right: 14,
             child: prism.SegmentedControl<SongsLibraryTab>(
               key: const ValueKey('songs-library-tabs'),
-              segments: [
+              segments: const [
                 (SongsLibraryTab.liked, '喜欢'),
                 (SongsLibraryTab.local, '本地音乐'),
-                if (cloudConfigured) (SongsLibraryTab.cloud, '云端音乐'),
                 (SongsLibraryTab.playlists, '歌单'),
               ],
               value: tab,
@@ -1886,54 +1755,6 @@ class _SongsPageState extends ConsumerState<SongsPage> {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// Circular refresh button on the cloud tab's folder row; spins while the
-/// re-enumeration it triggered is still running.
-class _CloudRefreshButton extends StatefulWidget {
-  const _CloudRefreshButton({super.key, required this.onPressed});
-
-  final Future<void> Function() onPressed;
-
-  @override
-  State<_CloudRefreshButton> createState() => _CloudRefreshButtonState();
-}
-
-class _CloudRefreshButtonState extends State<_CloudRefreshButton> {
-  bool _refreshing = false;
-
-  Future<void> _handlePressed() async {
-    if (_refreshing) return;
-    setState(() => _refreshing = true);
-    try {
-      await widget.onPressed();
-    } finally {
-      if (mounted) setState(() => _refreshing = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.62),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: _refreshing ? null : () => unawaited(_handlePressed()),
-        child: SizedBox(
-          width: 40,
-          height: 40,
-          child: _refreshing
-              ? const Padding(
-                  padding: EdgeInsets.all(11),
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(Icons.refresh_rounded, size: 19, color: scheme.onSurface),
-        ),
       ),
     );
   }

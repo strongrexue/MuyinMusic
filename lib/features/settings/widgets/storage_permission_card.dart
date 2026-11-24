@@ -70,7 +70,7 @@ class _StoragePermissionCardState extends ConsumerState<StoragePermissionCard>
         unawaited(
           ref
               .read(localSongScanCacheProvider)
-              .refresh(directories: ref.read(settingsProvider).scanDirectories),
+              .refresh(directories: ref.read(settingsProvider).localMusicDirs),
         );
       }
     } catch (_) {

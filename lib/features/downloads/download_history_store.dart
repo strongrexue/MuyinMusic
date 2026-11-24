@@ -65,11 +65,6 @@ class DownloadHistoryNotifier extends Notifier<List<DownloadHistoryEntry>> {
     );
   }
 
-  Future<void> addRawEntry(DownloadHistoryEntry entry) async {
-    state = [entry, ...state].take(_kMaxHistoryEntries).toList(growable: false);
-    await _persist();
-  }
-
   Future<void> remove(String id) async {
     state = state.where((entry) => entry.id != id).toList(growable: false);
     await _persist();

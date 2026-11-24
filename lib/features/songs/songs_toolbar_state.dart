@@ -7,13 +7,10 @@ import '../../core/storage/settings_store.dart';
 
 const String songsLibraryTabStorageKey = 'songs_library_tab_v1';
 
-/// The collections the Songs page hosts as independent tabs. The cloud
-/// tab only exists while CloudDrive2 is configured; the page falls back
-/// to the local tab when a persisted cloud selection outlives the config.
+/// The three collections the Songs page hosts as independent tabs.
 enum SongsLibraryTab {
   liked('liked', '喜欢', Icons.favorite_rounded),
   local('local', '本地音乐', Icons.smartphone_rounded),
-  cloud('cloud', '云端音乐', Icons.cloud_rounded),
   playlists('playlists', '歌单', Icons.queue_music_rounded);
 
   const SongsLibraryTab(this.code, this.label, this.icon);
@@ -25,7 +22,6 @@ enum SongsLibraryTab {
   static SongsLibraryTab fromCode(String? code) {
     return switch (code) {
       'local' => SongsLibraryTab.local,
-      'cloud' => SongsLibraryTab.cloud,
       'playlists' => SongsLibraryTab.playlists,
       _ => SongsLibraryTab.liked,
     };
@@ -105,7 +101,6 @@ class SongsToolbarState {
   String get searchLabel => switch (tab) {
     SongsLibraryTab.local => '搜索本地音乐',
     SongsLibraryTab.liked => '搜索喜欢的歌曲',
-    SongsLibraryTab.cloud => '搜索云端音乐',
     SongsLibraryTab.playlists => '搜索歌单',
   };
 

@@ -1,11 +1,8 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'app_logger.dart';
 
 final storageBrowserServiceProvider = Provider<StorageBrowserService>(
   (ref) => const StorageBrowserService(),
@@ -73,26 +70,13 @@ class StorageBrowserService {
 
   /// 弹出系统目录选择器并建立 security-scoped bookmark 持久授权（iOS）。
   /// 返回 {path, name}；用户取消返回 null。
-  /// 每次结局（选定/取消/错误码）写一条日志，下次实机复现可与原生侧
-  /// picker 记录对齐定位；只记目录名，不记完整路径。
   Future<Map<String, String>?> pickDirectory() async {
     if (!Platform.isIOS) return null;
-    try {
-      final raw = await _channel.invokeMapMethod<String, Object?>(
-        'pickDirectory',
-      );
-      final path = raw?['path'] as String?;
-      if (raw == null || path == null || path.isEmpty) {
-        unawaited(AppLogger.write('picker', 'outcome=cancelled'));
-        return null;
-      }
-      final name = raw['name'] as String? ?? path;
-      unawaited(AppLogger.write('picker', 'outcome=selected name=$name'));
-      return {'path': path, 'name': name};
-    } on PlatformException catch (error) {
-      unawaited(AppLogger.write('picker', 'outcome=error code=${error.code}'));
-      rethrow;
-    }
+    final raw = await _channel.invokeMapMethod<String, Object?>('pickDirectory');
+    if (raw == null) return null;
+    final path = raw['path'] as String?;
+    if (path == null || path.isEmpty) return null;
+    return {'path': path, 'name': raw['name'] as String? ?? path};
   }
 
   /// 启动时对全部已授权 bookmark 根持续持有 security scope（iOS）。
@@ -100,17 +84,6 @@ class StorageBrowserService {
   Future<int> acquireAllAccess() async {
     if (!Platform.isIOS) return 0;
     return await _channel.invokeMethod<int>('acquireAllAccess') ?? 0;
-  }
-
-  /// 该路径本身是否已有 security-scoped bookmark 授权（iOS）。
-  /// 先按路径键查，再回退解析存量条目比对解析出的路径（兼容旧版按
-  /// 文件夹名存键的 bookmark）。
-  Future<bool> hasBookmark(String path) async {
-    if (!Platform.isIOS) return false;
-    return await _channel.invokeMethod<bool>('hasBookmark', {
-          'path': path,
-        }) ??
-        false;
   }
 
   Future<List<StorageBrowserEntry>> listRoots() async {
