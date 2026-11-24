@@ -63,18 +63,21 @@ class LocalSongScanner {
   static Future<LocalSongScanResult> scan(
     List<String> directories,
     Map<String, LocalSongFileSnapshot> previous,
-    bool Function() cancelled,
-  ) async {
+    bool Function() cancelled, {
+    Map<String, String> contentRoots = const {},
+    Future<List<Map<String, dynamic>>> Function(String uri)? safScan,
+  }) async {
     final result = LocalSongScanResult(
       Platform.isAndroid ? 'media' : 'filesystem',
     );
     final zeroHitRoots = <String>{};
+    var hitRoots = <String>{};
     var fallback = directories;
     if (Platform.isAndroid) {
       try {
         final query = await MediaLibrary.query(directories);
         if (cancelled()) return result;
-        for (final row in query.files) {
+        for (final row in await existingMediaRows(query.files)) {
           final path = row['path'] as String;
           final owner = directories
               .where((root) => isFileInScanDirectory(path, root))
@@ -93,7 +96,7 @@ class LocalSongScanner {
         // Broad access is an optional fallback for unindexed USB/legacy roots.
         // A healthy indexed root never triggers a second filesystem walk.
         final wide = await PermissionService.hasExternalStorageWrite();
-        final hitRoots = <String>{
+        hitRoots = <String>{
           for (final root in directories)
             if (!isContentLocation(root) &&
                 result.files.values.any(
@@ -120,6 +123,56 @@ class LocalSongScanner {
           return result;
         }
         result.backend = 'compatibility';
+      }
+    }
+    // MediaStore 零命中且带 SAF 树授权的根：原始路径通道（dart:io 与
+    // MediaStore）都读不到授权目录，改走 SafStorage.scan 用授权枚举。
+    // 枚举失败（授权失效等）按零产出处理并留日志，不让整轮扫描失败。
+    final safRoots = <String>{};
+    if (contentRoots.isNotEmpty) {
+      final candidates =
+          safScanRoots(
+              directories,
+              contentRoots: contentRoots,
+              hitRoots: hitRoots,
+            ).toList()
+            ..sort((a, b) => a.length.compareTo(b.length));
+      for (final root in candidates) {
+        if (cancelled()) return result;
+        if (safRoots.any((parent) => isFileInScanDirectory(root, parent))) {
+          safRoots.add(root);
+          continue;
+        }
+        final treeUri = contentRoots[root]!;
+        try {
+          final rows = await (safScan ?? SafStorage.scan)(treeUri);
+          for (final row in rows) {
+            if (cancelled()) return result;
+            final file = safTreeFile(row, root: root, treeUri: treeUri);
+            if (file == null) continue;
+            final merged = file.retainingMetadata(
+              previous[file.key],
+              retryEmpty: true,
+            );
+            result.files.putIfAbsent(
+              file.key,
+              () => merged.withAliases({...file.aliases, ...merged.aliases}),
+            );
+          }
+          safRoots.add(root);
+        } catch (error) {
+          unawaited(
+            AppLogger.write(
+              'local-library',
+              'saf scan failed root=$root error=$error',
+            ),
+          );
+        }
+      }
+      if (safRoots.isNotEmpty) {
+        fallback = fallback
+            .where((root) => !safRoots.contains(root))
+            .toList();
       }
     }
     final completed = <String>[];
@@ -173,19 +226,57 @@ class LocalSongScanner {
       }
     }
     // MediaStore 零命中的本地根留一条痕：下次实机复现时能直接区分
-    // 「未被系统索引、靠兜底扫出」与「兜底也没读到」。
+    // 「未被系统索引、靠兜底扫出」与「兜底也没读到」，并标明最终是
+    // 哪条通道产出的（saf 授权枚举 / filesystem 原始遍历 / 都没走）。
     for (final root in zeroHitRoots) {
       final count = result.files.values
           .where((file) => isFileInScanDirectory(file.path, root))
           .length;
+      final channel = safRoots.contains(root)
+          ? 'saf'
+          : fallback.contains(root)
+          ? 'filesystem'
+          : 'none';
       unawaited(
         AppLogger.write(
           'local-library',
-          'mediastore zero-hit root=$root fallbackFiles=$count',
+          'mediastore zero-hit root=$root channel=$channel files=$count',
         ),
       );
     }
     return result;
+  }
+
+  /// MediaStore 会残留已删文件的陈旧行（实体经 SAF 删除时行不一定同步
+  /// 清掉）。本地路径形态的命中行先做存在性复核，实体不存在的不进结果；
+  /// content 形态的行没有本地实体语义，不查。复核本身抛错时保守保留，
+  /// 避免校验故障误杀真实歌曲。
+  @visibleForTesting
+  static Future<List<Map<String, dynamic>>> existingMediaRows(
+    List<Map<String, dynamic>> rows, {
+    Future<bool> Function(String path)? fileExists,
+  }) async {
+    final exists = fileExists ?? ((path) => File(path).exists());
+    final keep = List<bool>.filled(rows.length, true);
+    final pending = <int>[
+      for (var i = 0; i < rows.length; i++)
+        if (rows[i]['path'] is String &&
+            !isContentLocation(rows[i]['path'] as String))
+          i,
+    ];
+    for (var start = 0; start < pending.length; start += 64) {
+      await Future.wait([
+        for (final i in pending.skip(start).take(64))
+          exists(rows[i]['path'] as String).then(
+            (present) => keep[i] = present,
+            onError: (_) => keep[i] = true,
+          ),
+      ]);
+    }
+    return [
+      for (var i = 0; i < rows.length; i++)
+        if (keep[i]) rows[i],
+    ];
   }
 
   /// MediaStore 查询后决定哪些根还要走文件系统枚举：content 根恒入选
@@ -209,6 +300,90 @@ class LocalSongScanner {
       if (wide || await directoryExists(root)) roots.add(root);
     }
     return roots;
+  }
+
+  /// 哪些根走 SAF 通道枚举：带原始 content URI（成对根）且 MediaStore
+  /// 零命中的根。MediaStore 有命中的根不重复枚举；无 URI 的纯本地根
+  /// 保持文件系统兜底逻辑，不进此列。
+  @visibleForTesting
+  static List<String> safScanRoots(
+    List<String> directories, {
+    required Map<String, String> contentRoots,
+    required Set<String> hitRoots,
+  }) => [
+    for (final root in directories)
+      if (contentRoots.containsKey(root) && !hitRoots.contains(root)) root,
+  ];
+
+  /// 把一行 SAF 树枚举结果映射成索引行：身份 path 用拼出的本地路径
+  /// （与 MediaStore / saved 事件行同形态，归属与合并口径一致），
+  /// playbackPath/contentUri 用文档 URI。拼不出本地路径的行（文档 id
+  /// 与树根对不上）直接跳过。createdAt 与 saved 事件的 SAF 行一致，
+  /// 原生枚举不给创建时间，记为 epoch。
+  @visibleForTesting
+  static LocalSongFileSnapshot? safTreeFile(
+    Map<String, dynamic> row, {
+    required String root,
+    required String treeUri,
+  }) {
+    final documentId = row['id'] as String?;
+    final documentUri = row['path'] as String?;
+    final name = row['fileName'] as String?;
+    if (documentId == null || documentUri == null || name == null) {
+      return null;
+    }
+    final local = safDocumentLocalPath(
+      treeUri: treeUri,
+      rootPath: root,
+      documentId: documentId,
+    );
+    if (local == null || !isFileInScanDirectory(local, root)) return null;
+    final modifiedMs = (row['modifiedMs'] as num?)?.toInt() ?? 0;
+    return LocalSongFileSnapshot(
+      path: local,
+      contentUri: documentUri,
+      aliases: [documentUri],
+      fileName: name,
+      extension: p.extension(name).replaceFirst('.', ''),
+      modifiedAt: DateTime.fromMillisecondsSinceEpoch(modifiedMs),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      sizeBytes: (row['sizeBytes'] as num?)?.toInt() ?? 0,
+      directory: root,
+    );
+  }
+
+  /// 由文档 id 拼本地路径：外部存储文档 id 形如 `primary:Music/a.mp3`，
+  /// 树 id 形如 `primary:Music`；卷名一致时，文档相对路径去掉树相对
+  /// 前缀后拼到根的本地路径下即得。与原生 resolveLocalPath 的拼法对齐。
+  @visibleForTesting
+  static String? safDocumentLocalPath({
+    required String treeUri,
+    required String rootPath,
+    required String documentId,
+  }) {
+    final segments = Uri.tryParse(treeUri)?.pathSegments ?? const [];
+    final treeIndex = segments.indexOf('tree');
+    if (treeIndex < 0 || treeIndex + 1 >= segments.length) return null;
+    final treeId = segments[treeIndex + 1];
+    final treeColon = treeId.indexOf(':');
+    final docColon = documentId.indexOf(':');
+    if (treeColon < 0 || docColon < 0) return null;
+    if (treeId.substring(0, treeColon) !=
+        documentId.substring(0, docColon)) {
+      return null;
+    }
+    final treeRelative = treeId.substring(treeColon + 1);
+    final docRelative = documentId.substring(docColon + 1);
+    final String relative;
+    if (treeRelative.isEmpty) {
+      relative = docRelative;
+    } else if (docRelative.startsWith('$treeRelative/')) {
+      relative = docRelative.substring(treeRelative.length + 1);
+    } else {
+      return null;
+    }
+    if (relative.isEmpty) return null;
+    return normalizeStorageLocation(p.posix.join(rootPath, relative));
   }
 
   static void _preserve(

@@ -28,9 +28,11 @@ class LocalSongScanCache extends ChangeNotifier {
     List<String> Function()? directories,
     List<String> Function()? ignoredPaths,
     Future<String?> Function(String location)? contentRootResolver,
+    Future<List<Map<String, dynamic>>> Function(String uri)? safTreeScanner,
   }) : _directories = directories,
        _ignoredPaths = ignoredPaths,
-       _contentRootResolver = contentRootResolver {
+       _contentRootResolver = contentRootResolver,
+       _safTreeScanner = safTreeScanner {
     _stopListening = LocalAudioLibraryEvents.listen(_handleFileChange);
   }
 
@@ -38,8 +40,15 @@ class LocalSongScanCache extends ChangeNotifier {
   final List<String> Function()? _directories;
   final List<String> Function()? _ignoredPaths;
   final Future<String?> Function(String location)? _contentRootResolver;
+  final Future<List<Map<String, dynamic>>> Function(String uri)?
+  _safTreeScanner;
   late final void Function() _stopListening;
   final _mutations = <String, ({int revision, LocalSongFileSnapshot? file})>{};
+  // 待确认删除键：removePaths 记下的删除在每轮扫描落盘前再兜底剔除一次，
+  // 防止陈旧枚举源（如 MediaStore 残留行）把已删歌曲写回快照；某轮枚举
+  // 本身已不再产出该键时才移除（实体确已消失，自愈）。纯内存态即可：
+  // 落盘的快照已是剔除后的状态，重启后由枚举侧的存在性复核兜底。
+  final _pendingDeletionKeys = <String>{};
   final _eventRevisions = <String, int>{};
   final _aliases = <String, String>{};
   LocalSongScanSnapshot? _snapshot;
@@ -118,7 +127,8 @@ class LocalSongScanCache extends ChangeNotifier {
     String? directory,
     List<String>? directories,
   }) async {
-    final selected = await _prepareScanRoots(directory, directories);
+    final prepared = await _prepareScanRoots(directory, directories);
+    final selected = prepared.directories;
     await ensureLoaded();
     if (_disposed || selected.isEmpty) return;
     final current = _snapshot;
@@ -135,11 +145,16 @@ class LocalSongScanCache extends ChangeNotifier {
         return;
       }
     }
-    await refresh(directories: selected);
+    await _refreshPrepared(prepared);
   }
 
   Future<void> refresh({String? directory, List<String>? directories}) async {
-    final selected = await _prepareScanRoots(directory, directories);
+    final prepared = await _prepareScanRoots(directory, directories);
+    await _refreshPrepared(prepared);
+  }
+
+  Future<void> _refreshPrepared(_PreparedScanRoots prepared) async {
+    final selected = prepared.directories;
     await ensureLoaded();
     if (_disposed) return;
     if (selected.isEmpty) {
@@ -158,6 +173,7 @@ class LocalSongScanCache extends ChangeNotifier {
       selected,
       generation,
       startedRevision,
+      contentRoots: prepared.contentUris,
     );
     _scanFuture = future;
     await future;
@@ -165,19 +181,24 @@ class LocalSongScanCache extends ChangeNotifier {
 
   /// 扫描器只认本地路径，content 根（SAF 授权文件夹）必须先解析。
   /// 所有稳态扫描入口都经过 [ensureScan]/[refresh]，在此一处统一准备：
-  /// content 根解析成功换成本地路径，失败（null）则剔除——不送进扫描
-  /// 器、不产生用户可见 error。返回空列表表示没有可扫的根。
-  Future<List<String>> _prepareScanRoots(
+  /// content 根解析成功换成本地路径并与原始 URI 成对保留（扫描器对
+  /// MediaStore 零命中的授权根要靠 URI 走 SAF 通道枚举），失败（null）
+  /// 则剔除——不送进扫描器、不产生用户可见 error。目录身份（比对、
+  /// 落盘）始终以解析后的本地路径为准，成对信息不改变短路语义。
+  Future<_PreparedScanRoots> _prepareScanRoots(
     String? directory,
     List<String>? directories,
   ) async {
     final normalized = _scanRoots(directory, directories);
-    if (!normalized.any(isContentLocation)) return normalized;
+    if (!normalized.any(isContentLocation)) {
+      return _PreparedScanRoots(normalized, const {});
+    }
     final resolve =
         _contentRootResolver ??
         ((String location) =>
             SafStorage.resolveLocalPath(location, requireReadable: false));
     final prepared = <String>{};
+    final contentUris = <String, String>{};
     for (final root in normalized) {
       if (!isContentLocation(root)) {
         prepared.add(root);
@@ -185,7 +206,9 @@ class LocalSongScanCache extends ChangeNotifier {
       }
       final local = await resolve(root);
       if (local != null && local.trim().isNotEmpty) {
-        prepared.add(normalizeStorageLocation(local));
+        final localRoot = normalizeStorageLocation(local);
+        prepared.add(localRoot);
+        contentUris[localRoot] = root;
       } else {
         unawaited(
           AppLogger.write(
@@ -195,14 +218,18 @@ class LocalSongScanCache extends ChangeNotifier {
         );
       }
     }
-    return List.unmodifiable(prepared);
+    return _PreparedScanRoots(
+      List.unmodifiable(prepared),
+      Map.unmodifiable(contentUris),
+    );
   }
 
   Future<void> _scanDirectoryContents(
     List<String> directories,
     int generation,
-    int startedRevision,
-  ) async {
+    int startedRevision, {
+    Map<String, String> contentRoots = const {},
+  }) async {
     final watch = Stopwatch()..start();
     final previous = {
       for (final file in _snapshot?.files ?? const <LocalSongFileSnapshot>[])
@@ -213,6 +240,8 @@ class LocalSongScanCache extends ChangeNotifier {
         directories,
         previous,
         () => _disposed || generation != _scanGeneration,
+        contentRoots: contentRoots,
+        safScan: _safTreeScanner,
       );
       if (_disposed || generation != _scanGeneration) return;
       final files = result.files;
@@ -277,6 +306,18 @@ class LocalSongScanCache extends ChangeNotifier {
       final ignoredKeys = _ignoredKeys();
       if (ignoredKeys.isNotEmpty) {
         files.removeWhere((_, file) => _isIgnored(file, ignoredKeys));
+      }
+      // 删除防复活兜底：待确认删除的键，只要本轮枚举仍在产出它，落盘
+      // 前一律剔除；枚举已不再产出的键从待确认集合移除（自愈）。同一
+      // 路径被重新下载/保存时，saved 事件会提前清掉待确认键，不受影响。
+      if (_pendingDeletionKeys.isNotEmpty) {
+        for (final key in _pendingDeletionKeys.toList()) {
+          if (result.files.containsKey(key)) {
+            files.remove(key);
+          } else {
+            _pendingDeletionKeys.remove(key);
+          }
+        }
       }
       final enumerationMs = watch.elapsedMilliseconds;
       await save(
@@ -355,6 +396,8 @@ class LocalSongScanCache extends ChangeNotifier {
       }
       final key = file.key;
       final row = event.tags == null ? file : file.withMetadata(event.tags);
+      // 同一路径重新出现（重新下载/保存）：待确认删除作废，别再误删。
+      _pendingDeletionKeys.remove(key);
       _mutations[key] = (revision: revision, file: row);
       for (final alias in row.aliases) {
         _aliases[localSongPathKey(alias)] = key;
@@ -445,6 +488,7 @@ class LocalSongScanCache extends ChangeNotifier {
   void removePaths(Iterable<String> paths, {int? revision}) {
     if (_disposed) return;
     final keys = paths.map(pathKey).toSet();
+    _pendingDeletionKeys.addAll(keys);
     final current = _snapshot;
     for (final key in keys) {
       _mutations[key] = (revision: revision ?? ++_revision, file: null);
@@ -650,6 +694,16 @@ List<String> _scanRoots(String? directory, List<String>? directories) {
   final normalized = normalizeScanDirectories(directories ?? [?directory]);
   if (normalized.isEmpty) throw ArgumentError('至少需要一个本地音乐文件夹');
   return normalized;
+}
+
+/// 根准备结果：[directories] 是解析后的本地路径列表（目录身份口径）；
+/// [contentUris] 把源自 content URI 的根与其原始树 URI 成对保留，
+/// 供扫描器对 MediaStore 零命中的授权根走 SAF 通道枚举。
+class _PreparedScanRoots {
+  const _PreparedScanRoots(this.directories, this.contentUris);
+
+  final List<String> directories;
+  final Map<String, String> contentUris;
 }
 
 final localSongScanCacheProvider = ChangeNotifierProvider<LocalSongScanCache>(

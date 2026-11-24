@@ -190,6 +190,12 @@ void main() {
     const safTree =
         'content://com.android.externalstorage.documents/'
         'tree/primary%3AMuyinMusic';
+    const safMusicTree =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic';
+    const safSongDocUri =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic/document/primary%3AMusic%2FSub%2Fsong.mp3';
 
     test('an unresolvable SAF root next to a good folder is dropped and '
         'the scan stays error-free', () async {
@@ -219,6 +225,106 @@ void main() {
       expect(resolvingCache.snapshot!.files.single.fileName, 'three.m4a');
       expect(resolvingCache.snapshot!.directories, [extra.path]);
       expect(resolvingCache.snapshot!.error, isNull);
+    });
+
+    test('a SAF root invisible to raw paths is enumerated through its '
+        'tree grant', () async {
+      // safLocal 在磁盘上是空目录：原始遍历扫不出任何东西，索引里的
+      // 两首歌只能来自 SAF 通道枚举。
+      final safLocal = await Directory(p.join(root.path, 'safmusic')).create();
+      String? scannedTree;
+      final safCache = LocalSongScanCache(
+        contentRootResolver: (location) async =>
+            location == safMusicTree ? safLocal.path : null,
+        safTreeScanner: (uri) async {
+          scannedTree = uri;
+          return [
+            {
+              'id': 'primary:Music/Sub/song.mp3',
+              'path': safSongDocUri,
+              'fileName': 'song.mp3',
+              'mimeType': 'audio/mpeg',
+              'sizeBytes': 1234,
+              'modifiedMs': 1700000000000,
+            },
+            {
+              'id': 'primary:Music/top.flac',
+              'path': 'content://com.android.externalstorage.documents/'
+                  'tree/primary%3AMusic/document/primary%3AMusic%2Ftop.flac',
+              'fileName': 'top.flac',
+              'mimeType': 'audio/flac',
+              'sizeBytes': 55,
+              'modifiedMs': 1700000001000,
+            },
+          ];
+        },
+      );
+      addTearDown(safCache.dispose);
+      await safCache.refresh(directories: [safMusicTree]);
+      expect(scannedTree, safMusicTree);
+      expect(safCache.snapshot!.directories, [safLocal.path]);
+      expect(safCache.snapshot!.error, isNull);
+      final files = safCache.snapshot!.files;
+      expect(files, hasLength(2));
+      final song = files.singleWhere((file) => file.fileName == 'song.mp3');
+      expect(song.path, p.join(safLocal.path, 'Sub', 'song.mp3'));
+      expect(song.contentUri, safSongDocUri);
+      expect(song.playbackPath, safSongDocUri);
+      expect(song.aliases, contains(safSongDocUri));
+      expect(song.directory, safLocal.path);
+      expect(song.sizeBytes, 1234);
+    });
+
+    test('a failing SAF enumeration leaves the rest of the scan intact',
+        () async {
+      final safLocal = await Directory(p.join(root.path, 'safmusic')).create();
+      final safCache = LocalSongScanCache(
+        contentRootResolver: (location) async =>
+            location == safMusicTree ? safLocal.path : null,
+        safTreeScanner: (uri) async => throw StateError('grant revoked'),
+      );
+      addTearDown(safCache.dispose);
+      await safCache.refresh(directories: [safMusicTree, parent.path]);
+      expect(
+        safCache.snapshot!.files.map((file) => file.fileName),
+        unorderedEquals(['one.mp3', 'two.FLAC']),
+      );
+      expect(safCache.snapshot!.error, isNull);
+    });
+
+    test('a deleted song is not revived while enumeration keeps reporting '
+        'it, and the guard heals once enumeration stops', () async {
+      final target = p.join(parent.path, 'one.mp3');
+      await cache.refresh(directories: [parent.path]);
+      expect(cache.snapshot!.files.map((file) => file.path), contains(target));
+
+      cache.removePaths([target]);
+      await cache.flush();
+      expect(
+        cache.snapshot!.files.map((file) => file.path),
+        isNot(contains(target)),
+      );
+
+      // 枚举源仍产出这首歌（模拟 MediaStore 陈旧行：实体在删除后被滞后
+      // 枚举到）——下一轮扫描落盘仍不得包含它。
+      await cache.refresh(directories: [parent.path]);
+      expect(
+        cache.snapshot!.files.map((file) => file.path),
+        isNot(contains(target)),
+      );
+
+      // 实体真正消失、枚举不再产出：待确认删除自愈清除。
+      await File(target).delete();
+      await cache.refresh(directories: [parent.path]);
+      expect(
+        cache.snapshot!.files.map((file) => file.path),
+        isNot(contains(target)),
+      );
+
+      // 自愈后同名文件重新出现应正常入库，不被旧的删除记录误杀。
+      await File(target).writeAsString('1');
+      await cache.refresh(directories: [parent.path]);
+      expect(cache.snapshot!.files.map((file) => file.path), contains(target));
     });
   });
 
@@ -285,6 +391,217 @@ void main() {
 
     test('content roots are always selected for the fallback pass', () async {
       expect(await decide(const [content]), [content]);
+    });
+  });
+
+  group('media row existence gate', () {
+    test('drops local rows whose file is gone and keeps the rest', () async {
+      final rows = <Map<String, dynamic>>[
+        {'path': '/music/gone.mp3'},
+        {'path': '/music/here.mp3'},
+        {'path': 'content://media/external/audio/media/7'},
+      ];
+      final kept = await LocalSongScanner.existingMediaRows(
+        rows,
+        fileExists: (path) async => path.endsWith('here.mp3'),
+      );
+      expect(kept.map((row) => row['path']), [
+        '/music/here.mp3',
+        'content://media/external/audio/media/7',
+      ]);
+    });
+
+    test('keeps a row when the existence check itself fails', () async {
+      final rows = <Map<String, dynamic>>[
+        {'path': '/music/song.mp3'},
+      ];
+      final kept = await LocalSongScanner.existingMediaRows(
+        rows,
+        fileExists: (_) async => throw const FileSystemException('io'),
+      );
+      expect(kept, hasLength(1));
+    });
+  });
+
+  group('saf scan roots', () {
+    const local = '/storage/emulated/0/Music';
+    const other = '/storage/emulated/0/Other';
+    const tree =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic';
+
+    test('paired zero-hit roots are selected', () {
+      expect(
+        LocalSongScanner.safScanRoots(
+          const [local, other],
+          contentRoots: const {local: tree},
+          hitRoots: const {},
+        ),
+        [local],
+      );
+    });
+
+    test('paired roots with media hits are not selected', () {
+      expect(
+        LocalSongScanner.safScanRoots(
+          const [local],
+          contentRoots: const {local: tree},
+          hitRoots: const {local},
+        ),
+        isEmpty,
+      );
+    });
+
+    test('roots without a tree grant are not selected', () {
+      expect(
+        LocalSongScanner.safScanRoots(
+          const [local],
+          contentRoots: const {},
+          hitRoots: const {},
+        ),
+        isEmpty,
+      );
+    });
+  });
+
+  group('saf tree file mapping', () {
+    const tree =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic';
+    const rootPath = '/storage/emulated/0/Music';
+
+    test('derives nested and root-level local paths', () {
+      expect(
+        LocalSongScanner.safDocumentLocalPath(
+          treeUri: tree,
+          rootPath: rootPath,
+          documentId: 'primary:Music/Sub/song.mp3',
+        ),
+        '/storage/emulated/0/Music/Sub/song.mp3',
+      );
+      expect(
+        LocalSongScanner.safDocumentLocalPath(
+          treeUri: tree,
+          rootPath: rootPath,
+          documentId: 'primary:Music/top.flac',
+        ),
+        '/storage/emulated/0/Music/top.flac',
+      );
+    });
+
+    test('rejects documents outside the tree or on another volume', () {
+      expect(
+        LocalSongScanner.safDocumentLocalPath(
+          treeUri: tree,
+          rootPath: rootPath,
+          documentId: 'primary:Other/song.mp3',
+        ),
+        isNull,
+      );
+      expect(
+        LocalSongScanner.safDocumentLocalPath(
+          treeUri: tree,
+          rootPath: rootPath,
+          documentId: 'ABCD-1234:Music/song.mp3',
+        ),
+        isNull,
+      );
+    });
+
+    test('builds a snapshot with local identity and document playback', () {
+      const docUri =
+          'content://com.android.externalstorage.documents/'
+          'tree/primary%3AMusic/document/primary%3AMusic%2FSub%2Fsong.mp3';
+      final file = LocalSongScanner.safTreeFile(
+        const {
+          'id': 'primary:Music/Sub/song.mp3',
+          'path': docUri,
+          'fileName': 'song.mp3',
+          'sizeBytes': 99,
+          'modifiedMs': 1700000000000,
+        },
+        root: rootPath,
+        treeUri: tree,
+      );
+      expect(file, isNotNull);
+      expect(file!.path, '/storage/emulated/0/Music/Sub/song.mp3');
+      expect(file.contentUri, docUri);
+      expect(file.playbackPath, docUri);
+      expect(file.aliases, [docUri]);
+      expect(file.directory, rootPath);
+      expect(file.sizeBytes, 99);
+      expect(file.metadataRead, isFalse);
+    });
+
+    test('drops rows whose document is outside the tree', () {
+      expect(
+        LocalSongScanner.safTreeFile(
+          const {
+            'id': 'primary:Elsewhere/song.mp3',
+            'path': 'content://com.android.externalstorage.documents/'
+                'tree/primary%3AMusic/document/primary%3AElsewhere%2Fsong.mp3',
+            'fileName': 'song.mp3',
+          },
+          root: rootPath,
+          treeUri: tree,
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('saf channel enumeration', () {
+    late Directory root;
+    const tree =
+        'content://com.android.externalstorage.documents/'
+        'tree/primary%3AMusic';
+
+    setUp(() async {
+      root = await Directory.systemTemp.createTemp('muyin-saf-scan-test-');
+    });
+
+    tearDown(() async {
+      await root.delete(recursive: true);
+    });
+
+    test('enumerates a paired root through the SAF channel', () async {
+      final result = await LocalSongScanner.scan(
+        [root.path],
+        const {},
+        () => false,
+        contentRoots: {root.path: tree},
+        safScan: (uri) async {
+          expect(uri, tree);
+          return [
+            {
+              'id': 'primary:Music/Sub/song.mp3',
+              'path': 'content://com.android.externalstorage.documents/'
+                  'tree/primary%3AMusic/document/primary%3AMusic%2FSub%2Fsong.mp3',
+              'fileName': 'song.mp3',
+              'sizeBytes': 7,
+              'modifiedMs': 1700000000000,
+            },
+          ];
+        },
+      );
+      expect(result.errors, isEmpty);
+      final file = result.files.values.single;
+      expect(file.path, p.join(root.path, 'Sub', 'song.mp3'));
+      expect(file.playbackPath, startsWith('content://'));
+      expect(file.directory, root.path);
+    });
+
+    test('a failing SAF enumeration yields zero files without failing '
+        'the scan', () async {
+      final result = await LocalSongScanner.scan(
+        [root.path],
+        const {},
+        () => false,
+        contentRoots: {root.path: tree},
+        safScan: (uri) async => throw StateError('grant revoked'),
+      );
+      expect(result.files, isEmpty);
+      expect(result.errors, isEmpty);
     });
   });
 }
