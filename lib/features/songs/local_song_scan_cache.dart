@@ -15,6 +15,7 @@ import '../../core/services/permission_service.dart';
 import '../../core/services/saf_storage.dart';
 import '../../core/services/storage_location.dart';
 import '../../core/storage/settings_store.dart';
+import '../cloud/cloud_song_path.dart';
 import 'local_song_scan_models.dart';
 import 'local_song_scanner.dart';
 
@@ -23,13 +24,17 @@ export 'local_song_scan_models.dart';
 /// A durable library index. Only first import, folder changes and explicit
 /// refresh enumerate storage; downloads and deletions update individual rows.
 class LocalSongScanCache extends ChangeNotifier {
-  LocalSongScanCache({List<String> Function()? directories})
-    : _directories = directories {
+  LocalSongScanCache({
+    List<String> Function()? directories,
+    List<String> Function()? ignoredPaths,
+  }) : _directories = directories,
+       _ignoredPaths = ignoredPaths {
     _stopListening = LocalAudioLibraryEvents.listen(_handleFileChange);
   }
 
   static const _fileName = 'local_song_scan_v1.json';
   final List<String> Function()? _directories;
+  final List<String> Function()? _ignoredPaths;
   late final void Function() _stopListening;
   final _mutations = <String, ({int revision, LocalSongFileSnapshot? file})>{};
   final _eventRevisions = <String, int>{};
@@ -53,6 +58,21 @@ class LocalSongScanCache extends ChangeNotifier {
     return _aliases[key] ?? key;
   }
 
+  /// 「仅从本地列表移除」的忽略名单按路径键匹配：歌曲的本地路径、播放
+  /// 路径（SAF 的 content URI）与别名任一命中即视为被忽略，与扫描管线
+  /// 实际使用的路径形态保持一致。
+  Set<String> _ignoredKeys() => {
+    for (final path in _ignoredPaths?.call() ?? const <String>[])
+      if (path.trim().isNotEmpty) localSongPathKey(path),
+  };
+
+  bool _isIgnored(LocalSongFileSnapshot file, Set<String> ignoredKeys) {
+    if (ignoredKeys.isEmpty) return false;
+    return ignoredKeys.contains(file.key) ||
+        ignoredKeys.contains(pathKey(file.playbackPath)) ||
+        file.aliases.any((alias) => ignoredKeys.contains(pathKey(alias)));
+  }
+
   Future<void> ensureLoaded() => _loadFuture ??= _load();
 
   Future<void> _load() async {
@@ -65,6 +85,15 @@ class LocalSongScanCache extends ChangeNotifier {
         _snapshot = LocalSongScanSnapshot.fromJson(
           Map<String, dynamic>.from(decoded),
         );
+        final ignoredKeys = _ignoredKeys();
+        if (ignoredKeys.isNotEmpty) {
+          // 持久化索引可能还留着已忽略歌曲的行（例如名单是在别的入口
+          // 写入的），恢复时先过滤，避免它们在首次扫描前回到列表。
+          _snapshot = _snapshot!.withFiles([
+            for (final file in _snapshot!.files)
+              if (!_isIgnored(file, ignoredKeys)) file,
+          ]);
+        }
         _registerArtwork();
         notifyListeners();
         if (!Platform.isAndroid || _snapshot!.backend == 'compatibility') {
@@ -186,11 +215,25 @@ class LocalSongScanCache extends ChangeNotifier {
           files[entry.key] = file;
         }
       }
+      // 云端行由 CloudDrive2 枚举单独维护，本地枚举不产出它们；把上一份
+      // 快照里的云端行原样带过来，避免一次本地扫描把云端音乐冲掉。忽略
+      // 名单过滤在下面统一执行，云端行同样受约束。
+      for (final old in previous.values) {
+        if (isCloudSongPath(old.path) && !files.containsKey(old.key)) {
+          files[old.key] = old;
+        }
+      }
       for (final old in previous.values) {
         final next = files[old.key];
         if (next == null || next.fingerprint != old.fingerprint) {
           EmbeddedArtworkCache.evictPath(old.path);
         }
+      }
+      // 忽略名单最后兜底：枚举结果与增量变更合并后统一过滤，名单内
+      // 文件不落盘、不进本地库。
+      final ignoredKeys = _ignoredKeys();
+      if (ignoredKeys.isNotEmpty) {
+        files.removeWhere((_, file) => _isIgnored(file, ignoredKeys));
       }
       final enumerationMs = watch.elapsedMilliseconds;
       await save(
@@ -230,6 +273,8 @@ class LocalSongScanCache extends ChangeNotifier {
       return;
     }
     if (event.path.isEmpty) return;
+    // 忽略名单内的文件即使有保存事件也不重新入库。
+    if (_ignoredKeys().contains(localSongPathKey(event.path))) return;
     final eventKey = localSongPathKey(event.path);
     final revision = ++_revision;
     _eventRevisions[eventKey] = revision;
@@ -255,6 +300,7 @@ class LocalSongScanCache extends ChangeNotifier {
         unawaited(refresh(directories: directories));
         return;
       }
+      if (_isIgnored(file, _ignoredKeys())) return;
       if (_disposed ||
           _eventRevisions[eventKey] != revision ||
           (_mutations[file.key]?.revision ?? 0) > revision) {
@@ -302,6 +348,53 @@ class LocalSongScanCache extends ChangeNotifier {
     }
   }
 
+  /// Replaces every cloud row in the index with [cloudFiles], the latest
+  /// CloudDrive2 enumeration. Local rows are untouched; ignored cloud rows
+  /// are filtered with the same path-key rule as local files.
+  Future<void> mergeCloudFiles(List<LocalSongFileSnapshot> cloudFiles) async {
+    await ensureLoaded();
+    if (_disposed) return;
+    final current = _snapshot;
+    final rows = <String, LocalSongFileSnapshot>{
+      for (final file in current?.files ?? const <LocalSongFileSnapshot>[])
+        if (!isCloudSongPath(file.path)) file.key: file,
+    };
+    final ignoredKeys = _ignoredKeys();
+    for (final file in cloudFiles) {
+      if (_isIgnored(file, ignoredKeys)) continue;
+      rows[file.key] = file;
+    }
+    _snapshot = LocalSongScanSnapshot(
+      directories: current?.directories ?? const [],
+      cachedAt: current?.cachedAt ?? DateTime.now(),
+      files: List.unmodifiable(rows.values),
+      error: current?.error,
+      initialized: current?.initialized ?? false,
+      pathsLinked: current?.pathsLinked ?? false,
+      backend: current?.backend ?? 'filesystem',
+    );
+    _registerArtwork();
+    notifyListeners();
+    _scheduleSave();
+  }
+
+  /// Applies tags read for one cloud row (whose metadata is hydrated by the
+  /// cloud library, not by the local metadata warmer).
+  void applyExternalMetadata(LocalSongFileSnapshot file) {
+    if (_disposed) return;
+    final current = _snapshot;
+    if (current == null) return;
+    final index = current.files.indexWhere((row) => row.key == file.key);
+    if (index < 0 || current.files[index].fingerprint != file.fingerprint) {
+      return;
+    }
+    final files = [...current.files];
+    files[index] = file;
+    _snapshot = current.withFiles(files);
+    notifyListeners();
+    _scheduleSave();
+  }
+
   void removePaths(Iterable<String> paths, {int? revision}) {
     if (_disposed) return;
     final keys = paths.map(pathKey).toSet();
@@ -344,7 +437,10 @@ class LocalSongScanCache extends ChangeNotifier {
       _metadataFuture = null;
       if (!_disposed &&
           (_snapshot?.files.any(
-                (file) => !file.metadataRead && !isContentLocation(file.path),
+                (file) =>
+                    !file.metadataRead &&
+                    !isContentLocation(file.path) &&
+                    !isCloudSongPath(file.path),
               ) ??
               false)) {
         _warmMetadata();
@@ -359,7 +455,10 @@ class LocalSongScanCache extends ChangeNotifier {
       final pending =
           _snapshot?.files
               .where(
-                (file) => !file.metadataRead && !isContentLocation(file.path),
+                (file) =>
+                    !file.metadataRead &&
+                    !isContentLocation(file.path) &&
+                    !isCloudSongPath(file.path),
               )
               .take(2)
               .toList() ??
@@ -508,6 +607,7 @@ List<String> _scanRoots(String? directory, List<String>? directories) {
 
 final localSongScanCacheProvider = ChangeNotifierProvider<LocalSongScanCache>(
   (ref) => LocalSongScanCache(
-    directories: () => ref.read(settingsProvider).localMusicDirs,
+    directories: () => ref.read(settingsProvider).scanDirectories,
+    ignoredPaths: () => ref.read(settingsProvider).ignoredLocalSongPaths,
   ),
 );

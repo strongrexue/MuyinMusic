@@ -13,6 +13,7 @@ class SongActionsMenu extends StatelessWidget {
   factory SongActionsMenu.local({
     Key? key,
     required VoidCallback onDelete,
+    VoidCallback? onRemoveFromList,
     required VoidCallback onAddToPlaylist,
     required VoidCallback onAddNext,
     VoidCallback? onToggleLike,
@@ -21,13 +22,48 @@ class SongActionsMenu extends StatelessWidget {
     key: key,
     items: [
       if (onToggleLike != null) _like(liked, onToggleLike),
+      if (onRemoveFromList != null)
+        prism.PopupMenuItem(
+          label: '仅从本地列表移除',
+          glyph: MusicActionGlyphs.playlistRemove,
+          executeImmediately: true,
+          onPressed: onRemoveFromList,
+        ),
       prism.PopupMenuItem(
-        label: '删除',
+        label: '删除本地文件',
         glyph: MusicActionGlyphs.trash,
         executeImmediately: true,
         onPressed: onDelete,
         danger: true,
       ),
+      _addToPlaylist(onAddToPlaylist),
+      _addNext(onAddNext, label: '下一首播放'),
+    ],
+  );
+
+  /// Cloud songs live in the local list but have no file on this device:
+  /// they can be downloaded to local or removed from the list, never
+  /// file-deleted.
+  factory SongActionsMenu.cloud({
+    Key? key,
+    required VoidCallback? onDownload,
+    VoidCallback? onRemoveFromList,
+    required VoidCallback onAddToPlaylist,
+    required VoidCallback onAddNext,
+    VoidCallback? onToggleLike,
+    bool liked = false,
+  }) => SongActionsMenu._(
+    key: key,
+    items: [
+      if (onToggleLike != null) _like(liked, onToggleLike),
+      _download(onDownload, null),
+      if (onRemoveFromList != null)
+        prism.PopupMenuItem(
+          label: '仅从本地列表移除',
+          glyph: MusicActionGlyphs.playlistRemove,
+          executeImmediately: true,
+          onPressed: onRemoveFromList,
+        ),
       _addToPlaylist(onAddToPlaylist),
       _addNext(onAddNext, label: '下一首播放'),
     ],

@@ -103,6 +103,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     }
     final cache = ref.read(localSongScanCacheProvider);
     final selected = ref.read(settingsProvider).localMusicDirs;
+    final downloadDir = ref.read(settingsProvider).downloadDir;
     final directories = <String>[];
     for (final directory in selected) {
       directories.add(
@@ -123,7 +124,22 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     if (!listEquals(selected, directories)) {
       await ref.read(settingsProvider.notifier).setLocalMusicDirs(directories);
     }
-    await cache.ensureScan(directories: directories);
+    // 下载目录是隐含扫描根：与扫描目录用同样的 URI 解析后并入扫描集合，
+    // 但不写回 local_music_dirs 持久化。
+    final resolvedDownloadDir = isContentLocation(downloadDir)
+        ? await SafStorage.resolveLocalPath(
+                downloadDir,
+                requireReadable: false,
+              ) ??
+              downloadDir
+        : downloadDir;
+    if (!mounted) return;
+    final scanRoots = <String>{
+      ...directories,
+      if (resolvedDownloadDir.trim().isNotEmpty)
+        normalizeStorageLocation(resolvedDownloadDir),
+    }.toList();
+    await cache.ensureScan(directories: scanRoots);
     if (!mounted) return;
     await cache.linkKnownPaths([
       for (final entry in ref.read(downloadHistoryProvider))
@@ -252,7 +268,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
       unawaited(
         ref
             .read(localSongScanCacheProvider)
-            .refresh(directories: ref.read(settingsProvider).localMusicDirs),
+            .refresh(directories: ref.read(settingsProvider).scanDirectories),
       );
     }
     await AppLogger.write(

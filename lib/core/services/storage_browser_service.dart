@@ -86,6 +86,17 @@ class StorageBrowserService {
     return await _channel.invokeMethod<int>('acquireAllAccess') ?? 0;
   }
 
+  /// 该路径本身是否已有 security-scoped bookmark 授权（iOS）。
+  /// 先按路径键查，再回退解析存量条目比对解析出的路径（兼容旧版按
+  /// 文件夹名存键的 bookmark）。
+  Future<bool> hasBookmark(String path) async {
+    if (!Platform.isIOS) return false;
+    return await _channel.invokeMethod<bool>('hasBookmark', {
+          'path': path,
+        }) ??
+        false;
+  }
+
   Future<List<StorageBrowserEntry>> listRoots() async {
     if (!isSupported) return const [];
     final raw = await _channel.invokeListMethod<Object?>('listRoots');

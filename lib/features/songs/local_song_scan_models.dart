@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/services/embedded_audio_tags.dart';
 import '../../core/services/storage_location.dart';
+import '../cloud/cloud_song_path.dart';
 
 @immutable
 class LocalSongFileSnapshot {
@@ -20,6 +21,7 @@ class LocalSongFileSnapshot {
     this.aliases = const [],
     this.tags,
     this.metadataRead = false,
+    this.contentHash,
   });
 
   final String path;
@@ -35,8 +37,16 @@ class LocalSongFileSnapshot {
   final EmbeddedAudioTags? tags;
   final bool metadataRead;
 
+  /// Content hash reported by a remote source (CloudDrive2 MD5/SHA1).
+  /// Local files leave this null; when present it joins the fingerprint so
+  /// a same-size, same-mtime replacement in the cloud still invalidates the
+  /// cached tags.
+  final String? contentHash;
+
   String get key => localSongPathKey(path);
-  String get fingerprint => '${modifiedAt.microsecondsSinceEpoch}:$sizeBytes';
+  String get fingerprint => contentHash == null
+      ? '${modifiedAt.microsecondsSinceEpoch}:$sizeBytes'
+      : '${modifiedAt.microsecondsSinceEpoch}:$sizeBytes:$contentHash';
 
   LocalSongFileSnapshot withMetadata(EmbeddedAudioTags? value) =>
       LocalSongFileSnapshot(
@@ -57,6 +67,7 @@ class LocalSongFileSnapshot {
                 album: value.album,
               ),
         metadataRead: true,
+        contentHash: contentHash,
       );
 
   LocalSongFileSnapshot retainingMetadata(
@@ -80,6 +91,7 @@ class LocalSongFileSnapshot {
       aliases: previous.aliases,
       tags: previous.tags,
       metadataRead: previous.metadataRead,
+      contentHash: contentHash,
     );
   }
 
@@ -96,6 +108,7 @@ class LocalSongFileSnapshot {
         aliases: values.toSet().toList(),
         tags: tags,
         metadataRead: metadataRead,
+        contentHash: contentHash,
       );
 
   factory LocalSongFileSnapshot.fromJson(Map<String, dynamic> json) {
@@ -116,6 +129,7 @@ class LocalSongFileSnapshot {
       aliases:
           (json['aliases'] as List?)?.whereType<String>().toList() ?? const [],
       metadataRead: json['metadataRead'] == true,
+      contentHash: json['contentHash'] as String?,
       tags: tags is Map
           ? EmbeddedAudioTags(
               title: tags['title'] as String?,
@@ -137,6 +151,7 @@ class LocalSongFileSnapshot {
     if (contentUri != null) 'contentUri': contentUri,
     if (aliases.isNotEmpty) 'aliases': aliases,
     'metadataRead': metadataRead,
+    if (contentHash != null) 'contentHash': contentHash,
     if (tags != null)
       'tags': {
         'title': tags!.title,
@@ -237,6 +252,8 @@ List<String> normalizeScanDirectories(List<String> values) =>
 
 String localSongPathKey(String path) {
   if (isContentLocation(path)) return contentDocumentKey(path);
+  // Cloud identities are opaque URI-like keys, never filesystem paths.
+  if (isCloudSongPath(path)) return path;
   final normalized = normalizeStorageLocation(path).replaceAll('\\', '/');
   return Platform.isWindows ? normalized.toLowerCase() : normalized;
 }

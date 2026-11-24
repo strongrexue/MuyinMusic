@@ -454,6 +454,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     required MediaItem item,
     required Uri sourceUri,
     int? queueIndex,
+    Map<String, String> headers = const {},
   }) async {
     final loadGeneration = ++_loadGeneration;
     _retryAfterSourceFailure = null;
@@ -462,6 +463,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     final resolvedDuration = await _loadSourceBounded(
       sourceUri,
       formatHint: item.extras?['quality']?.toString(),
+      headers: headers,
       loadGeneration: loadGeneration,
     );
     if (loadGeneration != _loadGeneration) return resolvedDuration;
@@ -475,6 +477,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<Duration?> _loadSourceBounded(
     Uri sourceUri, {
     String? formatHint,
+    Map<String, String> headers = const {},
     required int loadGeneration,
   }) async {
     if (!_engineInitialized) await initializeEngine();
@@ -490,7 +493,11 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
             'format=${formatHint ?? 'unknown'}',
       ),
     );
-    final loading = _player.load(sourceUri, formatHint: formatHint);
+    final loading = _player.load(
+      sourceUri,
+      headers: headers,
+      formatHint: formatHint,
+    );
     try {
       final resolvedDuration = await loading.timeout(timeout);
       stopwatch.stop();

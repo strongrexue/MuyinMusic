@@ -42,13 +42,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('添加到歌单'), findsOneWidget);
-    expect(find.text('删除'), findsOneWidget);
+    expect(find.text('删除本地文件'), findsOneWidget);
 
     await tester.tapAt(const Offset(4, 700));
     await tester.pumpAndSettle();
 
     expect(find.text('添加到歌单'), findsNothing);
-    expect(find.text('删除'), findsNothing);
+    expect(find.text('删除本地文件'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

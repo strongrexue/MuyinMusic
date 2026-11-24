@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/storage_location.dart';
@@ -33,6 +32,10 @@ const String _kKtvBackgroundMigratedKey =
     'player_ktv_background_items_migrated_v1';
 const String _kLocalMusicDirKey = 'local_music_dir';
 const String _kLocalMusicDirsKey = 'local_music_dirs';
+const String _kLocalMusicIgnoredPathsKey = 'local_music_ignored_paths';
+const String _kCloudDrive2EnabledKey = 'cloud_drive2_enabled';
+const String _kCloudDrive2ServerKey = 'cloud_drive2_server';
+const String _kCloudDrive2TokenKey = 'cloud_drive2_api_token';
 const String _kUseBuiltInSourceFilePickerKey =
     'use_built_in_source_file_picker';
 const String _kThemeModeKey = 'theme_mode';
@@ -204,6 +207,10 @@ class AppSettings {
     this.ktvBackgroundSelectedId,
     this.portraitBackgroundSelectedId,
     required this.localMusicDirs,
+    this.ignoredLocalSongPaths = const [],
+    this.cloudDrive2Enabled = false,
+    this.cloudDrive2Server = '',
+    this.cloudDrive2Token = '',
     this.useBuiltInSourceFilePicker = false,
     required this.themeMode,
     required this.themeSeed,
@@ -282,6 +289,31 @@ class AppSettings {
 
   final List<String> localMusicDirs;
   String get localMusicDir => localMusicDirs.first;
+
+  /// 实际参与本地扫描的根目录：[localMusicDirs] 并上 [downloadDir]。
+  /// 下载目录是隐含扫描根（只在消费侧求并集，不写回 local_music_dirs
+  /// 持久化），改下载目录不改扫描列表，下载到的歌曲仍能被扫进本地音乐。
+  List<String> get scanDirectories => List.unmodifiable({
+    for (final dir in localMusicDirs) normalizeStorageLocation(dir),
+    if (downloadDir.trim().isNotEmpty) normalizeStorageLocation(downloadDir),
+  });
+
+  /// 被「仅从本地列表移除」的歌曲路径（归一化后的存储位置）。扫描时按
+  /// 路径键过滤，名单内文件不进本地库；本机设置，不参与跨设备同步。
+  final List<String> ignoredLocalSongPaths;
+
+  /// CloudDrive2 云端音乐开关与连接配置。未启用或未配置完整时云端源
+  /// 完全不工作，行为与没有此功能一致。令牌仅用于 API 请求头。
+  final bool cloudDrive2Enabled;
+  final String cloudDrive2Server;
+  final String cloudDrive2Token;
+
+  /// 配置是否齐全（启用 + 地址可解析 + 令牌非空）的判断在 cloud 层做，
+  /// 这里只存原始值。
+  bool get cloudDrive2Configured =>
+      cloudDrive2Enabled &&
+      cloudDrive2Server.trim().isNotEmpty &&
+      cloudDrive2Token.trim().isNotEmpty;
   final bool useBuiltInSourceFilePicker;
   final ThemeMode themeMode;
   final Color themeSeed;
@@ -358,6 +390,10 @@ class AppSettings {
     Object? portraitBackgroundSelectedId = _unsetValue,
     String? localMusicDir,
     List<String>? localMusicDirs,
+    List<String>? ignoredLocalSongPaths,
+    bool? cloudDrive2Enabled,
+    String? cloudDrive2Server,
+    String? cloudDrive2Token,
     bool? useBuiltInSourceFilePicker,
     ThemeMode? themeMode,
     Color? themeSeed,
@@ -415,6 +451,10 @@ class AppSettings {
     localMusicDirs:
         localMusicDirs ??
         (localMusicDir != null ? [localMusicDir] : this.localMusicDirs),
+    ignoredLocalSongPaths: ignoredLocalSongPaths ?? this.ignoredLocalSongPaths,
+    cloudDrive2Enabled: cloudDrive2Enabled ?? this.cloudDrive2Enabled,
+    cloudDrive2Server: cloudDrive2Server ?? this.cloudDrive2Server,
+    cloudDrive2Token: cloudDrive2Token ?? this.cloudDrive2Token,
     useBuiltInSourceFilePicker:
         useBuiltInSourceFilePicker ?? this.useBuiltInSourceFilePicker,
     themeMode: themeMode ?? this.themeMode,
@@ -557,6 +597,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
             [_prefs.getString(_kLocalMusicDirKey) ?? defaults.scanDir],
         fallback: defaults.scanDir,
       ),
+      ignoredLocalSongPaths: _normalizeIgnoredLocalSongPaths(
+        _prefs.getStringList(_kLocalMusicIgnoredPathsKey) ?? const [],
+      ),
+      cloudDrive2Enabled: _prefs.getBool(_kCloudDrive2EnabledKey) ?? false,
+      cloudDrive2Server: _prefs.getString(_kCloudDrive2ServerKey) ?? '',
+      cloudDrive2Token: _prefs.getString(_kCloudDrive2TokenKey) ?? '',
       useBuiltInSourceFilePicker:
           _prefs.getBool(_kUseBuiltInSourceFilePickerKey) ?? false,
       themeMode: _decodeThemeMode(_prefs.getString(_kThemeModeKey)),
@@ -644,31 +690,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
   }
 
   Future<void> setDownloadDir(String value) async {
-    final previousLocalPath = await SafStorage.resolveLocalPath(
-      state.downloadDir,
-      requireReadable: false,
-    );
-    final nextLocalPath = await SafStorage.resolveLocalPath(
-      value,
-      requireReadable: false,
-    );
-    final localMusicFollowsDownload =
-        state.localMusicDirs.length == 1 &&
-        (normalizeStorageLocation(state.localMusicDir) ==
-                normalizeStorageLocation(state.downloadDir) ||
-            (previousLocalPath != null &&
-                normalizeStorageLocation(state.localMusicDir) ==
-                    normalizeStorageLocation(previousLocalPath)));
+    // 下载目录与扫描目录互不联动：这里只写 download_dir。下载目录能被
+    // 扫到靠的是 AppSettings.scanDirectories 在消费侧并入隐含根。
     await _prefs.setString(_kDownloadDirKey, value);
-    if (localMusicFollowsDownload && nextLocalPath != null) {
-      final directories = _normalizeLocalMusicDirs([
-        nextLocalPath,
-      ], fallback: nextLocalPath);
-      await _persistLocalMusicDirs(directories);
-      state = state.copyWith(downloadDir: value, localMusicDirs: directories);
-    } else {
-      state = state.copyWith(downloadDir: value);
-    }
+    state = state.copyWith(downloadDir: value);
   }
 
   Future<void> setDownloadFileNameFormat(DownloadFileNameFormat format) async {
@@ -726,6 +751,62 @@ class SettingsNotifier extends Notifier<AppSettings> {
       directories.add(normalizeStorageLocation(fallback.trim()));
     }
     return List.unmodifiable(directories);
+  }
+
+  static List<String> _normalizeIgnoredLocalSongPaths(List<String> values) {
+    final paths = <String>[];
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) continue;
+      final path = normalizeStorageLocation(trimmed);
+      if (!paths.contains(path)) paths.add(path);
+    }
+    return List.unmodifiable(paths);
+  }
+
+  /// 把歌曲加入忽略名单：文件保留，之后扫描不再把它们收进本地库。
+  Future<void> ignoreLocalSongPaths(Iterable<String> paths) async {
+    final merged = _normalizeIgnoredLocalSongPaths([
+      ...state.ignoredLocalSongPaths,
+      ...paths,
+    ]);
+    if (merged.length == state.ignoredLocalSongPaths.length) return;
+    await _prefs.setStringList(_kLocalMusicIgnoredPathsKey, merged);
+    state = state.copyWith(ignoredLocalSongPaths: merged);
+  }
+
+  /// 把歌曲移出忽略名单；调用方随后触发重扫，歌曲才回到本地列表。
+  Future<void> unignoreLocalSongPaths(Iterable<String> paths) async {
+    final removed = {
+      for (final path in paths)
+        if (path.trim().isNotEmpty) normalizeStorageLocation(path.trim()),
+    };
+    if (removed.isEmpty) return;
+    final remaining = state.ignoredLocalSongPaths
+        .where((path) => !removed.contains(path))
+        .toList();
+    if (remaining.length == state.ignoredLocalSongPaths.length) return;
+    await _prefs.setStringList(_kLocalMusicIgnoredPathsKey, remaining);
+    state = state.copyWith(
+      ignoredLocalSongPaths: List.unmodifiable(remaining),
+    );
+  }
+
+  Future<void> setCloudDrive2Enabled(bool value) async {
+    await _prefs.setBool(_kCloudDrive2EnabledKey, value);
+    state = state.copyWith(cloudDrive2Enabled: value);
+  }
+
+  Future<void> setCloudDrive2Server(String value) async {
+    final trimmed = value.trim();
+    await _prefs.setString(_kCloudDrive2ServerKey, trimmed);
+    state = state.copyWith(cloudDrive2Server: trimmed);
+  }
+
+  Future<void> setCloudDrive2Token(String value) async {
+    final trimmed = value.trim();
+    await _prefs.setString(_kCloudDrive2TokenKey, trimmed);
+    state = state.copyWith(cloudDrive2Token: trimmed);
   }
 
   Future<void> setUseBuiltInSourceFilePicker(bool value) async {
@@ -1631,24 +1712,8 @@ _IosDirectories _migrateIosDirectories(
     unawaited(prefs.setBool(_kIosDirMigratedKey, true));
   }
 
-  // 下载根与扫描根同源：iOS 上让下载目录始终是扫描根下的 MuyinMusic，
-  // 保证落点归属判断恒成立（对齐 Cymusic「固定自有目录」的做法）。
-  if (Platform.isIOS) {
-    final scanRoot = scanDirs?.isEmpty == true
-        ? defaultScanDir
-        : (scanDirs?.first ?? defaultScanDir);
-    final derived = p.join(scanRoot, 'MuyinMusic');
-    if (downloadDir == null ||
-        isAndroidPath(downloadDir) ||
-        stale(downloadDir)) {
-      downloadDir = derived;
-    } else {
-      final dl = normalizeStorageLocation(downloadDir);
-      final expected = normalizeStorageLocation(derived);
-      final root = normalizeStorageLocation(scanRoot);
-      if (dl != expected && dl != root) downloadDir = derived;
-    }
-  }
+  // 下载目录以 prefs 存值为准：用户在系统选择器里选过的外部目录（含
+  // bookmark 授权）原样保留，不再按扫描根强制派生。
 
   return _IosDirectories(
     downloadDir: downloadDir ?? defaultDownloadDir,

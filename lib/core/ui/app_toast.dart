@@ -58,6 +58,8 @@ AppToastHandle showAppToast(
   AppToastType type = AppToastType.info,
   AppToastPosition position = AppToastPosition.bottomCenter,
   Duration duration = const Duration(seconds: 3),
+  String? actionLabel,
+  VoidCallback? onAction,
 }) {
   return _showToast(
     context: context,
@@ -65,6 +67,8 @@ AppToastHandle showAppToast(
     type: type,
     position: position,
     duration: duration,
+    actionLabel: actionLabel,
+    onAction: onAction,
   );
 }
 
@@ -74,6 +78,8 @@ AppToastHandle showAppToastOnOverlay(
   AppToastType type = AppToastType.info,
   AppToastPosition position = AppToastPosition.bottomCenter,
   Duration duration = const Duration(seconds: 3),
+  String? actionLabel,
+  VoidCallback? onAction,
 }) {
   return _showToast(
     overlayState: overlay,
@@ -81,6 +87,8 @@ AppToastHandle showAppToastOnOverlay(
     type: type,
     position: position,
     duration: duration,
+    actionLabel: actionLabel,
+    onAction: onAction,
   );
 }
 
@@ -118,6 +126,8 @@ AppToastHandle _showToast({
   required AppToastType type,
   required AppToastPosition position,
   required Duration duration,
+  String? actionLabel,
+  VoidCallback? onAction,
 }) {
   final previous = _currentToast;
   if (previous != null) {
@@ -138,8 +148,18 @@ AppToastHandle _showToast({
       onAutoCompleteCompleted: (item) =>
           _dismissToast(item, showRemoveAnimation: false),
     ),
-    builder: (context, _) =>
-        _ToastViewport(message: message, type: type, position: position),
+    builder: (context, item) => _ToastViewport(
+      message: message,
+      type: type,
+      position: position,
+      actionLabel: actionLabel,
+      onAction: onAction == null
+          ? null
+          : () {
+              _dismissToast(item, showRemoveAnimation: false);
+              onAction();
+            },
+    ),
   );
   _currentToast = item;
   return AppToastHandle._(item);
@@ -171,20 +191,31 @@ class _ToastViewport extends StatelessWidget {
     required this.message,
     required this.type,
     required this.position,
+    this.actionLabel,
+    this.onAction,
   });
 
   final String message;
   final AppToastType type;
   final AppToastPosition position;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
+      // 带操作按钮的提示需要接收点击，其余提示保持穿透不挡界面。
+      ignoring: onAction == null,
       child: Padding(
         padding: position.viewportPadding,
         child: Align(
           alignment: position.contentAlignment,
-          child: _ToastCapsule(message: message, type: type),
+          child: _ToastCapsule(
+            message: message,
+            type: type,
+            actionLabel: actionLabel,
+            onAction: onAction,
+          ),
         ),
       ),
     );
@@ -192,10 +223,17 @@ class _ToastViewport extends StatelessWidget {
 }
 
 class _ToastCapsule extends StatelessWidget {
-  const _ToastCapsule({required this.message, required this.type});
+  const _ToastCapsule({
+    required this.message,
+    required this.type,
+    this.actionLabel,
+    this.onAction,
+  });
 
   final String message;
   final AppToastType type;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +291,25 @@ class _ToastCapsule extends StatelessWidget {
               ),
             ),
           ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(width: 6),
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: tone.color,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                actionLabel!,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

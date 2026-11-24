@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +22,9 @@ import '../../core/ui/app_scrollbar.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/ui/app_refresh_indicator.dart';
 import '../../theme/app_motion.dart';
+import '../cloud/cloud_download_service.dart';
+import '../cloud/cloud_library.dart';
+import '../cloud/cloud_song_path.dart';
 import '../downloads/download_history_store.dart';
 import '../downloads/download_progress.dart';
 import '../music_sources/music_source_action_guard.dart';
@@ -93,7 +97,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
   String? _lxImportProgress;
   List<ScannedSongFile>? _scannedFiles;
   String? _scanError;
-  ProviderSubscription<List<String>>? _localMusicDirSubscription;
+  ProviderSubscription<AppSettings>? _localMusicDirSubscription;
   late final StateController<SongsToolbarState> _toolbarStateController;
   late final StateController<bool> _shellToolbarController;
   late final LocalSongScanCache _scanCache;
@@ -112,13 +116,15 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     _scanCache.addListener(_handleScanCacheChanged);
     if (_searchMode) _enableSearchFocusHandling();
     _localMusicDirSubscription = ref.listenManual(
-      settingsProvider.select((settings) => settings.localMusicDirs),
+      settingsProvider,
       (previous, next) {
-        if (previous == null || previous == next) return;
+        if (previous == null) return;
+        final directories = next.scanDirectories;
+        if (listEquals(previous.scanDirectories, directories)) return;
         // Keep the currently rendered library in place while the new folders are
         // scanned, then swap the result in one frame. This avoids a loading
         // flash when the local music folder changes from Settings.
-        unawaited(_scanCache.ensureScan(directories: next));
+        unawaited(_scanCache.ensureScan(directories: directories));
       },
     );
     unawaited(_initializeScan());
@@ -130,7 +136,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     final snapshot = _scanCache.snapshot;
     if (snapshot == null ||
         !snapshot.matchesDirectories(
-          ref.read(settingsProvider).localMusicDirs,
+          ref.read(settingsProvider).scanDirectories,
         )) {
       return;
     }
@@ -154,8 +160,9 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _initializeScan() async {
     await _scanCache.ensureScan(
-      directories: ref.read(settingsProvider).localMusicDirs,
+      directories: ref.read(settingsProvider).scanDirectories,
     );
+    unawaited(ref.read(cloudDrive2LibraryProvider).refresh());
     if (mounted) _handleScanCacheChanged();
   }
 
@@ -224,7 +231,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     if (!mounted) return;
     final snapshot = _scanCache.snapshot;
     if (snapshot == null) return;
-    final currentDirectories = ref.read(settingsProvider).localMusicDirs;
+    final currentDirectories = ref.read(settingsProvider).scanDirectories;
     if (!snapshot.matchesDirectories(currentDirectories)) return;
 
     final files = [
@@ -236,10 +243,11 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     });
   }
 
-  Future<void> _scanLocalMusicFolder() {
-    return _scanCache.refresh(
-      directories: ref.read(settingsProvider).localMusicDirs,
+  Future<void> _scanLocalMusicFolder() async {
+    await _scanCache.refresh(
+      directories: ref.read(settingsProvider).scanDirectories,
     );
+    await ref.read(cloudDrive2LibraryProvider).refresh();
   }
 
   List<DownloadHistoryEntry> _songs(List<DownloadHistoryEntry> history) {
@@ -330,9 +338,13 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     bool replaceQueue = true,
   }) async {
     final path = entry.savedPath;
+    final isCloud = path != null && isCloudSongPath(path);
     final hasLocalFile =
-        path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path);
-    if (!hasLocalFile && entry.musicInfo == null) {
+        !isCloud &&
+        path != null &&
+        path.isNotEmpty &&
+        isLocalAudioSourceAvailable(path);
+    if (!isCloud && !hasLocalFile && entry.musicInfo == null) {
       showAppToast(context, '文件不存在，可能已被移动或删除', type: AppToastType.warning);
       return;
     }
@@ -487,9 +499,13 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _addNext(DownloadHistoryEntry entry) async {
     final path = entry.savedPath;
+    final isCloud = path != null && isCloudSongPath(path);
     final hasLocalFile =
-        path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path);
-    if (!hasLocalFile && entry.musicInfo == null) {
+        !isCloud &&
+        path != null &&
+        path.isNotEmpty &&
+        isLocalAudioSourceAvailable(path);
+    if (!isCloud && !hasLocalFile && entry.musicInfo == null) {
       showAppToast(context, '文件不存在，无法加入队列', type: AppToastType.warning);
       return;
     }
@@ -544,6 +560,22 @@ class _SongsPageState extends ConsumerState<SongsPage> {
 
   Future<void> _deleteSongs(List<DownloadHistoryEntry> entries) async {
     if (_deletingFiles) return;
+    // 云端条目在本机没有文件可删：一律走「仅从本地列表移除」。
+    final cloudEntries = entries
+        .where(
+          (e) => e.savedPath != null && isCloudSongPath(e.savedPath!),
+        )
+        .toList(growable: false);
+    if (cloudEntries.isNotEmpty) {
+      await _removeSongsFromList(cloudEntries);
+      if (!mounted) return;
+      entries = entries
+          .where(
+            (e) => e.savedPath == null || !isCloudSongPath(e.savedPath!),
+          )
+          .toList(growable: false);
+      if (entries.isEmpty) return;
+    }
     final paths = entries
         .map((e) => e.savedPath)
         .whereType<String>()
@@ -663,6 +695,80 @@ class _SongsPageState extends ConsumerState<SongsPage> {
     } finally {
       _deletingFiles = false;
     }
+  }
+
+  /// 云端歌曲「下载」：落盘到下载目录并登记，完成后即普通本地歌。
+  Future<void> _downloadCloudSong(DownloadHistoryEntry entry) async {
+    final path = entry.savedPath;
+    if (path == null || !isCloudSongPath(path)) return;
+    final row = _scanCache.snapshot?.files
+        .where((file) => file.key == _pathKey(path))
+        .firstOrNull;
+    if (row == null) {
+      showAppToast(context, '云端歌曲信息已失效，请下拉刷新', type: AppToastType.warning);
+      return;
+    }
+    showAppToast(context, '开始下载「${entry.name}」');
+    try {
+      await ref.read(cloudDownloadServiceProvider).downloadToLocal(row);
+      if (!mounted) return;
+      showAppToast(context, '已下载到本地', type: AppToastType.success);
+    } catch (error) {
+      if (!mounted) return;
+      showAppToast(context, '下载失败：$error', type: AppToastType.error);
+    }
+  }
+
+  /// 「仅从本地列表移除」：文件保留，路径写入忽略名单，扫描不再收录；
+  /// 提示带撤销，撤销即恢复（移出名单并重扫回填）。
+  Future<void> _removeSongsFromList(List<DownloadHistoryEntry> entries) async {
+    final paths = entries
+        .map((e) => e.savedPath)
+        .whereType<String>()
+        .where((p) => p.isNotEmpty)
+        .toSet();
+    if (paths.isEmpty) return;
+    final wasBatch = _batchMode;
+    await ref.read(settingsProvider.notifier).ignoreLocalSongPaths(paths);
+    _scanCache.removePaths(paths);
+    await _scanCache.flush();
+    if (!mounted) return;
+    if (wasBatch) {
+      final removedIds = entries.map((e) => e.id).toSet();
+      setState(() {
+        _selectedIds.removeWhere(removedIds.contains);
+        _batchMode = _selectedIds.isNotEmpty;
+      });
+    }
+    showAppToast(
+      context,
+      entries.length == 1
+          ? '已从本地列表移除，文件未删除'
+          : '已从本地列表移除 ${entries.length} 首，文件未删除',
+      type: AppToastType.success,
+      duration: const Duration(seconds: 5),
+      actionLabel: '撤销',
+      onAction: () => unawaited(_restoreIgnoredSongs(paths)),
+    );
+  }
+
+  Future<void> _removeSelectedFromList(List<DownloadHistoryEntry> songs) async {
+    final selected = songs
+        .where((entry) => _selectedIds.contains(entry.id))
+        .toList(growable: false);
+    if (selected.isEmpty) {
+      showAppToast(context, '请先选择要移除的歌曲', type: AppToastType.warning);
+      return;
+    }
+    await _removeSongsFromList(selected);
+  }
+
+  /// 恢复被忽略的歌曲：移出忽略名单后触发一次全量重扫回填列表。
+  Future<void> _restoreIgnoredSongs(Iterable<String> paths) async {
+    await ref.read(settingsProvider.notifier).unignoreLocalSongPaths(paths);
+    await _scanCache.refresh(
+      directories: ref.read(settingsProvider).scanDirectories,
+    );
   }
 
   Future<void> _openPlaylist(LocalPlaylist playlist) async {
@@ -1488,6 +1594,18 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                 ),
               ),
           ] else ...[
+            if (tab == SongsLibraryTab.local && !searching && !_batchMode)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                sliver: SliverToBoxAdapter(
+                  child: _LibraryQuickAction(
+                    key: const ValueKey('local-ignored-songs'),
+                    icon: Icons.visibility_off_rounded,
+                    label: '已忽略的本地音乐',
+                    onPressed: () => context.push('/songs/ignored'),
+                  ),
+                ),
+              ),
             if (localSongs.isNotEmpty)
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
@@ -1559,6 +1677,7 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       playing: playing,
                       playingActive: playing && playbackIdentity.playing,
                       batchMode: _batchMode,
+                      cloudMode: path != null && isCloudSongPath(path),
                       selected: _selectedIds.contains(entry.id),
                       liked: likedKeys.contains(songIdentityKey(entry)),
                       onToggleLike: () => _toggleLike(entry),
@@ -1566,7 +1685,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                       onAddNext: () => _addNext(entry),
                       onAddToPlaylist: () =>
                           unawaited(_selectPlaylistForSong(entry)),
-                      onDownload: entry.musicInfo == null
+                      onDownload:
+                          path != null && isCloudSongPath(path)
+                          ? () => unawaited(_downloadCloudSong(entry))
+                          : entry.musicInfo == null
                           ? null
                           : () => showQualityPickerSheet(
                               context,
@@ -1574,6 +1696,8 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                             ),
                       onPlay: () => _play(entry, songs, replaceQueue: false),
                       onDelete: () => _deleteSong(entry),
+                      onRemoveFromList: () =>
+                          unawaited(_removeSongsFromList([entry])),
                     );
                   },
                 ),
@@ -1603,6 +1727,10 @@ class _SongsPageState extends ConsumerState<SongsPage> {
                         : (tab == SongsLibraryTab.liked
                               ? () => unawaited(_unlikeSelected(songs))
                               : () => unawaited(_confirmDeleteSelected(songs))),
+                    onRemoveFromList:
+                        tab == SongsLibraryTab.local && selectedCount > 0
+                        ? () => unawaited(_removeSelectedFromList(songs))
+                        : null,
                     onAddToPlaylist: selectedCount == 0
                         ? null
                         : () => unawaited(_addSelectedToPlaylist(songs)),

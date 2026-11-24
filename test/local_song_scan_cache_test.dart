@@ -135,6 +135,41 @@ void main() {
       expect(cache.snapshot!.directories, [extra.path]);
       expect(cache.snapshot!.files.single.fileName, 'three.m4a');
     });
+
+    test('scan skips ignored files without deleting them, and '
+        'unignoring brings them back on rescan', () async {
+      final ignored = <String>[p.join(parent.path, 'one.mp3')];
+      final ignoringCache = LocalSongScanCache(
+        ignoredPaths: () => ignored,
+      );
+      addTearDown(ignoringCache.dispose);
+      await ignoringCache.refresh(directories: [parent.path, extra.path]);
+      expect(
+        ignoringCache.snapshot!.files.map((file) => file.fileName),
+        unorderedEquals(['two.FLAC', 'three.m4a']),
+      );
+      // 仅从列表移除不删文件：被忽略的歌曲仍在设备上。
+      expect(await File(p.join(parent.path, 'one.mp3')).exists(), isTrue);
+
+      ignored.clear();
+      await ignoringCache.refresh(directories: [parent.path, extra.path]);
+      expect(ignoringCache.snapshot!.files, hasLength(3));
+    });
+
+    test('persisted index rows for ignored files are filtered on load',
+        () async {
+      await cache.refresh(directories: [parent.path, extra.path]);
+      expect(cache.snapshot!.files, hasLength(3));
+      final restored = LocalSongScanCache(
+        ignoredPaths: () => [p.join(nested.path, 'two.FLAC')],
+      );
+      addTearDown(restored.dispose);
+      await restored.ensureLoaded();
+      expect(
+        restored.snapshot!.files.map((file) => file.fileName),
+        unorderedEquals(['one.mp3', 'three.m4a']),
+      );
+    });
   });
 }
 

@@ -21,6 +21,8 @@ import '../../core/services/network_type_service.dart';
 import '../../core/services/tagger.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
+import '../cloud/cloud_library.dart';
+import '../cloud/cloud_song_path.dart';
 import '../downloads/download_history_store.dart';
 import '../equalizer/equalizer_store.dart';
 import '../home/recent_plays_store.dart';
@@ -662,6 +664,7 @@ class PlayerController extends StateNotifier<PlayerState>
               await _audioHandler.load(
                 item: initialItem,
                 sourceUri: Uri.parse(resolved.url),
+                headers: resolved.headers ?? const {},
                 queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
               );
               return resolved;
@@ -1704,6 +1707,13 @@ class PlayerController extends StateNotifier<PlayerState>
     _pendingRestoredSession = null;
     _recordRecentPlay(entry);
     final path = entry.savedPath?.trim();
+    if (path != null && path.isNotEmpty && isCloudSongPath(path)) {
+      if (state.track?.id == '${entry.id}:cloud') {
+        _syncQueueAvailability();
+        return _restartCurrentTrack();
+      }
+      return _playCloudEntry(entry, path);
+    }
     if (path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path)) {
       if (state.track?.localPath == path) {
         _syncQueueAvailability();
@@ -1725,6 +1735,163 @@ class PlayerController extends StateNotifier<PlayerState>
     }
     state = state.copyWith(error: '歌曲不可播放');
     return Future<void>.value();
+  }
+
+  /// Cloud songs (CloudDrive2): the savedPath is a virtual identity, so the
+  /// playable URL is resolved fresh at play time and streamed with the
+  /// headers the API returned for it. Phase 1 lyrics = embedded tags only.
+  Future<bool> _playCloudEntry(
+    DownloadHistoryEntry entry,
+    String cloudPath,
+  ) async {
+    final token = Object();
+    _invalidateGrooveShift();
+    _cancelNetworkResume();
+    _requestToken = token;
+    _transportSuppressionToken = token;
+    _pausedBySleepTimer = false;
+    final pauseGeneration = _sleepTimerPauseGeneration;
+    _currentMusic = null;
+    _currentQuality = Quality.tryFromCode(entry.qualityCode);
+    PlayerTrack buildTrack({String? remoteUrl}) => PlayerTrack(
+      id: '${entry.id}:cloud',
+      kind: PlayerTrackKind.remote,
+      title: entry.name,
+      artist: entry.singer.trim().isEmpty ? '未知歌手' : entry.singer.trim(),
+      album: entry.albumName,
+      sourceLabel: 'CloudDrive2',
+      qualityLabel: entry.qualityCode,
+      coverUrl: entry.picUrl,
+      remoteUrl: remoteUrl,
+    );
+    final provisionalTrack = buildTrack();
+    _logPlayback(
+      'load_start kind=cloud quality=${_singleLine(entry.qualityCode)} '
+      'title="${_singleLine(entry.name)}"',
+    );
+    state = state.beginTrackLoading(
+      nextTrack: provisionalTrack,
+      canPlayPrevious: _canPlayPrevious,
+      canPlayNext: _canPlayNext,
+      queue: List<DownloadHistoryEntry>.unmodifiable(_queue),
+      queueIndex: _queueIndex,
+    );
+    _completionHandledForTrackId = null;
+    _hasStartedPlayback = false;
+
+    await _beginAudioTransition(
+      token,
+      _buildMediaItem(
+        provisionalTrack,
+        artUri: _networkArtworkUri(provisionalTrack.coverUrl),
+      ),
+    );
+    if (!identical(_requestToken, token)) return false;
+    try {
+      final tagsFuture = _ref
+          .read(cloudDrive2LibraryProvider)
+          .tagsFor(cloudPath)
+          .then<EmbeddedAudioTags?>((tags) => tags, onError: (_) => null);
+      final resolved = await _ref
+          .read(cloudPlaybackResolverProvider)
+          .resolve(cloudPath);
+      if (!identical(_requestToken, token)) return false;
+      if (resolved.url.trim().isEmpty) {
+        throw StateError('CloudDrive2 没有返回播放地址');
+      }
+      final track = buildTrack(remoteUrl: resolved.url);
+      await _audioHandler.load(
+        item: _buildMediaItem(
+          track,
+          artUri: _networkArtworkUri(track.coverUrl),
+        ),
+        sourceUri: Uri.parse(resolved.url),
+        headers: resolved.headers ?? const {},
+        queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
+      );
+      if (!identical(_requestToken, token)) return false;
+      _endTransportSuppression(token);
+      state = state.copyWith(
+        track: track,
+        loading: false,
+        playing: _audioHandler.playing,
+        position: _audioHandler.position,
+        duration: _audioHandler.duration ?? Duration.zero,
+        processingState: _mapProcessingState(_audioHandler.processingState),
+        error: null,
+      );
+      _logPlayback(
+        'load_ready kind=cloud positionMs=${state.position.inMilliseconds} '
+        'durationMs=${state.duration.inMilliseconds}',
+      );
+      _publishMediaMetadata(
+        _buildMediaItem(
+          track,
+          duration: _audioHandler.duration,
+          artUri: _networkArtworkUri(track.coverUrl),
+        ),
+      );
+      _syncBluetoothMetadata(force: true);
+      _syncQueueAvailability();
+      _persistFullSession();
+      if (!identical(_requestToken, token)) return false;
+      if (pauseGeneration == _sleepTimerPauseGeneration) {
+        await _audioHandler.play();
+        if (!identical(_requestToken, token)) return false;
+      }
+
+      final tags = await tagsFuture;
+      if (!identical(_requestToken, token)) return false;
+      if (tags == null) {
+        state = state.copyWith(lyricLoading: false);
+        return true;
+      }
+      final enriched = track.withEmbeddedTags(tags);
+      state = state.copyWith(track: enriched);
+      _publishMediaMetadata(
+        _buildMediaItem(
+          enriched,
+          duration: _audioHandler.duration,
+          artUri: _networkArtworkUri(enriched.coverUrl),
+        ),
+      );
+      final rawLyrics = tags.lyrics;
+      if (rawLyrics == null || rawLyrics.trim().isEmpty) {
+        state = state.copyWith(lyricLoading: false);
+        return true;
+      }
+      final parsed = await compute(
+        KaraokeLyricsParser.parseEmbedded,
+        rawLyrics,
+        debugLabel: 'player-cloud-lyrics',
+      );
+      if (!mounted || !identical(_requestToken, token)) return false;
+      state = state
+          .withLoadedLyrics(
+            info: LyricInfo(lyric: rawLyrics),
+            parsed: parsed,
+          )
+          .copyWith(
+            position: _audioHandler.position,
+            duration: _audioHandler.duration ?? state.duration,
+            playing: _audioHandler.playing,
+          );
+      _syncBluetoothMetadata(force: true);
+      return true;
+    } catch (e) {
+      await AppLogger.write('player', 'play cloud failed: $e');
+      if (!identical(_requestToken, token)) return false;
+      _audioHandler.failTrackTransition(e);
+      _endTransportSuppression(token);
+      state = state.copyWith(
+        loading: false,
+        lyricLoading: false,
+        playing: false,
+        processingState: PlayerProcessingState.idle,
+        error: '无法播放云端歌曲：$e',
+      );
+      return false;
+    }
   }
 
   Future<void> _restartCurrentTrack() async {
@@ -1786,6 +1953,9 @@ class PlayerController extends StateNotifier<PlayerState>
   bool _isPlayableEntry(DownloadHistoryEntry entry) {
     if (!entry.isCompleted) return false;
     final path = entry.savedPath;
+    if (path != null && path.isNotEmpty && isCloudSongPath(path.trim())) {
+      return true;
+    }
     if (path != null && path.isNotEmpty && isLocalAudioSourceAvailable(path)) {
       return true;
     }

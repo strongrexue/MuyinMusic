@@ -15,6 +15,7 @@ void main() {
     var addNextCount = 0;
     var addToPlaylistCount = 0;
     var deleteCount = 0;
+    var removeFromListCount = 0;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -35,6 +36,7 @@ void main() {
             onAddToPlaylist: () => addToPlaylistCount++,
             onPlay: () {},
             onDelete: () => deleteCount++,
+            onRemoveFromList: () => removeFromListCount++,
           ),
         ),
       ),
@@ -53,7 +55,8 @@ void main() {
     await tester.tap(menu);
     await tester.pumpAndSettle();
     expect(find.text('添加到歌单'), findsOneWidget);
-    expect(find.text('删除'), findsOneWidget);
+    expect(find.text('仅从本地列表移除'), findsOneWidget);
+    expect(find.text('删除本地文件'), findsOneWidget);
 
     await tester.tap(find.text('添加到歌单'));
     await tester.pumpAndSettle();
@@ -62,7 +65,14 @@ void main() {
 
     await tester.tap(menu);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('删除'));
+    await tester.tap(find.text('仅从本地列表移除'));
+    await tester.pumpAndSettle();
+    expect(removeFromListCount, 1);
+    expect(deleteCount, 0);
+
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除本地文件'));
     await tester.pumpAndSettle();
     expect(deleteCount, 1);
     expect(tester.takeException(), isNull);

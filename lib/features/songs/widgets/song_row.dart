@@ -34,8 +34,10 @@ class SongRow extends ConsumerWidget {
     required this.onAddToPlaylist,
     required this.onPlay,
     required this.onDelete,
+    this.onRemoveFromList,
     this.onDownload,
     this.playlistMode = false,
+    this.cloudMode = false,
     this.liked = false,
     this.onToggleLike,
   });
@@ -51,8 +53,13 @@ class SongRow extends ConsumerWidget {
   final VoidCallback onAddToPlaylist;
   final VoidCallback onPlay;
   final VoidCallback onDelete;
+  final VoidCallback? onRemoveFromList;
   final VoidCallback? onDownload;
   final bool playlistMode;
+
+  /// Cloud (CloudDrive2) rows: no local file exists, so the menu offers
+  /// download-to-local instead of file deletion.
+  final bool cloudMode;
   final bool liked;
   final VoidCallback? onToggleLike;
 
@@ -230,9 +237,20 @@ class SongRow extends ConsumerWidget {
                                   ? null
                                   : () => cancelDownload(context, ref, task.id),
                             )
+                          : cloudMode
+                          ? SongActionsMenu.cloud(
+                              key: ValueKey('song-menu-${entry.id}'),
+                              onDownload: onDownload,
+                              onRemoveFromList: onRemoveFromList,
+                              onAddToPlaylist: onAddToPlaylist,
+                              onAddNext: onAddNext,
+                              liked: liked,
+                              onToggleLike: onToggleLike,
+                            )
                           : SongActionsMenu.local(
                               key: ValueKey('song-menu-${entry.id}'),
                               onDelete: onDelete,
+                              onRemoveFromList: onRemoveFromList,
                               onAddToPlaylist: onAddToPlaylist,
                               onAddNext: onAddNext,
                               liked: liked,

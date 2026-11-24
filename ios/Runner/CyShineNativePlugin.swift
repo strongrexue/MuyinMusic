@@ -365,6 +365,16 @@ final class CyShineStorageBrowserChannel {
       // 让绝对路径的扫描/播放沿用既有代码。
       result(acquireAllAccess())
 
+    case "hasBookmark":
+      // Dart 侧选目录后校验探针降级用：该路径已有 bookmark 授权时，
+      // 探针失败不拒绝保存。先按路径键查，再回退旧的文件夹名键条目。
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String, !path.isEmpty else {
+        result(false)
+        return
+      }
+      result(bookmarks.hasBookmark(forPath: path))
+
     case "listChildren":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String, !path.isEmpty else {
@@ -396,7 +406,17 @@ final class CyShineStorageBrowserChannel {
         result(FlutterError(code: "INVALID_ARGS", message: "缺少 name/bookmark", details: nil))
         return
       }
-      bookmarks.save(name: name, bookmark: data)
+      // 优先按解析出的目录路径存键（同名文件夹不互相顶授权）；
+      // 解析失败才回退旧的文件夹名键。
+      var isStale = false
+      if let url = try? URL(resolvingBookmarkData: data,
+                            options: [.withoutUI],
+                            relativeTo: nil,
+                            bookmarkDataIsStale: &isStale) {
+        bookmarks.save(path: url.path, bookmark: data)
+      } else {
+        bookmarks.save(name: name, bookmark: data)
+      }
       result(true)
 
     case "removeRoot":
@@ -584,7 +604,7 @@ final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
       let data = try url.bookmarkData(options: [],
                                       includingResourceValuesForKeys: nil,
                                       relativeTo: nil)
-      bookmarks.save(name: url.lastPathComponent, bookmark: data)
+      bookmarks.save(path: url.path, bookmark: data)
       // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
       result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
     } catch {
@@ -619,10 +639,26 @@ final class CyShineSecurityScopedStore {
     defaults.dictionary(forKey: Self.defaultsKey) as? [String: String] ?? [:]
   }
 
+  /// 按目录完整路径存键：两个同名文件夹（如两处「Music」）不再互相
+  /// 顶掉授权。旧条目按文件夹名存键，读取时仍兼容（见 resolvedRoots）。
+  func save(path: String, bookmark: Data) {
+    var stored = load()
+    stored[path] = bookmark.base64EncodedString()
+    defaults.set(stored, forKey: Self.defaultsKey)
+  }
+
+  /// 旧版按文件夹名存键的写法，仅保留给解析不出路径时的兜底。
   func save(name: String, bookmark: Data) {
     var stored = load()
     stored[name] = bookmark.base64EncodedString()
     defaults.set(stored, forKey: Self.defaultsKey)
+  }
+
+  /// 该路径是否已有授权：先按路径键直查，未命中再解析全部存量条目
+  /// 比对解析出的路径（兼容旧版按文件夹名存键的条目）。
+  func hasBookmark(forPath path: String) -> Bool {
+    if load()[path] != nil { return true }
+    return resolvedRoots().contains { $0.url.path == path }
   }
 
   func remove(path: String) {
@@ -642,7 +678,14 @@ final class CyShineSecurityScopedStore {
     for (name, encoded) in load() {
       guard let data = Data(base64Encoded: encoded) else { continue }
       if let resolved = try? resolve(data) {
-        roots.append(Root(name: name, url: resolved.url))
+        // 新条目的键是完整路径，展示名取解析出 URL 的末段；旧条目的键
+        // 是文件夹名，原样用作展示名。
+        let displayName = name.hasPrefix("/")
+          ? (resolved.url.lastPathComponent.isEmpty
+              ? name
+              : resolved.url.lastPathComponent)
+          : name
+        roots.append(Root(name: displayName, url: resolved.url))
         if !resolved.isStale { stillValid[name] = encoded }
       }
     }

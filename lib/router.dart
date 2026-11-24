@@ -30,6 +30,7 @@ import 'features/shell/shell_navigation.dart';
 import 'features/shell/shell_page_storage.dart';
 import 'features/shell/shell_page_frame.dart';
 import 'features/shell/shell_route_utils.dart';
+import 'features/songs/ignored_local_songs_page.dart';
 import 'features/songs/songs_page.dart';
 import 'theme/app_motion.dart';
 
@@ -257,6 +258,15 @@ GoRouter createAppRouter({
                       child: _shellPageContent(
                         state,
                         child: const SongsPage(searchMode: true),
+                      ),
+                    ),
+                  ),
+                  GoRoute(
+                    path: '/songs/ignored',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: _shellPageContent(
+                        state,
+                        child: const IgnoredLocalSongsPage(),
                       ),
                     ),
                   ),

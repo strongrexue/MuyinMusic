@@ -13,12 +13,16 @@ class SongsBatchActionBar extends StatelessWidget {
     required this.onAddToPlaylist,
     required this.onPlaySelected,
     required this.onDownloadSelected,
+    this.onRemoveFromList,
     this.playlistMode = false,
     this.likedMode = false,
   });
 
   final int selectedCount;
   final VoidCallback? onDelete;
+
+  /// 本地音乐批量「仅从本地列表移除」（文件保留）；仅本地列表模式传入。
+  final VoidCallback? onRemoveFromList;
   final VoidCallback? onAddToPlaylist;
   final VoidCallback? onPlaySelected;
 
@@ -45,6 +49,14 @@ class SongsBatchActionBar extends StatelessWidget {
               height: 64,
               child: Row(
                 children: [
+                  if (onRemoveFromList != null)
+                    Expanded(
+                      child: _SongsBatchAction(
+                        icon: MusicActionGlyphs.playlistRemove,
+                        label: '仅从列表移除',
+                        onPressed: onRemoveFromList,
+                      ),
+                    ),
                   Expanded(
                     child: _SongsBatchAction(
                       icon: likedMode
@@ -54,7 +66,7 @@ class SongsBatchActionBar extends StatelessWidget {
                               : MusicActionGlyphs.trash),
                       label: likedMode
                           ? '取消喜欢'
-                          : (playlistMode ? '移出歌单' : '永久删除'),
+                          : (playlistMode ? '移出歌单' : '删除本地文件'),
                       onPressed: onDelete,
                       enabledColor: scheme.error,
                     ),

@@ -509,17 +509,22 @@ void main() {
   );
 
   test(
-    'local music scan folder follows download folder until customized',
+    'changing the download folder leaves the scan folder untouched',
     () async {
       final prefs = await SharedPreferences.getInstance();
       final container = _settingsContainer(prefs);
       final notifier = container.read(settingsProvider.notifier);
+      final defaultDir = container.read(settingsProvider).downloadDir;
 
       await notifier.setDownloadDir('/storage/emulated/0/Music/Downloads');
       expect(
         container.read(settingsProvider).localMusicDir,
-        '/storage/emulated/0/Music/Downloads',
+        defaultDir,
       );
+      expect(container.read(settingsProvider).scanDirectories, [
+        defaultDir,
+        '/storage/emulated/0/Music/Downloads',
+      ]);
 
       await notifier.setLocalMusicDir('/storage/1234-5678/Music');
       await notifier.setDownloadDir('/storage/emulated/0/Music/NewDownloads');
