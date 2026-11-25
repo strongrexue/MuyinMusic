@@ -1,16 +1,46 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:muyin_music/core/xiaomi/mina_models.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_intent.dart';
+import 'package:muyin_music/core/xiaomi/takeover/speaker_stream_proxy.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_resolver.dart';
 import 'package:muyin_music/core/xiaomi/takeover/takeover_engine.dart';
 import 'package:muyin_music/core/xiaomi/takeover/takeover_state.dart';
 
 import 'xiaomi_takeover_test_utils.dart';
 
+/// 假流代理：publish 返回固定代理 URL（或 null 模拟不可用），
+/// wasFetched 可控。
+class FakeStreamProxy implements SpeakerStreamProxy {
+  FakeStreamProxy({this.publishResult, this.fetched = false});
+
+  final String? publishResult;
+  bool fetched;
+  final List<String> publishedUpstreams = [];
+
+  @override
+  Future<String?> publish(String upstreamUrl) async {
+    publishedUpstreams.add(upstreamUrl);
+    return publishResult;
+  }
+
+  @override
+  bool wasFetched(String pushUrl) => fetched;
+}
+
 void main() {
   group('TakeoverEngine 点歌时序', () {
     test('pause→stop 两轮（间隔 600ms）→ 推播 → 回读验证 → 记录成功', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
+      // 推播验证脚本：首采样 position 已达 3000 → 首帧即落地
+      // （静态 fallback 的 500 在收紧判定下永不落地）。
+      gateway.statusQueue.add(
+        const MinaPlayerStatus(
+          statusCode: 1,
+          positionMs: 5000,
+          durationMs: 200000,
+        ),
+      );
       final resolver = FakeSpeakerResolver();
       final records = <TakeoverRecord>[];
       SpeakerNowPlaying? nowPlaying;
@@ -105,6 +135,76 @@ void main() {
       await future;
       expect(gateway.callNames, isNot(contains('playMusic')));
       expect(records.single.success, isFalse);
+    });
+  });
+
+  group('TakeoverEngine 代理推播', () {
+    test('注入假 proxy：推代理 URL，记录 viaProxy=true 且 fetched 随 wasFetched', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      final proxy = FakeStreamProxy(
+        publishResult: 'http://192.168.1.9:18761/stream/abc.mp3',
+        fetched: true,
+      );
+      final records = <TakeoverRecord>[];
+      final engine = TakeoverEngine(
+        gateway: gateway,
+        clock: clock,
+        resolver: FakeSpeakerResolver(),
+        device: fakeDevice(),
+        streamProxy: proxy,
+        onTakeoverRecord: records.add,
+      );
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      await pumpMicrotasks();
+      clock.advance(const Duration(milliseconds: 600));
+      await pumpMicrotasks();
+      expect(await future, isTrue);
+
+      expect(proxy.publishedUpstreams, ['http://example.com/song.mp3']);
+      final pushCall = gateway.calls.singleWhere((c) => c.name == 'playMusic');
+      expect(pushCall.detail, 'http://192.168.1.9:18761/stream/abc.mp3');
+      expect(records.single.success, isTrue);
+      expect(records.single.viaProxy, isTrue);
+      expect(records.single.fetched, isTrue);
+      expect(records.single.upstreamHostPath, 'example.com/song.mp3');
+    });
+
+    test('proxy publish 返回 null：直推上游 URL，记录 viaProxy=false', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.add(
+        const MinaPlayerStatus(
+          statusCode: 1,
+          positionMs: 5000,
+          durationMs: 200000,
+        ),
+      );
+      final proxy = FakeStreamProxy(publishResult: null);
+      final records = <TakeoverRecord>[];
+      final engine = TakeoverEngine(
+        gateway: gateway,
+        clock: clock,
+        resolver: FakeSpeakerResolver(),
+        device: fakeDevice(),
+        streamProxy: proxy,
+        onTakeoverRecord: records.add,
+      );
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      await pumpMicrotasks();
+      clock.advance(const Duration(milliseconds: 600));
+      await pumpMicrotasks();
+      expect(await future, isTrue);
+
+      final pushCall = gateway.calls.singleWhere((c) => c.name == 'playMusic');
+      expect(pushCall.detail, 'http://example.com/song.mp3');
+      expect(records.single.success, isTrue);
+      expect(records.single.viaProxy, isFalse);
+      expect(records.single.fetched, isFalse);
     });
   });
 

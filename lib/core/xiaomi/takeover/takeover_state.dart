@@ -22,6 +22,11 @@ class TakeoverRecord {
     required this.atMs,
     required this.success,
     this.detail,
+    this.sourceName,
+    this.qualityLabel,
+    this.upstreamHostPath,
+    this.viaProxy = false,
+    this.fetched = false,
   });
 
   /// 触发这次接管的语音原话。
@@ -38,6 +43,35 @@ class TakeoverRecord {
 
   /// 失败原因等补充说明（如「未找到可播版本」）。
   final String? detail;
+
+  /// 命中的音源名（供记录展示）。
+  final String? sourceName;
+
+  /// 命中的音质（供记录展示）。
+  final String? qualityLabel;
+
+  /// 上游 URL 的 host+path，不含签名参数（供记录展示 / 排查）。
+  final String? upstreamHostPath;
+
+  /// 是否经局域网代理推播。
+  final bool viaProxy;
+
+  /// 音箱是否已从代理取流。
+  final bool fetched;
+}
+
+/// 接管记录最多保留条数。
+const int kMaxTakeoverRecords = 10;
+
+/// 把 [record] 插到 [current] 最前（新→旧），截断到 [kMaxTakeoverRecords]
+/// 条，返回不可变新列表（不改入参）。
+List<TakeoverRecord> prependTakeoverRecord(
+  List<TakeoverRecord> current,
+  TakeoverRecord record,
+) {
+  return List<TakeoverRecord>.unmodifiable(
+    [record, ...current].take(kMaxTakeoverRecords),
+  );
 }
 
 /// 音箱当前在播（由接管推播）的一首。
@@ -66,6 +100,7 @@ class XiaoaiTakeoverState {
     this.deviceName,
     this.nowPlaying,
     this.lastRecord,
+    this.records = const [],
     this.errorMessage,
   });
 
@@ -76,6 +111,9 @@ class XiaoaiTakeoverState {
 
   final SpeakerNowPlaying? nowPlaying;
   final TakeoverRecord? lastRecord;
+
+  /// 接管记录（新→旧，最多 [kMaxTakeoverRecords] 条）。
+  final List<TakeoverRecord> records;
   final String? errorMessage;
 
   XiaoaiTakeoverState copyWith({
@@ -84,6 +122,7 @@ class XiaoaiTakeoverState {
     SpeakerNowPlaying? nowPlaying,
     bool clearNowPlaying = false,
     TakeoverRecord? lastRecord,
+    List<TakeoverRecord>? records,
     String? errorMessage,
     bool clearError = false,
   }) {
@@ -92,6 +131,7 @@ class XiaoaiTakeoverState {
       deviceName: deviceName ?? this.deviceName,
       nowPlaying: clearNowPlaying ? null : (nowPlaying ?? this.nowPlaying),
       lastRecord: lastRecord ?? this.lastRecord,
+      records: records ?? this.records,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     );
   }

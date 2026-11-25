@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:muyin_music/core/xiaomi/mina_models.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_relay.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_resolver.dart';
+import 'package:muyin_music/core/xiaomi/takeover/speaker_stream_proxy.dart';
 
 import 'xiaomi_takeover_test_utils.dart';
 
@@ -29,6 +30,7 @@ SpeakerRelay buildRelay(
   FakeTakeoverClock clock,
   FakeSpeakerResolver resolver, {
   void Function(RelayEndReason)? onEnded,
+  SpeakerStreamProxy? streamProxy,
 }) {
   return SpeakerRelay(
     gateway: gateway,
@@ -36,8 +38,23 @@ SpeakerRelay buildRelay(
     resolver: resolver,
     deviceId: 'device-1',
     usePlayMusic: true,
+    streamProxy: streamProxy,
     onSessionEnded: onEnded,
   );
+}
+
+/// 假流代理：publish 把上游 URL 换成固定代理 URL。
+class FakeStreamProxy implements SpeakerStreamProxy {
+  final List<String> publishedUpstreams = [];
+
+  @override
+  Future<String?> publish(String upstreamUrl) async {
+    publishedUpstreams.add(upstreamUrl);
+    return 'http://192.168.1.9:18761/stream/relay.mp3';
+  }
+
+  @override
+  bool wasFetched(String pushUrl) => false;
 }
 
 Future<void> elapse(FakeTakeoverClock clock, int seconds) async {
@@ -85,8 +102,9 @@ void main() {
         MinaPlayerStatus(statusCode: 1, positionMs: 5000),
         MinaPlayerStatus(statusCode: 1, positionMs: 12000),
         MinaPlayerStatus(statusCode: 1, positionMs: 1000),
-        // 推播验证采样：
-        MinaPlayerStatus(statusCode: 1, positionMs: 500, durationMs: 300000),
+        // 推播验证采样：position 已达 3000 量级 → 首帧即落地
+        // （静态 500 在收紧判定下永不落地）。
+        MinaPlayerStatus(statusCode: 1, positionMs: 5000, durationMs: 300000),
       ]);
       const noDuration = ResolvedSong(
         url: 'http://example.com/a.mp3',
@@ -103,6 +121,38 @@ void main() {
       expect(pushes, hasLength(1));
       expect(pushes.single.detail, 'http://example.com/b.mp3');
       expect(relay.nowPlaying?.queueIndex, 1);
+      relay.stop();
+    });
+  });
+
+  group('SpeakerRelay 代理推播', () {
+    test('接力推播走代理 URL（上游直链只进 publish，不直推）', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.add(
+        const MinaPlayerStatus(
+          statusCode: 1,
+          positionMs: 5000,
+          durationMs: 300000,
+        ),
+      );
+      final resolver = FakeSpeakerResolver()
+        ..byKeyword['李荣浩 麻雀'] = songB;
+      final proxy = FakeStreamProxy();
+      final relay = buildRelay(gateway, clock, resolver, streamProxy: proxy);
+      await relay.startWith(songA, const [
+        SpeakerQueueItem(title: '麻雀', artist: '李荣浩'),
+      ]);
+
+      expect(await relay.next(), isTrue);
+      expect(proxy.publishedUpstreams, ['http://example.com/b.mp3']);
+      final pushes = gateway.calls.where((c) => c.name == 'playMusic').toList();
+      expect(pushes, hasLength(1));
+      expect(
+        pushes.single.detail,
+        'http://192.168.1.9:18761/stream/relay.mp3',
+      );
+      expect(relay.nowPlaying?.title, '麻雀');
       relay.stop();
     });
   });
@@ -150,6 +200,17 @@ void main() {
         ..byKeyword['李荣浩 麻雀'] = songB
         ..byKeyword['歌手C 歌C'] = songC;
       RelayEndReason? endedReason;
+      // 推播验证脚本：首采样 position 已达 3000 量级 → 首帧即落地
+      // （静态 fallback 的 500 在收紧判定下永不落地）。共 4 次推播，
+      // 校准循环也会消费采样，故多备几份。
+      gateway.statusQueue.addAll([
+        for (var i = 0; i < 12; i++)
+          const MinaPlayerStatus(
+            statusCode: 1,
+            positionMs: 5000,
+            durationMs: 300000,
+          ),
+      ]);
       final relay = buildRelay(
         gateway,
         clock,

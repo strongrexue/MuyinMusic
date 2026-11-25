@@ -5,6 +5,7 @@ import '../models/music_url.dart';
 import '../models/search_response.dart';
 import '../music_sources/music_url_resolver.dart';
 import '../../features/player/player_models.dart';
+import 'speaker_url_probe.dart';
 import 'takeover/speaker_relay.dart';
 import 'takeover/speaker_resolver.dart';
 
@@ -23,11 +24,17 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
   PanghuSpeakerSongResolver({
     required MusicApi api,
     required MusicUrlResolver urlResolver,
+    SpeakerUrlProbe? urlProbe,
+    void Function(String message)? onLog,
   }) : _api = api,
-       _urlResolver = urlResolver;
+       _urlResolver = urlResolver,
+       _urlProbe = urlProbe ?? SpeakerUrlProbe(),
+       _onLog = onLog;
 
   final MusicApi _api;
   final MusicUrlResolver _urlResolver;
+  final SpeakerUrlProbe _urlProbe;
+  final void Function(String message)? _onLog;
 
   /// 单个候选最多尝试的音质数（避免在坏源上无限试错）。
   static const _maxQualityAttempts = 6;
@@ -112,11 +119,26 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
       final url = result.url.trim();
       if (url.isEmpty) continue;
       if (!isSpeakerPlayableUrl(url)) continue;
+      try {
+        final probe = await _urlProbe.probe(
+          url,
+          expectedDurationMs: parseMusicIntervalMs(music.interval),
+        );
+        if (!probe.ok) {
+          _onLog?.call('speaker probe rejected ${probe.rejectReason}');
+          continue;
+        }
+      } catch (e) {
+        _onLog?.call('speaker probe rejected error: $e');
+        continue;
+      }
       return ResolvedSong(
         url: url,
         title: music.name,
         artist: music.singer,
         durationMs: parseMusicIntervalMs(music.interval),
+        sourceName: music.source.label,
+        qualityLabel: quality.code,
       );
     }
     return null;

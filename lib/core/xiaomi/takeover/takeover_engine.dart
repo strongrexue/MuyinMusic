@@ -5,6 +5,7 @@ import 'speaker_gateway.dart';
 import 'speaker_intent.dart';
 import 'speaker_relay.dart';
 import 'speaker_resolver.dart';
+import 'speaker_stream_proxy.dart';
 import 'push_verify.dart';
 import 'takeover_clock.dart';
 import 'takeover_state.dart';
@@ -29,6 +30,7 @@ class TakeoverEngine {
     required SpeakerSongResolver resolver,
     required MinaDevice device,
     SpeakerQueueTailProvider? queueTailProvider,
+    SpeakerStreamProxy? streamProxy,
     void Function(TakeoverRecord record)? onTakeoverRecord,
     void Function(SpeakerNowPlaying? nowPlaying)? onNowPlayingChanged,
     void Function(String message)? onLog,
@@ -36,6 +38,7 @@ class TakeoverEngine {
        _clock = clock,
        _resolver = resolver,
        _device = device,
+       _streamProxy = streamProxy,
        _queueTailProvider = queueTailProvider,
        _onTakeoverRecord = onTakeoverRecord,
        _onNowPlayingChanged = onNowPlayingChanged,
@@ -45,6 +48,7 @@ class TakeoverEngine {
   final TakeoverClock _clock;
   final SpeakerSongResolver _resolver;
   final MinaDevice _device;
+  final SpeakerStreamProxy? _streamProxy;
   final SpeakerQueueTailProvider? _queueTailProvider;
   final void Function(TakeoverRecord record)? _onTakeoverRecord;
   final void Function(SpeakerNowPlaying? nowPlaying)? _onNowPlayingChanged;
@@ -138,7 +142,19 @@ class TakeoverEngine {
       return true;
     }
 
-    final pushed = await _pushAndVerify(resolved.url);
+    final push = await publishViaProxyOrDirect(
+      _streamProxy,
+      resolved.url,
+      onLog: _onLog,
+    );
+    final pushed = await _pushAndVerify(
+      push.url,
+      fetchedSignal: push.viaProxy
+          ? () => _streamProxy!.wasFetched(push.url)
+          : null,
+    );
+    final fetched =
+        push.viaProxy && _streamProxy!.wasFetched(push.url);
     if (!pushed) {
       _emitRecord(
         TakeoverRecord(
@@ -147,7 +163,12 @@ class TakeoverEngine {
           artist: resolved.artist,
           atMs: _clock.nowMs(),
           success: false,
-          detail: '推播未落地',
+          detail: !push.viaProxy ? '推播未落地（代理不可用，已直推）' : '推播未落地',
+          sourceName: resolved.sourceName,
+          qualityLabel: resolved.qualityLabel,
+          upstreamHostPath: _hostPathOf(resolved.url),
+          viaProxy: push.viaProxy,
+          fetched: fetched,
         ),
       );
       return true;
@@ -160,6 +181,11 @@ class TakeoverEngine {
         artist: resolved.artist,
         atMs: _clock.nowMs(),
         success: true,
+        sourceName: resolved.sourceName,
+        qualityLabel: resolved.qualityLabel,
+        upstreamHostPath: _hostPathOf(resolved.url),
+        viaProxy: push.viaProxy,
+        fetched: fetched,
       ),
     );
 
@@ -169,7 +195,10 @@ class TakeoverEngine {
     return true;
   }
 
-  Future<bool> _pushAndVerify(String url) async {
+  Future<bool> _pushAndVerify(
+    String url, {
+    bool Function()? fetchedSignal,
+  }) async {
     bool ok;
     if (_usePlayMusic) {
       ok = await _gateway.playMusic(_deviceId, url);
@@ -177,11 +206,23 @@ class TakeoverEngine {
       // play_url 无 REPLACE_ALL；压制阶段已停过，这里直接推。
       ok = await _gateway.playUrl(_deviceId, url);
     }
-    final verified = await verifyPushLanded(_gateway, _clock, _deviceId);
+    final verified = await verifyPushLanded(
+      _gateway,
+      _clock,
+      _deviceId,
+      fetchedSignal: fetchedSignal,
+    );
     if (ok != verified) {
       _onLog?.call('takeover push receipt=$ok but verify=$verified');
     }
-    return ok || verified;
+    return verified;
+  }
+
+  /// 上游 URL 的 host+path（不含签名查询参数）；解析失败返回 null。
+  static String? _hostPathOf(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host.isEmpty) return null;
+    return '${uri.host}${uri.path}';
   }
 
   SpeakerRelay _ensureRelay() {
@@ -193,6 +234,7 @@ class TakeoverEngine {
       resolver: _resolver,
       deviceId: _deviceId,
       usePlayMusic: _usePlayMusic,
+      streamProxy: _streamProxy,
       onNowPlayingChanged: _onNowPlayingChanged,
       onSessionEnded: (reason) {
         _onLog?.call('relay ended: $reason');

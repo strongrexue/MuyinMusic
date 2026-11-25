@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/storage/settings_store.dart';
 import '../../../core/xiaomi/mina_models.dart';
+import '../../../core/xiaomi/takeover/wake_word_filter.dart';
 import '../../../core/xiaomi/takeover_providers.dart';
 import '../../../core/xiaomi/xiaomi_providers.dart';
 
@@ -16,6 +17,13 @@ const String kXiaoaiDevicePrefsKey = 'xiaoai_speaker_device_v1';
 
 /// 接管开关的用户意图落盘键（自启恢复只认它，不认运行时状态）。
 const String kXiaoaiEnabledPrefsKey = 'xiaoai_speaker_takeover_enabled_v1';
+
+/// 专属口令开关落盘键。
+const String kXiaoaiWakeWordEnabledPrefsKey =
+    'xiaoai_speaker_wake_word_enabled_v1';
+
+/// 专属口令词落盘键。
+const String kXiaoaiWakeWordPrefsKey = 'xiaoai_speaker_wake_word_v1';
 
 /// 「小爱音箱」卡是否展示：V1 仅 Android（前台宿主与轮询承载都是安卓的）。
 /// 独立成 provider，方便测试覆盖。
@@ -39,6 +47,8 @@ class XiaoaiSettingsState {
     this.devices = const [],
     this.selectedDevice,
     this.takeoverEnabled = false,
+    this.wakeWordEnabled = false,
+    this.wakeWord = kDefaultWakeWord,
     this.statusNote,
   });
 
@@ -55,6 +65,12 @@ class XiaoaiSettingsState {
   /// 接管开关的用户意图（落盘值）。
   final bool takeoverEnabled;
 
+  /// 专属口令开关（落盘值）：开启后只有带口令的指令才被接管。
+  final bool wakeWordEnabled;
+
+  /// 专属口令词（落盘值）。
+  final String wakeWord;
+
   /// 自启恢复失败时留下的状态说明，展示在「监听状态」行；
   /// 用户重新开开关或重新登录后清除。
   final String? statusNote;
@@ -65,6 +81,8 @@ class XiaoaiSettingsState {
     List<MinaDevice>? devices,
     Object? selectedDevice = _unsetValue,
     bool? takeoverEnabled,
+    bool? wakeWordEnabled,
+    String? wakeWord,
     Object? statusNote = _unsetValue,
   }) {
     return XiaoaiSettingsState(
@@ -75,6 +93,8 @@ class XiaoaiSettingsState {
           ? this.selectedDevice
           : selectedDevice as MinaDevice?,
       takeoverEnabled: takeoverEnabled ?? this.takeoverEnabled,
+      wakeWordEnabled: wakeWordEnabled ?? this.wakeWordEnabled,
+      wakeWord: wakeWord ?? this.wakeWord,
       statusNote: identical(statusNote, _unsetValue)
           ? this.statusNote
           : statusNote as String?,
@@ -93,6 +113,7 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
     required Future<void> Function() doLogout,
     required Future<void> Function(MinaDevice device) enableTakeover,
     required Future<void> Function() disableTakeover,
+    void Function(WakeWordFilter filter)? syncWakeWordFilter,
   }) : _prefs = prefs,
        _loadTokens = loadTokens,
        _fetchDevices = fetchDevices,
@@ -100,6 +121,7 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
        _doLogout = doLogout,
        _enableTakeover = enableTakeover,
        _disableTakeover = disableTakeover,
+       _syncWakeWordFilter = syncWakeWordFilter,
        super(const XiaoaiSettingsState());
 
   final SharedPreferences _prefs;
@@ -109,6 +131,7 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
   final Future<void> Function() _doLogout;
   final Future<void> Function(MinaDevice device) _enableTakeover;
   final Future<void> Function() _disableTakeover;
+  final void Function(WakeWordFilter filter)? _syncWakeWordFilter;
 
   Future<void>? _initFuture;
 
@@ -117,6 +140,9 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
 
   Future<void> _initialize() async {
     final enabled = _prefs.getBool(kXiaoaiEnabledPrefsKey) ?? false;
+    final wakeEnabled =
+        _prefs.getBool(kXiaoaiWakeWordEnabledPrefsKey) ?? false;
+    final wakeWord = _prefs.getString(kXiaoaiWakeWordPrefsKey);
     final snapshot = _decodeDevice(_prefs.getString(kXiaoaiDevicePrefsKey));
     XiaomiTokenInfo? tokens;
     try {
@@ -130,8 +156,38 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
       loggedIn: tokens?.isLoggedIn ?? false,
       selectedDevice: snapshot,
       takeoverEnabled: enabled,
+      wakeWordEnabled: wakeEnabled,
+      wakeWord: (wakeWord == null || wakeWord.trim().isEmpty)
+          ? kDefaultWakeWord
+          : wakeWord,
     );
+    _syncWakeWord();
     if (state.loggedIn) await refreshDevices();
+  }
+
+  /// 把当前口令设置同步给接管总控的过滤器。
+  void _syncWakeWord() {
+    _syncWakeWordFilter?.call(
+      WakeWordFilter(enabled: state.wakeWordEnabled, word: state.wakeWord),
+    );
+  }
+
+  /// 专属口令开关：落盘 + 同步过滤器。
+  Future<void> setWakeWordEnabled(bool enabled) async {
+    await _prefs.setBool(kXiaoaiWakeWordEnabledPrefsKey, enabled);
+    if (!mounted) return;
+    state = state.copyWith(wakeWordEnabled: enabled);
+    _syncWakeWord();
+  }
+
+  /// 专属口令词：trim 后为空不更新；更新后落盘 + 同步过滤器。
+  Future<void> setWakeWord(String word) async {
+    final trimmed = word.trim();
+    if (trimmed.isEmpty) return;
+    await _prefs.setString(kXiaoaiWakeWordPrefsKey, trimmed);
+    if (!mounted) return;
+    state = state.copyWith(wakeWord: trimmed);
+    _syncWakeWord();
   }
 
   /// 重新拉设备列表，并把已选设备换成列表里的实时对象（在线状态以此为准）。
@@ -226,7 +282,12 @@ class XiaoaiSettingsController extends StateNotifier<XiaoaiSettingsState> {
     await _prefs.remove(kXiaoaiDevicePrefsKey);
     await _doLogout();
     if (!mounted) return;
-    state = const XiaoaiSettingsState(initialized: true);
+    // 口令设置与账号无关，落盘保留，状态也一并保留。
+    state = XiaoaiSettingsState(
+      initialized: true,
+      wakeWordEnabled: state.wakeWordEnabled,
+      wakeWord: state.wakeWord,
+    );
   }
 
   /// App 启动恢复：上次开关为开且会话有效时自动重新 enable
@@ -310,5 +371,8 @@ final xiaoaiSettingsProvider =
             ref.read(xiaoaiTakeoverControllerProvider.notifier).enable(device),
         disableTakeover: () =>
             ref.read(xiaoaiTakeoverControllerProvider.notifier).disable(),
+        syncWakeWordFilter: (filter) => ref
+            .read(xiaoaiTakeoverControllerProvider.notifier)
+            .setWakeWordFilter(filter),
       );
     });

@@ -37,12 +37,20 @@ class ResolvedSong {
     required this.title,
     required this.artist,
     this.durationMs,
+    this.sourceName,
+    this.qualityLabel,
   });
 
   /// 音箱可直接拉流的直链（适配器保证已通过 [isSpeakerPlayableUrl]）。
   final String url;
   final String title;
   final String artist;
+
+  /// 命中的音源名（供接管记录展示）。
+  final String? sourceName;
+
+  /// 命中的音质（供接管记录展示）。
+  final String? qualityLabel;
 
   /// 时长（毫秒）；未知为 null，接力会走 position 回零探测兜底。
   final int? durationMs;

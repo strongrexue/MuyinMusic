@@ -4,6 +4,7 @@ import '../mina_models.dart';
 import 'push_verify.dart';
 import 'speaker_gateway.dart';
 import 'speaker_resolver.dart';
+import 'speaker_stream_proxy.dart';
 import 'takeover_clock.dart';
 import 'takeover_state.dart';
 
@@ -56,12 +57,14 @@ class SpeakerRelay {
     required SpeakerSongResolver resolver,
     required this.deviceId,
     required this.usePlayMusic,
+    SpeakerStreamProxy? streamProxy,
     void Function(SpeakerNowPlaying? nowPlaying)? onNowPlayingChanged,
     void Function(RelayEndReason reason)? onSessionEnded,
     void Function(String message)? onLog,
   }) : _gateway = gateway,
        _clock = clock,
        _resolver = resolver,
+       _streamProxy = streamProxy,
        _onNowPlayingChanged = onNowPlayingChanged,
        _onSessionEnded = onSessionEnded,
        _onLog = onLog;
@@ -69,6 +72,7 @@ class SpeakerRelay {
   final SpeakerGateway _gateway;
   final TakeoverClock _clock;
   final SpeakerSongResolver _resolver;
+  final SpeakerStreamProxy? _streamProxy;
   final String deviceId;
   final bool usePlayMusic;
 
@@ -198,7 +202,18 @@ class SpeakerRelay {
     }
     if (!_active || generation != _generation) return false;
 
-    final pushed = await _push(resolved.url);
+    // 代理 URL 每次推播现注册，不进 _resolvedCache（缓存的仍是上游直链）。
+    final push = await publishViaProxyOrDirect(
+      _streamProxy,
+      resolved.url,
+      onLog: _onLog,
+    );
+    final pushed = await _push(
+      push.url,
+      fetchedSignal: push.viaProxy
+          ? () => _streamProxy!.wasFetched(push.url)
+          : null,
+    );
     if (!_active || generation != _generation) return false;
     if (!pushed) return false;
 
@@ -209,7 +224,7 @@ class SpeakerRelay {
     return true;
   }
 
-  Future<bool> _push(String url) async {
+  Future<bool> _push(String url, {bool Function()? fetchedSignal}) async {
     bool ok;
     if (usePlayMusic) {
       ok = await _gateway.playMusic(deviceId, url);
@@ -219,13 +234,18 @@ class SpeakerRelay {
       await _gateway.playerStop(deviceId);
       ok = await _gateway.playUrl(deviceId, url);
     }
-    // 回执与回读都不可全信：任一确认即算落地，两者矛盾时记日志
-    // （3012 假失败 / 云端受理但设备没拉流的假成功都存在）。
-    final verified = await verifyPushLanded(_gateway, _clock, deviceId);
+    // 只认回读验证：回执不可信（3012 假失败 / 云端受理但设备没拉流
+    // 的假成功都存在），两者矛盾时记日志。
+    final verified = await verifyPushLanded(
+      _gateway,
+      _clock,
+      deviceId,
+      fetchedSignal: fetchedSignal,
+    );
     if (ok != verified) {
       _onLog?.call('relay push receipt=$ok but verify=$verified');
     }
-    return ok || verified;
+    return verified;
   }
 
   // ===== 校准循环 =====
