@@ -325,9 +325,13 @@ class MinaAuth {
         'User-Agent': await _ua(),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      extraCookie: captcha.isNotEmpty && _captchaIck.isNotEmpty
-          ? 'ick=$_captchaIck'
-          : null,
+      // miservice 的 _serviceLogin 两步都显式带 sdkVersion + deviceId
+      // cookie；此前第二步只在验证码场景带 ick、常态下漏了 deviceId，
+      // 与蓝本对齐（ick 仍只在验证码场景追加）。
+      extraCookie: [
+        'sdkVersion=3.8.6; deviceId=${_deviceId ?? ''}',
+        if (captcha.isNotEmpty && _captchaIck.isNotEmpty) 'ick=$_captchaIck',
+      ].join('; '),
       body: _encodeForm(form),
     );
     final raw = stripXiaomiJsonPrefix(resp.bodyText);
@@ -764,12 +768,40 @@ class MinaAuth {
     // HTML 时附带页面 <title>：标题只是页面名（如验证页 / 风控页的
     // 自称），无敏感值，却能一眼定性这是什么页。限长 40、去内嵌标签。
     var titlePart = '';
+    var bodyPart = '';
     if (kind == 'HTML 页面') {
       final title = _extractHtmlTitle(raw);
       if (title != null) titlePart = '，页面标题「$title」';
+      // 再附正文可见文本：「温馨提示」类页面的正文就是服务器给出的
+      // 具体原因（如验证已过期 / 操作频繁），标题定不了性时靠它。
+      // 只取去标签后的可见文本并限长 80，不带整段原文。
+      final bodyText = _extractHtmlBodyText(raw);
+      if (bodyText != null) bodyPart = '，正文「$bodyText」';
     }
     return 'HTTP ${resp.statusCode}，${resp.bodyBytes.length} 字节，'
-        '$kind，起始「$head」$titlePart';
+        '$kind，起始「$head」$titlePart$bodyPart';
+  }
+
+  /// 提取 HTML 的正文可见文本：去掉 script/style/title 元素与全部
+  /// 标签，解常见实体，折叠空白，限长 80 字；无可见文本返回 null。
+  static String? _extractHtmlBodyText(String html) {
+    var text = html
+        .replaceAll(
+          RegExp(r'<(script|style|title)[^>]*>[\s\S]*?</\1>', caseSensitive: false),
+          ' ',
+        )
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&amp;', '&')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (text.isEmpty) return null;
+    if (text.length > 80) text = text.substring(0, 80);
+    return text;
   }
 
   /// 提取 HTML 的 `<title>` 文本：去内嵌标签、折叠空白、限长 40 字；

@@ -113,7 +113,12 @@ class MinaCookieJar {
         final attrEq = attr.indexOf('=');
         if (attrEq <= 0) continue;
         if (attr.substring(0, attrEq).trim().toLowerCase() == 'domain') {
-          domain = attr.substring(attrEq + 1).trim().replaceFirst('.', '');
+          // RFC 6265：Domain 值只忽略一个前导点。不能用 replaceFirst
+          // 删任意位置的点——Domain=xiaomi.com（无前导点）会被改成
+          // xiaomicom，cookie 永远存不进该发的域，真机上即表现为
+          // 会话 cookie 丢失（单测夹具只用 Path=/ 时测不出来）。
+          domain = attr.substring(attrEq + 1).trim().toLowerCase();
+          if (domain.startsWith('.')) domain = domain.substring(1);
         }
       }
       if (name.isEmpty) continue;

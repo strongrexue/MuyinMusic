@@ -492,6 +492,82 @@ void main() {
       }
     });
 
+    test('list 以 Domain=xiaomi.com（无前导点）下发会话 cookie → 触发步带上', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse(
+            '&&&START&&&{"flag":4}',
+            setCookies: [
+              'identity_session=sess-1; Domain=xiaomi.com; Path=/',
+            ],
+          );
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      final trigger = transport
+          .requestsTo('/identity/auth/verifyPhone')
+          .single;
+      expect(
+        trigger.headers['Cookie'],
+        contains('identity_session=sess-1'),
+      );
+    });
+
+    test('登录第二步也带 deviceId cookie（对齐 miservice _serviceLogin）', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        throw StateError('unexpected request: ${req.urlText}');
+      });
+      await _loginToNeedVerify(transport, store);
+
+      final step2 = transport.requestsTo('serviceLoginAuth2').single;
+      expect(step2.headers['Cookie'], contains('deviceId=dev-fixed'));
+    });
+
+    test('触发步回温馨提示页 → 失败且错误带正文可见文本', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse(
+            '<!DOCTYPE html><html><head>'
+            '<title>小米账号 - 温馨提示</title>'
+            '<style>.tips{color:red}</style></head>'
+            '<body><div class="tips">身份验证已过期，请重新登录</div>'
+            '<script>var tracker = 1;</script></body></html>',
+          );
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isFalse);
+      final error = auth.lastSendCodeError!;
+      expect(error, contains('页面标题「小米账号 - 温馨提示」'));
+      expect(error, contains('正文「身份验证已过期，请重新登录」'));
+      expect(error, isNot(contains('tracker')));
+    });
+
     test('发码链每一步都用 OTP 专用 UA（miservice UA_OTP）', () async {
       final store = await _seededStore();
       final transport = _verifyFlowTransport((req) {
