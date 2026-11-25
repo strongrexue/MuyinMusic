@@ -396,10 +396,14 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
   }
 
   Future<void> _sendCode() async {
-    final ok = await ref.read(minaAuthProvider).sendVerificationCode();
+    final auth = ref.read(minaAuthProvider);
+    final ok = await auth.sendVerificationCode();
     if (!mounted) return;
     if (!ok) {
-      setState(() => _error = '验证码发送失败，请稍后重试');
+      final detail = auth.lastSendCodeError;
+      setState(() => _error = (detail != null && detail.isNotEmpty)
+          ? '验证码发送失败：$detail'
+          : '验证码发送失败，请稍后重试');
       return;
     }
     _startResendCountdown();

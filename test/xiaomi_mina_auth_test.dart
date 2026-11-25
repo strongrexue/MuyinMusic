@@ -47,6 +47,35 @@ Future<XiaomiTokenStore> _seededStore() async {
   return store;
 }
 
+const _step2NeedVerifyBody =
+    '&&&START&&&{"code":0,"notificationUrl":'
+    '"https://account.xiaomi.com/fe/service/identity/authStart'
+    '?sid=micoapi&context=ctx9"}';
+
+/// 登录两步固定走到 NeedVerify，验证链各步交给 [verifyHandler] 回放。
+FakeMinaTransport _verifyFlowTransport(
+  MinaHttpResponse Function(RecordedRequest req) verifyHandler,
+) {
+  return FakeMinaTransport((req) {
+    final url = req.urlText;
+    if (url.contains('serviceLoginAuth2')) {
+      return fakeJsonResponse(_step2NeedVerifyBody);
+    }
+    if (url.contains('serviceLogin')) return fakeJsonResponse(_step1Body);
+    return verifyHandler(req);
+  });
+}
+
+Future<MinaAuth> _loginToNeedVerify(
+  FakeMinaTransport transport,
+  XiaomiTokenStore store,
+) async {
+  final auth = MinaAuth(http: transport, tokenStore: store);
+  final first = await auth.login('user@example.com', 'pw');
+  expect(first, isA<MinaLoginNeedVerify>());
+  return auth;
+}
+
 void main() {
   group('MinaAuth 登录', () {
     test('happy path：三步登录，nonce 从原文提取，passToken 取 cookie', () async {
@@ -66,7 +95,7 @@ void main() {
             );
           }
           return fakeJsonResponse(
-            '{}',
+            '&&&START&&&{}',
             setCookies: [
               'serviceToken=tok-abc; Path=/',
               'userId=123456; Path=/',
@@ -113,7 +142,7 @@ void main() {
           step2Calls++;
           if (step2Calls == 1) {
             return fakeJsonResponse(
-              '{"code":87001,"captchaUrl":"/pass/captcha/img?id=9"}',
+              '&&&START&&&{"code":87001,"captchaUrl":"/pass/captcha/img?id=9"}',
             );
           }
           return fakeJsonResponse(_step2OkBody);
@@ -129,7 +158,7 @@ void main() {
         }
         if (url.contains('/pass/sts')) {
           return fakeJsonResponse(
-            '{}',
+            '&&&START&&&{}',
             setCookies: ['serviceToken=tok-abc; Path=/'],
           );
         }
@@ -160,30 +189,32 @@ void main() {
         final url = req.urlText;
         if (url.contains('serviceLoginAuth2')) {
           return fakeJsonResponse(
-            '{"code":0,"notificationUrl":'
+            '&&&START&&&{"code":0,"notificationUrl":'
             '"https://account.xiaomi.com/fe/service/identity/authStart'
             '?sid=micoapi&context=ctx9"}',
           );
         }
         if (url.contains('/identity/list')) {
-          return fakeJsonResponse('{"flag":4}');
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
         }
         if (url.contains('/identity/auth/verifyPhone')) {
-          if (req.method == 'GET') return fakeJsonResponse('{"code":0}');
+          if (req.method == 'GET') {
+            return fakeJsonResponse('&&&START&&&{"code":0}');
+          }
           return fakeJsonResponse(
-            '{"code":0,'
+            '&&&START&&&{"code":0,'
             '"location":"https://account.xiaomi.com/pass/sts?d=2"}',
           );
         }
         if (url.contains('/identity/auth/sendPhoneTicket')) {
-          return fakeJsonResponse('{"code":0}');
+          return fakeJsonResponse('&&&START&&&{"code":0}');
         }
         if (url.contains('/fe/service/identity/authStart')) {
-          return fakeJsonResponse('{}');
+          return fakeJsonResponse('&&&START&&&{}');
         }
         if (url.contains('/pass/sts?d=2')) {
           return fakeJsonResponse(
-            '{}',
+            '&&&START&&&{}',
             setCookies: [
               'passToken=pt-verify; Path=/',
               'userId=123456; Path=/',
@@ -192,7 +223,7 @@ void main() {
         }
         if (url.contains('/pass/sts?d=3')) {
           return fakeJsonResponse(
-            '{}',
+            '&&&START&&&{}',
             setCookies: ['serviceToken=tok-verify; Path=/'],
           );
         }
@@ -201,7 +232,7 @@ void main() {
           if (serviceLoginCalls == 1) return fakeJsonResponse(_step1Body);
           // passToken 续期（securityTokenService）。
           return fakeJsonResponse(
-            '{"code":0,'
+            '&&&START&&&{"code":0,'
             '"location":"https://account.xiaomi.com/pass/sts?d=3",'
             '"ssecurity":"sec2","nonce":42}',
           );
@@ -235,6 +266,140 @@ void main() {
       expect(submit.form['_flag'], '4');
       expect(submit.form['trust'], 'true');
     });
+
+    test('发码严格校验：sendPhoneTicket 回非 0 code → false 且带服务器错误', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse(
+            '&&&START&&&{"code":87005,"desc":"短信发送失败"}',
+          );
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isFalse);
+      expect(auth.lastSendCodeError, contains('87005'));
+      expect(auth.lastSendCodeError, contains('短信发送失败'));
+    });
+
+    test('发码：list 回 flag=8（带前缀）→ 走邮箱通道，不调 sendPhoneTicket', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/verifyEmail')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":8}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      expect(transport.requestsTo('/identity/auth/verifyEmail'), hasLength(1));
+      expect(transport.requestsTo('/identity/auth/verifyPhone'), isEmpty);
+      expect(transport.requestsTo('sendPhoneTicket'), isEmpty);
+    });
+
+    test('发码链每一步都带 deviceId cookie', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      for (final part in [
+        '/fe/service/identity/authStart',
+        '/identity/list',
+        '/identity/auth/verifyPhone',
+        '/identity/auth/sendPhoneTicket',
+      ]) {
+        final reqs = transport.requestsTo(part);
+        expect(reqs, hasLength(1), reason: part);
+        expect(
+          reqs.single.headers['Cookie'],
+          contains('deviceId=dev-fixed'),
+          reason: part,
+        );
+      }
+    });
+
+    test('发码第一步 authStart 跟随重定向；回 403 时发码失败且不再往下走', () async {
+      final store = await _seededStore();
+      var authStartCalls = 0;
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/fe/service/identity/authStart')) {
+          authStartCalls++;
+          if (authStartCalls == 1) {
+            return fakeRedirect(
+              'https://account.xiaomi.com/fe/service/identity/authStart'
+              '?sid=micoapi&context=ctx9&step=2',
+            );
+          }
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      expect(authStartCalls, 2);
+
+      // 403：第一步即失败，不再请求 list。
+      final store2 = await _seededStore();
+      final transport2 = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}', status: 403);
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth2 = await _loginToNeedVerify(transport2, store2);
+
+      expect(await auth2.sendVerificationCode(), isFalse);
+      expect(auth2.lastSendCodeError, contains('403'));
+      expect(transport2.requestsTo('/identity/list'), isEmpty);
+    });
   });
 
   group('MinaAuth token 生命周期', () {
@@ -259,14 +424,14 @@ void main() {
         final url = req.urlText;
         if (url.contains('/pass/sts')) {
           return fakeJsonResponse(
-            '{}',
+            '&&&START&&&{}',
             setCookies: ['serviceToken=tok-new; Path=/'],
           );
         }
         if (url.contains('serviceLogin')) {
           expect(req.headers['Cookie'], contains('passToken=pt-old'));
           return fakeJsonResponse(
-            '{"code":0,'
+            '&&&START&&&{"code":0,'
             '"location":"https://account.xiaomi.com/pass/sts?d=9",'
             '"ssecurity":"sec9","nonce":7}',
           );

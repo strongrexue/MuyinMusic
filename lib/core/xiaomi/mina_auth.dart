@@ -45,7 +45,14 @@ class MinaAuth {
   int _rateLimitHits = 0;
   int _rateLimitCooldownUntilMs = 0;
 
+  String? _lastSendCodeError;
+  Uri? _lastFetchFinalUrl;
+
   XiaomiTokenInfo? get currentTokens => _tokenStore.cached;
+
+  /// 最近一次 [sendVerificationCode] 失败的原因（含服务器 code / 描述），
+  /// 成功或未调用时为 null，供 UI 展示。
+  String? get lastSendCodeError => _lastSendCodeError;
 
   int get _nowMs => _now().millisecondsSinceEpoch;
 
@@ -93,15 +100,32 @@ class MinaAuth {
   /// miot 的 auth 层没有这一步（其前端另行处理），这里按 miservice
   /// 的完整流程实现：打开 notificationUrl 建会话 → /identity/list
   /// 定方式 → GET verify{Phone,Email} 触发 → 手机再 POST
-  /// sendPhoneTicket 真正发短信。
+  /// sendPhoneTicket 真正发短信。每步都带 deviceId cookie（miservice
+  /// 全程显式携带），且严格校验：响应解析失败或 code 显式非 0 都如实
+  /// 返回失败，原因记入 [lastSendCodeError]，绝不把服务器拒绝吞成成功。
   Future<bool> sendVerificationCode() async {
-    if (_verifyUrl.isEmpty) return false;
+    _lastSendCodeError = null;
+    if (_verifyUrl.isEmpty) {
+      return _sendCodeFailed('没有进行中的验证会话');
+    }
     final ua = await _ua();
+    final deviceCookie = 'deviceId=${_deviceId ?? ''}';
 
-    // 1. 打开 notificationUrl 建立验证会话。
-    await _fetch('GET', Uri.parse(_verifyUrl), headers: {'User-Agent': ua});
+    // 1. 打开 notificationUrl 建立验证会话（跟随重定向，最终须 200，
+    //    与 miservice 的硬性要求一致）。
+    final startResp = await _fetch(
+      'GET',
+      Uri.parse(_verifyUrl),
+      headers: {'User-Agent': ua},
+      extraCookie: deviceCookie,
+      maxRedirects: 10,
+    );
+    if (startResp.statusCode != 200) {
+      return _sendCodeFailed('打开验证页失败（HTTP ${startResp.statusCode}）');
+    }
 
-    // 2. 查可用验证方式（flag 4=手机、8=邮箱）。
+    // 2. 查可用验证方式（flag 4=手机、8=邮箱）；解析不到 flag 直接
+    //    失败，不猜默认值。
     final verifyUri = Uri.parse(_verifyUrl);
     final context = verifyUri.queryParameters['context'] ?? '';
     final sidParam = verifyUri.queryParameters['sid'] ?? kMinaSid;
@@ -112,9 +136,16 @@ class MinaAuth {
       'GET',
       Uri.parse(listUrl),
       headers: {'User-Agent': ua},
+      extraCookie: deviceCookie,
     );
-    final listJson = _parseJson(listResp.bodyText);
-    final flag = (listJson?['flag'] as num?)?.toInt() ?? 4;
+    final listJson = _parseJson(stripXiaomiJsonPrefix(listResp.bodyText));
+    if (listJson == null) {
+      return _sendCodeFailed(_serverErrorText('查询验证方式', null));
+    }
+    final flag = (listJson['flag'] as num?)?.toInt();
+    if (flag == null) {
+      return _sendCodeFailed(_serverErrorText('查询验证方式', listJson));
+    }
     _verifyKind = flag == 8 ? XiaomiVerifyKind.email : XiaomiVerifyKind.phone;
 
     // 3. 触发发送。
@@ -126,8 +157,14 @@ class MinaAuth {
         '?_flag=$flag&_json=true',
       ),
       headers: {'User-Agent': ua},
+      extraCookie: deviceCookie,
     );
-    if (!_codeOkOrAbsent(_parseJson(triggerResp.bodyText))) return false;
+    final triggerJson = _parseJson(
+      stripXiaomiJsonPrefix(triggerResp.bodyText),
+    );
+    if (!_strictSendCodeOk(triggerJson)) {
+      return _sendCodeFailed(_serverErrorText('触发验证码发送', triggerJson));
+    }
 
     // 4. 手机需再调 sendPhoneTicket 才真正发出短信。
     if (_verifyKind == XiaomiVerifyKind.phone) {
@@ -138,9 +175,13 @@ class MinaAuth {
           'User-Agent': ua,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
+        extraCookie: deviceCookie,
         body: _encodeForm({'retry': '0', 'icode': '', '_json': 'true'}),
       );
-      if (!_codeOkOrAbsent(_parseJson(sendResp.bodyText))) return false;
+      final sendJson = _parseJson(stripXiaomiJsonPrefix(sendResp.bodyText));
+      if (!_strictSendCodeOk(sendJson)) {
+        return _sendCodeFailed(_serverErrorText('短信发送', sendJson));
+      }
     }
     return true;
   }
@@ -162,6 +203,19 @@ class MinaAuth {
       headers: {'User-Agent': await _ua()},
       maxRedirects: 10,
     );
+    // miservice 7a'：重定向链可能停在「确认手机号」页，最终 URL 上的
+    // confirmUrl 续链后才会走到下发 passToken 的终点，先带 cookie
+    // GET 它再继续找 passToken。
+    final confirmUrl = _lastFetchFinalUrl?.queryParameters['confirmUrl'];
+    if (confirmUrl != null && confirmUrl.isNotEmpty) {
+      await _fetch(
+        'GET',
+        Uri.parse(confirmUrl),
+        headers: {'User-Agent': await _ua()},
+        extraCookie: 'deviceId=${_deviceId ?? ''}',
+        maxRedirects: 10,
+      );
+    }
     final passToken = _jar.value('passToken') ?? '';
     final userId = _jar.value('userId') ?? '';
     if (passToken.isEmpty) {
@@ -204,6 +258,7 @@ class MinaAuth {
     _passwordHash = '';
     _captchaIck = '';
     _verifyUrl = '';
+    _lastSendCodeError = null;
     _jar.clear();
     await _tokenStore.clear();
   }
@@ -479,8 +534,11 @@ class MinaAuth {
         'User-Agent': await _ua(),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
+      extraCookie: 'deviceId=${_deviceId ?? ''}',
       body: _encodeForm({
         'ticket': ticket,
+        // trust 取值蓝本分歧未定版：miot 用 'true'、miservice 用
+        // 'false'，当前沿用 miot 的 'true'，待真机抓包定版后再改。
         'trust': 'true',
         '_json': 'true',
         '_flag': flag,
@@ -488,7 +546,8 @@ class MinaAuth {
     );
     final json = _parseJson(stripXiaomiJsonPrefix(resp.bodyText));
     if (json == null) return null;
-    if (_codeOf(json) != 0) return null;
+    // miservice 的成功判定：响应带 location 即视为校验通过（其流程
+    // 根本不看 code），没有 location 才算失败。
     final location = _stringValue(json, 'location');
     return location.isEmpty ? null : location;
   }
@@ -503,6 +562,7 @@ class MinaAuth {
         'GET',
         Uri.parse(listUrl),
         headers: {'User-Agent': await _ua()},
+        extraCookie: 'deviceId=${_deviceId ?? ''}',
       );
     } catch (_) {
       // 非致命：拿不到 identity_session 也继续提交（miot 同策略）。
@@ -548,7 +608,10 @@ class MinaAuth {
       final location = resp.header('location');
       final isRedirect =
           resp.statusCode >= 300 && resp.statusCode < 400 && location != null;
-      if (!isRedirect || hops >= maxRedirects) return resp;
+      if (!isRedirect || hops >= maxRedirects) {
+        _lastFetchFinalUrl = currentUrl;
+        return resp;
+      }
       hops++;
       currentUrl = currentUrl.resolve(location);
       currentMethod = 'GET';
@@ -589,10 +652,35 @@ class MinaAuth {
   static int? _codeOf(Map<String, Object?> json) =>
       (json['code'] as num?)?.toInt();
 
-  static bool _codeOkOrAbsent(Map<String, Object?>? json) {
-    if (json == null) return true;
+  /// 发码链严格校验：解析失败（null）直接算失败；code 显式非 0 也
+  /// 失败。code 缺失时与 miservice 一致暂容忍（其触发/发码步判定为
+  /// `code not in (0, None)` 才报错）——但解析失败绝不放行，这是
+  /// 与旧 _codeOkOrAbsent 的关键区别。
+  static bool _strictSendCodeOk(Map<String, Object?>? json) {
+    if (json == null) return false;
     final code = _codeOf(json);
     return code == null || code == 0;
+  }
+
+  /// 把服务器返回的 code / 描述拼成可读的失败原因。
+  static String _serverErrorText(String step, Map<String, Object?>? json) {
+    if (json == null) return '$step失败：服务器响应解析失败';
+    final code = _codeOf(json);
+    var desc = '';
+    for (final key in ['desc', 'description', 'message']) {
+      final v = json[key];
+      if (v is String && v.isNotEmpty) {
+        desc = v;
+        break;
+      }
+    }
+    return '$step失败${code != null ? '（code=$code）' : ''}'
+        '${desc.isNotEmpty ? '：$desc' : ''}';
+  }
+
+  bool _sendCodeFailed(String message) {
+    _lastSendCodeError = message;
+    return false;
   }
 
   static Map<String, Object?>? _parseJson(String text) {
