@@ -11,8 +11,9 @@ import 'lan_stream_server.dart';
 import 'mina_models.dart';
 import 'panghu_speaker_adapter.dart';
 import 'takeover/conversation_monitor.dart';
+import 'takeover/dispatch.dart';
+import 'takeover/quiet.dart';
 import 'takeover/speaker_gateway.dart';
-import 'takeover/speaker_intent.dart';
 import 'takeover/speaker_resolver.dart';
 import 'takeover/takeover_clock.dart';
 import 'takeover/takeover_engine.dart';
@@ -102,10 +103,10 @@ final xiaoaiTakeoverControllerProvider =
       );
     });
 
-/// 接管总控：把监听器、接管引擎、前台宿主串起来。
+/// 接管总控：把监听器、分发层、接管引擎、前台宿主串起来。
 ///
 /// 本类只做接线与状态汇总，业务全在核心层
-/// （ConversationMonitor / TakeoverEngine / SpeakerRelay）。
+/// （ConversationMonitor / TakeoverDispatcher / TakeoverEngine）。
 class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
   XiaoaiTakeoverController({
     required SpeakerGateway gateway,
@@ -156,6 +157,8 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
 
   ConversationMonitor? _monitor;
   TakeoverEngine? _engine;
+  TakeoverDispatcher? _dispatcher;
+  int _enableGen = 0;
 
   WakeWordFilter _wakeWordFilter = const WakeWordFilter.disabled();
 
@@ -221,28 +224,45 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     }
 
     const clock = SystemTakeoverClock();
+    void onRecord(TakeoverRecord record) {
+      if (mounted) {
+        state = state.copyWith(
+          lastRecord: record,
+          records: prependTakeoverRecord(state.records, record),
+        );
+      }
+    }
+
+    void onNowPlaying(SpeakerNowPlaying? nowPlaying) {
+      if (!mounted) return;
+      state = nowPlaying == null
+          ? state.copyWith(clearNowPlaying: true)
+          : state.copyWith(nowPlaying: nowPlaying);
+    }
+
+    final quiet = TakeoverQuiet(
+      gateway: _gateway,
+      clock: clock,
+      store: _muteStore,
+      deviceId: device.deviceId,
+      onLog: _log,
+    );
     final engine = TakeoverEngine(
       gateway: _gateway,
       clock: clock,
-      resolver: _resolver,
       device: device,
+      quiet: quiet,
+      onTakeoverRecord: onRecord,
+      onNowPlayingChanged: onNowPlaying,
+      onLog: _log,
+    );
+    final dispatcher = TakeoverDispatcher(
+      engine: engine,
+      resolver: _resolver,
       streamProxy: _streamServer,
-      muteStore: _muteStore,
+      clock: clock,
       queueTailProvider: _queueTailProvider,
-      onTakeoverRecord: (record) {
-        if (mounted) {
-          state = state.copyWith(
-            lastRecord: record,
-            records: prependTakeoverRecord(state.records, record),
-          );
-        }
-      },
-      onNowPlayingChanged: (nowPlaying) {
-        if (!mounted) return;
-        state = nowPlaying == null
-            ? state.copyWith(clearNowPlaying: true)
-            : state.copyWith(nowPlaying: nowPlaying);
-      },
+      onTakeoverRecord: onRecord,
       onLog: _log,
     );
     final monitor = ConversationMonitor(
@@ -252,23 +272,30 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
         limit: 5,
       ),
       clock: clock,
-      onRecord: (record) {
+      onRecord: (record, seenMs) {
         final query = _wakeWordFilter.apply(record.query);
         if (query == null) return; // 未命中口令：放行原生，不接管
-        final intent = parseSpeakerIntent(query);
-        if (intent == null) return; // 不认识的指令交还原生
-        // 不 await：处理一条指令（含解析/守卫）不再阻塞轮询，
-        // 新指令由引擎代际令牌取代旧流程。
+        // 不 await：一条指令的处理（找歌/守卫/watch）不阻塞
+        // 轮询，新指令由分发/引擎的代际机制取代旧流程。口令
+        // 剥除后的文本以新记录形态进分发（时间戳不变）。
+        final effective = query == record.query
+            ? record
+            : ConversationRecord(
+                timeMs: record.timeMs,
+                query: query,
+                answers: record.answers,
+                requestId: record.requestId,
+              );
         unawaited(
-          engine.handleIntent(intent).catchError((Object e) {
-            _log('takeover intent error: $e');
-            return false;
+          dispatcher.onCommand(effective, seenMs).catchError((Object e) {
+            _log('takeover dispatch error: $e');
           }),
         );
       },
       onLog: _log,
     );
     _engine = engine;
+    _dispatcher = dispatcher;
     _monitor = monitor;
     state = XiaoaiTakeoverState(
       phase: TakeoverPhase.listening,
@@ -279,16 +306,36 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     );
     unawaited(_host.start());
     monitor.start();
+    final gen = ++_enableGen;
+    unawaited(_recoverLoop(engine, gen));
   }
 
-  /// 关闭接管：停监听、停接力、撤前台服务（先恢复可能持有的静音）。
+  /// RecoverVolumes（蓝本）：每 20 秒扫一遍待恢复音量，
+  /// 被当前接管持有时引擎内部会跳过；接管途中崩溃也不会把
+  /// 音箱永久留在静音。
+  Future<void> _recoverLoop(TakeoverEngine engine, int gen) async {
+    while (mounted && gen == _enableGen && _engine == engine) {
+      await Future<void>.delayed(const Duration(seconds: 20));
+      if (!mounted || gen != _enableGen || _engine != engine) return;
+      try {
+        await engine.recoverVolumesOnce();
+      } catch (e) {
+        _log('takeover recover volumes error: $e');
+      }
+    }
+  }
+
+  /// 关闭接管：停监听、停分发、撤前台服务（先恢复可能持有的静音）。
   Future<void> disable({bool keepRecord = false}) async {
+    _enableGen++;
     _monitor?.stop();
     _monitor = null;
+    _dispatcher?.halt();
+    _dispatcher = null;
     try {
-      await _engine?.restorePendingVolume();
+      await _engine?.restoreVolumeNow();
     } catch (_) {
-      // 恢复失败不影响关闭；落盘条目留待下次启动自检。
+      // 恢复失败不影响关闭；落盘条目留待 RecoverVolumes 兜底。
     }
     _engine?.shutdown();
     _engine = null;

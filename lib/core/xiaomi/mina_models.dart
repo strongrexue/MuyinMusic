@@ -337,7 +337,13 @@ class ConversationRecord {
     required this.timeMs,
     required this.query,
     required this.answers,
+    this.requestId,
   });
+
+  /// 上游请求 id（蓝本 internal/xiaomi/client.go Record.RequestID，
+  /// JSON 字段 `requestId`）；某些固件为空，此时为 null。
+  /// 有值时是首选去重键（蓝本 observe.handle 的 RequestKey）。
+  final String? requestId;
 
   /// 服务端毫秒时间戳，去重基线必须用它，不能用本地时钟。
   final int timeMs;
@@ -375,10 +381,15 @@ class ConversationRecord {
         );
       }
     }
+    // requestId 归一：toString 后空串视为没有（蓝本：empty on some firmware）。
+    final rawRequestId = json['requestId']?.toString();
     return ConversationRecord(
       timeMs: (json['time'] as num?)?.toInt() ?? 0,
       query: json['query']?.toString() ?? '',
       answers: answers,
+      requestId: (rawRequestId == null || rawRequestId.isEmpty)
+          ? null
+          : rawRequestId,
     );
   }
 }

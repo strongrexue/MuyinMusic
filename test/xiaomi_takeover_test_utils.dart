@@ -2,10 +2,11 @@ import 'dart:async';
 
 import 'package:muyin_music/core/xiaomi/mina_constants.dart';
 import 'package:muyin_music/core/xiaomi/mina_models.dart';
+import 'package:muyin_music/core/xiaomi/takeover/quiet.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_gateway.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_resolver.dart';
+import 'package:muyin_music/core/xiaomi/takeover/speaker_stream_proxy.dart';
 import 'package:muyin_music/core/xiaomi/takeover/takeover_clock.dart';
-import 'package:muyin_music/core/xiaomi/takeover/takeover_engine.dart';
 
 /// 内存版待恢复音量存储（TrackFerry PendingVolume 语义：
 /// save 已有不覆盖、change 只改已有）。
@@ -202,6 +203,76 @@ class FakeSpeakerResolver implements SpeakerSongResolver {
       return byKeyword[request.keyword];
     }
     return result;
+  }
+}
+
+/// 假流句柄：取流/重取/丢失信号可脚本化。
+class FakeStreamHandle implements StreamHandle {
+  FakeStreamHandle({
+    required this.url,
+    this.label = '',
+    this.lengthMs = 269000,
+  });
+
+  @override
+  final String url;
+  @override
+  final String label;
+  @override
+  final int lengthMs;
+
+  bool fetchedValue = false;
+  int fetchedAtMsValue = 0;
+  bool restartedValue = false;
+  bool lostValue = false;
+  int fetchCountValue = 0;
+
+  /// resume 的返回：(句柄, 起点ms)；为 null 表示不可续播。
+  ({StreamHandle handle, int startMs})? resumeResult;
+
+  @override
+  bool get fetched => fetchedValue;
+  @override
+  int get fetchedAtMs => fetchedAtMsValue;
+  @override
+  bool get restarted => restartedValue;
+  @override
+  bool get lost => lostValue;
+  @override
+  int get fetchCount => fetchCountValue;
+
+  @override
+  Future<({StreamHandle handle, int startMs})?> resume(int atMs) async {
+    return resumeResult;
+  }
+}
+
+/// 假推流代理：publish 返回可脚本化的句柄（或 null 模拟失败）。
+class FakeStreamProxy implements SpeakerStreamProxy {
+  final List<String> publishedUrls = [];
+  FakeStreamHandle? nextHandle;
+  bool publishFails = false;
+
+  /// 自动生成的句柄是否直接标记已取流（队列推进等多首场景用）。
+  bool autoFetched = false;
+
+  @override
+  Future<StreamHandle?> publish(
+    String upstreamUrl, {
+    int? durationMs,
+    String? label,
+  }) async {
+    publishedUrls.add(upstreamUrl);
+    if (publishFails) return null;
+    final handle =
+        nextHandle ??
+        (FakeStreamHandle(
+          url: 'http://192.168.50.10:18761/stream/token.mp3',
+          label: label ?? '',
+          lengthMs: durationMs ?? 269000,
+        )..fetchedValue = autoFetched);
+    nextHandle = null;
+    return handle;
   }
 }
 

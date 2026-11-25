@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muyin_music/core/xiaomi/lan_stream_server.dart';
+import 'package:muyin_music/core/xiaomi/takeover/speaker_stream_proxy.dart';
 
 /// 自构造 MP3 字节：ID3 头 + 帧头 0xFF 0xFB 0x90 0x00 + 填充。
 List<int> buildMp3Bytes(int total) {
@@ -40,11 +41,48 @@ Future<_GetResult> _httpGet(String url, {Map<String, String>? headers}) async {
   }
 }
 
+Future<int> _httpHead(String url) async {
+  final client = HttpClient();
+  try {
+    final request = await client.headUrl(Uri.parse(url));
+    final response = await request.close();
+    await response.drain<void>();
+    return response.statusCode;
+  } finally {
+    client.close(force: true);
+  }
+}
+
 Future<int> freePort() async {
   final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
   final port = socket.port;
   await socket.close();
   return port;
+}
+
+void serveSong(HttpRequest request, List<int> songBytes) {
+  final response = request.response;
+  final range = request.headers.value(HttpHeaders.rangeHeader);
+  if (range != null) {
+    final match = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(range)!;
+    final start = int.parse(match.group(1)!);
+    final end = match.group(2)!.isEmpty
+        ? songBytes.length - 1
+        : int.parse(match.group(2)!);
+    response.statusCode = HttpStatus.partialContent;
+    response.headers.set(
+      HttpHeaders.contentRangeHeader,
+      'bytes $start-$end/${songBytes.length}',
+    );
+    response.headers.contentType = ContentType('application', 'octet-stream');
+    response.contentLength = end - start + 1;
+    response.add(songBytes.sublist(start, end + 1));
+  } else {
+    response.headers.contentType = ContentType('application', 'octet-stream');
+    response.contentLength = songBytes.length;
+    response.add(songBytes);
+  }
+  response.close();
 }
 
 void main() {
@@ -53,44 +91,37 @@ void main() {
   late String upstreamBase;
   late LanStreamServer server;
   late int nowMsValue;
+  late int flakyHits;
   const startNow = 1700000000000;
 
   setUp(() async {
     nowMsValue = startNow;
+    flakyHits = 0;
     upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     upstreamBase = 'http://127.0.0.1:${upstream.port}';
-    upstream.listen((request) {
+    upstream.listen((request) async {
       final response = request.response;
       if (request.uri.path == '/song.mp3') {
-        final range = request.headers.value(HttpHeaders.rangeHeader);
-        if (range != null) {
-          final match = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(range)!;
-          final start = int.parse(match.group(1)!);
-          final end = match.group(2)!.isEmpty
-              ? songBytes.length - 1
-              : int.parse(match.group(2)!);
-          response.statusCode = HttpStatus.partialContent;
-          response.headers.set(
-            HttpHeaders.contentRangeHeader,
-            'bytes $start-$end/${songBytes.length}',
-          );
-          response.headers.contentType = ContentType('application', 'octet-stream');
-          response.contentLength = end - start + 1;
-          response.add(songBytes.sublist(start, end + 1));
-        } else {
-          response.headers.contentType = ContentType('application', 'octet-stream');
-          response.contentLength = songBytes.length;
-          response.add(songBytes);
+        serveSong(request, songBytes);
+      } else if (request.uri.path == '/flaky.mp3') {
+        flakyHits++;
+        if (flakyHits == 1) {
+          // 首次打开直接毁连接，模拟上游打开失败（openAgain 场景）。
+          final socket = await response.detachSocket(writeHeaders: false);
+          socket.destroy();
+          return;
         }
+        serveSong(request, songBytes);
       } else if (request.uri.path == '/norange.mp3') {
         // 忽略 Range，恒回 200 全量。
         response.headers.contentType = ContentType('application', 'octet-stream');
         response.contentLength = songBytes.length;
         response.add(songBytes);
+        response.close();
       } else {
         response.statusCode = HttpStatus.notFound;
+        response.close();
       }
-      response.close();
     });
 
     server = LanStreamServer(
@@ -106,30 +137,48 @@ void main() {
     await upstream.close(force: true);
   });
 
-  test('publish URL 形态 + GET 200 全量 + wasFetched false→true', () async {
-    final pushUrl = await server.publish('$upstreamBase/song.mp3');
-    expect(pushUrl, isNotNull);
-    expect(
-      pushUrl,
-      matches(
-        RegExp(
-          r'^http://127\.0\.0\.1:\d+/stream/[0-9a-f]{32}\.mp3$',
-        ),
-      ),
+  Future<StreamHandle> publishSong({int? durationMs, String path = '/song.mp3'}) async {
+    final handle = await server.publish(
+      '$upstreamBase$path',
+      durationMs: durationMs,
+      label: '测试歌',
     );
-    expect(server.wasFetched(pushUrl!), isFalse);
+    expect(handle, isNotNull);
+    return handle!;
+  }
 
-    final result = await _httpGet(pushUrl);
+  test('publish URL 形态 + GET 200 全量 + fetched false→true', () async {
+    final handle = await publishSong();
+    expect(
+      handle.url,
+      matches(RegExp(r'^http://127\.0\.0\.1:\d+/stream/[0-9a-f]{32}\.mp3$')),
+    );
+    expect(handle.label, '测试歌');
+    expect(handle.fetched, isFalse);
+    expect(handle.fetchedAtMs, isNull);
+    expect(handle.fetchCount, 0);
+
+    final result = await _httpGet(handle.url);
     expect(result.statusCode, 200);
     expect(result.bytes, songBytes);
     expect(result.headers.contentType?.mimeType, 'audio/mpeg');
-    expect(server.wasFetched(pushUrl), isTrue);
+    expect(result.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
+    expect(handle.fetched, isTrue);
+    expect(handle.fetchedAtMs, startNow);
+    expect(handle.fetchCount, 1);
+  });
+
+  test('HEAD 也记 fetched', () async {
+    final handle = await publishSong();
+    expect(await _httpHead(handle.url), 200);
+    expect(handle.fetched, isTrue);
+    expect(handle.fetchCount, 1);
   });
 
   test('带 Range 且上游 206 → 206 分段', () async {
-    final pushUrl = await server.publish('$upstreamBase/song.mp3');
+    final handle = await publishSong();
     final result = await _httpGet(
-      pushUrl!,
+      handle.url,
       headers: {HttpHeaders.rangeHeader: 'bytes=100-199'},
     );
     expect(result.statusCode, 206);
@@ -142,9 +191,9 @@ void main() {
   });
 
   test('上游忽略 Range 恒 200 → 代理回 200 全量', () async {
-    final pushUrl = await server.publish('$upstreamBase/norange.mp3');
+    final handle = await publishSong(path: '/norange.mp3');
     final result = await _httpGet(
-      pushUrl!,
+      handle.url,
       headers: {HttpHeaders.rangeHeader: 'bytes=100-199'},
     );
     expect(result.statusCode, 200);
@@ -159,22 +208,97 @@ void main() {
     expect(result.statusCode, 404);
   });
 
-  test('未取流 token 推进 6 分钟 → 404', () async {
-    final pushUrl = await server.publish('$upstreamBase/song.mp3');
-    nowMsValue += 6 * 60 * 1000;
-    final result = await _httpGet(pushUrl!);
-    expect(result.statusCode, 404);
+  test('TTL 统一 6 小时：未取流 +5h59m 仍 200，+6h 后 404', () async {
+    final handle = await publishSong();
+    nowMsValue += 5 * 60 * 60 * 1000 + 59 * 60 * 1000;
+    expect((await _httpGet(handle.url)).statusCode, 200);
+
+    final handle2 = await publishSong();
+    // handle2 的过期点是其 publish 时刻 +6h；把时钟推到该点之后。
+    nowMsValue += 6 * 60 * 60 * 1000 + 1;
+    expect((await _httpGet(handle2.url)).statusCode, 404);
   });
 
-  test('已取流 token：+20 分钟仍 200，fetched+31 分钟 → 404', () async {
-    final pushUrl = await server.publish('$upstreamBase/song.mp3');
-    expect((await _httpGet(pushUrl!)).statusCode, 200);
+  test('TTL：已取流不缩短，publish +6h 后一律 404', () async {
+    final handle = await publishSong();
+    expect((await _httpGet(handle.url)).statusCode, 200);
+    nowMsValue += 5 * 60 * 60 * 1000;
+    expect((await _httpGet(handle.url)).statusCode, 200);
+    nowMsValue += 60 * 60 * 1000 + 1;
+    expect((await _httpGet(handle.url)).statusCode, 404);
+  });
 
-    nowMsValue += 20 * 60 * 1000;
-    expect((await _httpGet(pushUrl)).statusCode, 200);
+  test('restarted：时长已知 gap=时长*9/10', () async {
+    final handle = await publishSong(durationMs: 10000); // gap 9000ms
+    await _httpGet(handle.url);
+    expect(handle.restarted, isFalse);
 
-    nowMsValue += 11 * 60 * 1000;
-    expect((await _httpGet(pushUrl)).statusCode, 404);
+    nowMsValue += 8999;
+    await _httpGet(handle.url);
+    expect(handle.restarted, isFalse);
+
+    nowMsValue += 1;
+    await _httpGet(handle.url);
+    expect(handle.restarted, isTrue);
+    expect(handle.fetchCount, 3);
+  });
+
+  test('restarted：时长未知 gap=15s，且非从头请求不触发', () async {
+    final handle = await publishSong();
+    await _httpGet(handle.url);
+
+    nowMsValue += 15000;
+    // 非从头（bytes=100-）不算重取。
+    await _httpGet(
+      handle.url,
+      headers: {HttpHeaders.rangeHeader: 'bytes=100-199'},
+    );
+    expect(handle.restarted, isFalse);
+
+    await _httpGet(
+      handle.url,
+      headers: {HttpHeaders.rangeHeader: 'bytes=0-'},
+    );
+    expect(handle.restarted, isTrue);
+  });
+
+  test('restarted：时长未知时 15s 内从头请求不触发', () async {
+    final handle = await publishSong();
+    await _httpGet(handle.url);
+    nowMsValue += 14999;
+    await _httpGet(handle.url);
+    expect(handle.restarted, isFalse);
+  });
+
+  test('lost：只取一半（Range 0-499）后请求结束 → lost', () async {
+    final handle = await publishSong();
+    final result = await _httpGet(
+      handle.url,
+      headers: {HttpHeaders.rangeHeader: 'bytes=0-499'},
+    );
+    expect(result.statusCode, 206);
+    expect(result.bytes.length, 500);
+    expect(handle.lost, isTrue);
+  });
+
+  test('lost：全量取完 → 不 lost', () async {
+    final handle = await publishSong();
+    await _httpGet(handle.url);
+    expect(handle.lost, isFalse);
+  });
+
+  test('openAgain：上游首次打开失败、第二次成功 → 200 全量', () async {
+    final handle = await publishSong(path: '/flaky.mp3');
+    final result = await _httpGet(handle.url);
+    expect(result.statusCode, 200);
+    expect(result.bytes, songBytes);
+    expect(flakyHits, 2);
+  });
+
+  test('上游 404 → 代理回 502', () async {
+    final handle = await publishSong(path: '/missing.mp3');
+    final result = await _httpGet(handle.url);
+    expect(result.statusCode, 502);
   });
 
   test('lanIpLookup 返回 null → publish null', () async {

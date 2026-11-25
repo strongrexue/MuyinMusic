@@ -1,645 +1,611 @@
 import 'dart:async';
 
 import '../mina_models.dart';
+import 'quiet.dart';
 import 'speaker_gateway.dart';
-import 'speaker_intent.dart';
-import 'speaker_relay.dart';
-import 'speaker_resolver.dart';
 import 'speaker_stream_proxy.dart';
-import 'push_verify.dart';
 import 'takeover_clock.dart';
 import 'takeover_state.dart';
-
-/// 点歌成功后取「该歌在 App 当前队列之后的部分」的回调。
-typedef SpeakerQueueTailProvider =
-    List<SpeakerQueueItem> Function(ResolvedSong song);
+import 'takeover_types.dart';
+import 'watch.dart';
 
 /// 音量步进（大声一点 / 小声一点）的单步幅度。
 const int kSpeakerVolumeStep = 10;
 
-/// 待恢复音量的落盘接缝（TrackFerry 的 PendingVolume 语义）。
+/// 接管引擎（TrackFerry `internal/takeover` 的 Engine/runner 移植）。
 ///
-/// 接管静音前先把原音量落盘、恢复后才清除，App 异常退出也不会把
-/// 音箱留在静音：宿主在下次监听启动时按落盘值自愈。
-/// [savePendingVolume] 已有条目时不覆盖（先落盘的那份才是用户
-/// 的真实音量，中途的 0 不是）。
-abstract interface class TakeoverMuteStore {
-  Future<int?> readPendingVolume(String deviceId);
-
-  Future<void> savePendingVolume(String deviceId, int volume);
-
-  /// 改恢复目标（静音期间用户调了音量）；返回此前是否有待恢复条目。
-  Future<bool> changePendingVolume(String deviceId, int volume);
-
-  Future<void> clearPendingVolume(String deviceId);
-}
-
-/// 接管引擎：意图 → 静音压制 → 解析 → 推播 → 验证 → 守卫 → 接力。
-///
-/// 时序照 TrackFerry `internal/takeover` 原版（参数全部取其
-/// DefaultTiming 原值）：
-/// 1. 发现点歌指令即静音（原音量先落盘再置 0，罩住后面的解析期，
-///    对应 TrackFerry 在路由决定前就调用的 Quiet），与第一轮
-///    halt（pause 与 stop 并发，个别型号对单独 stop 不理）并行
-///    发出（TrackFerry mute 与 stop1 同毫秒）；
-/// 2. 解析+探测在静音中进行；push 前补第二轮 halt，两轮之间至少
-///    间隔 Settle 600ms（解析更快时补睡）；
-/// 3. 推播后回读验证（正证据模型：取流+在播才算落地，
-///    见 verifyPushLanded）；
-/// 4. 落地后立即恢复音量，随后进入 Guard 8s 守卫：同一套正
-///    证据判定认出外来播放就 halt + 重推（MaxReplays 2 次），
-///    抢不回如实记失败；
-/// 5. 没找到歌不交还原生：保持静音 quietSettle 20s 再恢复音量
-///    （等小爱自己的版本也没机会起播）。
-class TakeoverEngine {
+/// 一个引擎管一台音箱：同一时刻至多一个 run 在执行，新 run 开始
+/// 即取消旧 run（代际），旧 run 在检查点自行收尾且不恢复音量
+/// （新 run 继承待恢复音量）。run 的时序照蓝本 execute：
+/// mute 与 stop1 并行 → settle → stop2 → push（失败重试 2 次）
+/// → guard 8s（取流/确认/外来重推）→ watch（自维护播放时钟、
+/// 续播、防循环收尾）。每一步都以 step 形式写进诊断日志，
+/// 结局以 TakeoverRecord 落到 UI 记录。
+class TakeoverEngine implements WatchHost {
   TakeoverEngine({
     required SpeakerGateway gateway,
     required TakeoverClock clock,
-    required SpeakerSongResolver resolver,
     required MinaDevice device,
-    SpeakerQueueTailProvider? queueTailProvider,
-    SpeakerStreamProxy? streamProxy,
-    TakeoverMuteStore? muteStore,
+    required TakeoverQuiet quiet,
+    TakeoverTiming timing = const TakeoverTiming(),
     void Function(TakeoverRecord record)? onTakeoverRecord,
     void Function(SpeakerNowPlaying? nowPlaying)? onNowPlayingChanged,
     void Function(String message)? onLog,
-    Duration settle = const Duration(milliseconds: 600),
-    Duration guardWindow = const Duration(seconds: 8),
-    Duration guardPollFast = const Duration(milliseconds: 350),
-    Duration guardPoll = const Duration(milliseconds: 700),
-    int maxGuardReplays = 2,
-    Duration quietSettle = const Duration(seconds: 20),
   }) : _gateway = gateway,
        _clock = clock,
-       _resolver = resolver,
        _device = device,
-       _streamProxy = streamProxy,
-       _muteStore = muteStore,
-       _queueTailProvider = queueTailProvider,
+       _quiet = quiet,
+       _timing = timing,
        _onTakeoverRecord = onTakeoverRecord,
        _onNowPlayingChanged = onNowPlayingChanged,
-       _onLog = onLog,
-       _settle = settle,
-       _guardWindow = guardWindow,
-       _guardPollFast = guardPollFast,
-       _guardPoll = guardPoll,
-       _maxGuardReplays = maxGuardReplays,
-       _quietSettle = quietSettle;
+       _onLog = onLog;
 
   final SpeakerGateway _gateway;
   final TakeoverClock _clock;
-  final SpeakerSongResolver _resolver;
   final MinaDevice _device;
-  final SpeakerStreamProxy? _streamProxy;
-  final TakeoverMuteStore? _muteStore;
-  final SpeakerQueueTailProvider? _queueTailProvider;
+  final TakeoverQuiet _quiet;
+  final TakeoverTiming _timing;
   final void Function(TakeoverRecord record)? _onTakeoverRecord;
   final void Function(SpeakerNowPlaying? nowPlaying)? _onNowPlayingChanged;
   final void Function(String message)? _onLog;
 
-  /// TrackFerry DefaultTiming 原值（可注入仅为单测缩短）。
-  final Duration _settle;
-  final Duration _guardWindow;
-  final Duration _guardPollFast;
-  final Duration _guardPoll;
-  final int _maxGuardReplays;
-  final Duration _quietSettle;
+  late final TakeoverWatcher _watcher = TakeoverWatcher(
+    host: this,
+    clock: _clock,
+    timing: _timing,
+  );
 
-  SpeakerRelay? _relay;
+  TakeoverRun? _currentRun;
+  int _generation = 0;
+  Future<void> _tail = Future.value();
+  bool _shutdown = false;
 
-  /// 上次读到的非 0 音量（TrackFerry `know`：状态读顺手记，
-  /// 当前音量为 0 又无落盘时用它当恢复目标）。
-  int? _lastKnownVolume;
-
-  /// 本引擎正持有静音（已置 0、待恢复）。
-  bool _mutedHeld = false;
-
-  /// 本次静音要恢复到的音量（putBack 每次重读落盘，此为兜底）。
-  int? _muteTargetVolume;
-
-  /// 点歌流程代际：没找到歌的延迟恢复按它认领，新点歌接手后
-  /// 旧的延迟恢复自动作废。
-  int _playSongGeneration = 0;
+  /// 分发层预静音（Quiet）的持有令牌；run 接手后清掉。
+  Object? _quietToken;
 
   String get _deviceId => _device.deviceId;
   bool get _usePlayMusic => _gateway.usePlayMusicApi(_device.hardware);
 
-  bool get hasActiveRelay => _relay?.isActive ?? false;
-  SpeakerRelay? get relay => _relay;
+  /// 是否有 run 正在跟随播放（蓝本 Engine.Playing）。
+  bool get playing => _currentRun?.watching ?? false;
 
-  /// 处理一条意图。返回 true 表示已被接管侧处理（不再交还原生）。
-  Future<bool> handleIntent(SpeakerIntent intent) async {
-    switch (intent) {
-      case PlaySongIntent():
-        return _handlePlaySong(intent);
-      case StopIntent():
-        await _handleStop();
-        return true;
-      case PauseIntent():
-        await _gateway.playerPause(_deviceId);
-        return true;
-      case ResumeIntent():
-        await _gateway.playerPlay(_deviceId);
-        return true;
-      case NextIntent():
-        if (!hasActiveRelay) return false;
-        await _relay!.next();
-        return true;
-      case PreviousIntent():
-        if (!hasActiveRelay) return false;
-        await _relay!.previous();
-        return true;
-      case SetVolumeIntent():
-        return _handleSetVolume(intent.value);
-      case VolumeStepIntent():
-        return _handleVolumeStep(intent);
-    }
+  /// 这台音箱是否被接管侧持有（run 在跑、预静音未归还、或
+  /// 静音还压着）——RecoverVolumes 据此跳过。
+  bool get deviceHeld =>
+      _currentRun != null || _quietToken != null || _quiet.muteHeld;
+
+  TakeoverRun? get currentRun => _currentRun;
+
+  // ===== Quiet（分发层预静音） =====
+
+  /// 决策期预静音（蓝本 `Engine.Quiet`）：立即开始静音（不等
+  /// 完成），返回归还函数。归还函数只生效一次：back=true 时
+  /// 若静音仍归本令牌持有（没有 run 接手）则恢复音量；
+  /// back=false 表示 run 已接手，什么都不做。
+  void Function(bool) quiet() {
+    final token = Object();
+    _quietToken = token;
+    final future = _quiet.mute();
+    var used = false;
+    return (bool back) {
+      if (used) return;
+      used = true;
+      if (!back) {
+        if (_quietToken == token) _quietToken = null;
+        return;
+      }
+      unawaited(() async {
+        final m = await future;
+        if (_quietToken != token) return; // 已被 run 接手
+        _quietToken = null;
+        if (m.muted) await _quiet.putBack(m.volume);
+      }());
+    };
   }
 
-  /// 一轮压制：pause 与 stop 并发发出（TrackFerry `halt`；
-  /// 一些型号忽略单独的 stop）。回执不作数，停没停以回读为准。
-  Future<void> suppressNative() async {
-    await Future.wait([
-      _gateway.playerPause(_deviceId),
-      _gateway.playerStop(_deviceId),
-    ]);
+  // ===== run 生命周期 =====
+
+  /// 开始一个 run（蓝本 `Engine.Start`）：取消同设备旧 run，
+  /// 新 run 排队串行执行（旧 run 被取消后会快速退出检查点）。
+  void start(TakeoverRequest req) {
+    _quietToken = null; // run 接手静音所有权
+    final gen = ++_generation;
+    final run = TakeoverRun(
+      gen: gen,
+      req: req,
+      startedAtMs: _clock.nowMs(),
+      nowMs: _clock.nowMs,
+      onStep: (s) => _onLog?.call(
+        'takeover step ${s.name} ${s.ok ? 'ok' : 'fail'} '
+        '+${s.atMs}ms${s.detail.isEmpty ? '' : ' ${s.detail}'}',
+      ),
+    );
+    _currentRun = run;
+    _tail = _tail.then((_) => _execute(run)).catchError((Object e) {
+      _onLog?.call('takeover run error: $e');
+    });
   }
 
-  /// 宿主关闭接管时停接力，并尽力把静音恢复（不阻塞关闭流程）。
+  /// 结束当前 run 的守卫（蓝本 `Engine.Release`）：守卫提前
+  /// 退出，但 run 仍恢复音量并进 watch 防循环。
+  void release() {
+    _currentRun?.released = true;
+  }
+
+  /// 把外部事件递给当前 run 的 watch（蓝本 `Engine.Hear`）。
+  void hear(HeardEvent event) {
+    _currentRun?.hear(event);
+  }
+
+  /// 取消当前 run（蓝本 Halt 的引擎侧）：按「被取代」收尾；
+  /// [byStop] 为真时按「按了停止」收尾（结局文案不同）。
+  void cancelCurrentRun({bool byStop = false}) {
+    final run = _currentRun;
+    if (run == null) return;
+    if (byStop) run.stopRequested = true;
+    _generation++;
+    _currentRun = null;
+  }
+
+  /// 等所有已启动的 run 执行完毕（测试与关闭流程用）。
+  Future<void> whenIdle() => _tail;
+
+  /// 宿主关闭：取消 run 并尽力恢复静音（不阻塞关闭）。
   void shutdown() {
-    _relay?.stop();
-    if (_mutedHeld) {
-      unawaited(restorePendingVolume().catchError((Object _) {}));
+    _shutdown = true;
+    cancelCurrentRun(byStop: true);
+    if (_quiet.muteHeld) {
+      unawaited(
+        _quiet.putBack(-1).then((_) {}, onError: (_) {}),
+      );
     }
   }
 
-  // ===== 静音与恢复（TrackFerry mute / putBack） =====
+  bool _runInactive(TakeoverRun run) =>
+      _shutdown || run.gen != _generation || run.stopRequested;
 
-  /// 顺手记音量：只记 >0 的（0 可能是我们自己压的）。
-  void _know(MinaPlayerStatus? status) {
-    final volume = status?.volume;
-    if (volume != null && volume > 0) _lastKnownVolume = volume;
-  }
-
-  /// 下发音量并验回执：失败重试至多 2 次（间隔 300ms）。
-  /// 此前 _mute 直接丢弃 setVolume 回执、失败也记「已静音」，
-  /// 静音没生效流程毫不知情（1.3.27 审计定版）。
-  Future<bool> _setVolumeVerified(int volume) async {
-    for (var attempt = 0; attempt < 3; attempt++) {
-      bool ok;
-      try {
-        ok = await _gateway.setVolume(_deviceId, volume);
-      } catch (_) {
-        ok = false;
-      }
-      if (ok) return true;
-      if (attempt < 2) {
-        await _clock.sleep(const Duration(milliseconds: 300));
-      }
+  /// 蓝本 cancelled()：被取消时落 step 并以 cancelled 结局收尾。
+  bool _cancelled(TakeoverRun run) {
+    if (!_runInactive(run)) return false;
+    if (run.stopRequested) {
+      run.step(TakeoverStepName.stopped, true, '按了停止');
+      _finish(run, RunOutcome.cancelled, '按了停止');
+    } else {
+      run.step(TakeoverStepName.cancelled, true, '同一台音箱有了更新的指令');
+      _finish(run, RunOutcome.cancelled, '被更新的指令取代');
     }
-    return false;
-  }
-
-  /// 静音：恢复目标先落盘、再置 0。已有落盘条目时沿用它
-  /// （inherited：上一轮/上个进程留下的待恢复音量才是真实音量）；
-  /// 其次用内存已知音量——两者已知时不再为读音量多跑一趟状态
-  /// 查询（TrackFerry 同口径，省一个云端往返）。都未知才读状态；
-  /// 仍读不到则不静音（没把握恢复就不压，TrackFerry 同口径）。
-  /// 置 0 必须验回执：下发失败（重试后仍失败）记日志且不置
-  /// [_mutedHeld]，不装作已静音。返回是否已持有静音。
-  Future<bool> _mute() async {
-    final store = _muteStore;
-    if (store == null) return false;
-    final pending = await store.readPendingVolume(_deviceId);
-    int? volume = pending ?? _lastKnownVolume;
-    if (volume == null) {
-      final status = await _gateway.getPlayerStatus(_deviceId);
-      _know(status);
-      final current = status?.volume;
-      if (current != null && current > 0) volume = current;
-    }
-    if (volume == null || volume <= 0) {
-      _onLog?.call('takeover mute skipped: current volume unknown');
-      return false;
-    }
-    // 先落盘后置 0：置 0 之后崩溃也有据可恢复。
-    if (pending == null) await store.savePendingVolume(_deviceId, volume);
-    _muteTargetVolume = volume;
-    final ok = await _setVolumeVerified(0);
-    if (!ok) {
-      _onLog?.call('takeover mute failed: setVolume(0) not acknowledged');
-      return false;
-    }
-    _mutedHeld = true;
     return true;
   }
 
-  /// 恢复音量（TrackFerry `putBack`）：最多 3 次尝试，间隔 300ms；
-  /// 每次重读落盘值（静音期间用户改过恢复目标就用新值），
-  /// 按值清除（恢复后落盘值又被改动则再循环一轮）。幂等。
-  Future<void> restorePendingVolume() async {
-    final store = _muteStore;
-    if (store == null) return;
-    var target = _muteTargetVolume;
-    try {
-      for (var attempt = 0; attempt < 3; attempt++) {
-        final pending = await store.readPendingVolume(_deviceId);
-        if (pending != null) target = pending;
-        if (target == null) break;
-        final ok = await _gateway.setVolume(_deviceId, target);
-        if (ok) {
-          _knowVolumeValue(target);
-          final now = await store.readPendingVolume(_deviceId);
-          if (now == null) break;
-          if (now == target) {
-            await store.clearPendingVolume(_deviceId);
-            break;
-          }
-          target = now; // 恢复期间被改过：用新值再设一轮
-          continue;
-        }
-        if (attempt < 2) {
-          await _clock.sleep(const Duration(milliseconds: 300));
-        }
-      }
-    } catch (e) {
-      _onLog?.call('takeover volume restore error: $e');
-    }
-    _mutedHeld = false;
-    _muteTargetVolume = null;
-  }
+  // ===== execute（蓝本 runner.execute） =====
 
-  void _knowVolumeValue(int volume) {
-    if (volume > 0) _lastKnownVolume = volume;
-  }
-
-  // ===== 点歌 =====
-
-  Future<bool> _handlePlaySong(PlaySongIntent intent) async {
-    final generation = ++_playSongGeneration;
-    // 代际令牌：新点歌到达后，旧流程在各检查点自行收尾（不写
-    // 记录、不恢复音量——静音持有权已移交新流程）。
-    bool stale() => generation != _playSongGeneration;
-
-    final startedMs = _clock.nowMs();
-    final stageMs = <String, int>{};
-
+  Future<void> _execute(TakeoverRun run) async {
+    final req = run.req;
+    final track = req.track as StreamHandle?;
+    var volume = -1;
+    var muted = false;
     var restored = false;
-    Future<void> restoreOnce() async {
-      if (restored || stale()) return;
+
+    // 恢复先于一切失败路径注册（蓝本 defer restore）：被取代/
+    // 被取消时不恢复——新 run 继承待恢复音量，关闭流程另有兜底。
+    Future<void> restore() async {
+      if (!muted || restored) return;
       restored = true;
-      await restorePendingVolume();
+      if (_runInactive(run)) return;
+      final r = await _quiet.putBack(volume);
+      run.step(
+        TakeoverStepName.restore,
+        r.error == null,
+        '音量 ${r.volume}${r.error == null ? '' : ' ${r.error}'}',
+      );
     }
 
-    var quietHold = false;
     try {
-      // 静音与第一轮压制并行发出（TrackFerry mute 与 stop1
-      // 同毫秒），一起罩住后面的解析期。
-      final halt1AtMs = _clock.nowMs();
-      await Future.wait([_mute(), suppressNative().then((_) => true)]);
-      stageMs['mute'] = _clock.nowMs() - startedMs;
-      if (stale()) return true;
-
-      ResolvedSong? resolved;
-      try {
-        resolved = await _resolver.resolveTopOne(
-          SpeakerResolveRequest(
-            keyword: intent.keyword,
-            hintTitle: intent.title,
-            hintArtist: intent.artist,
-          ),
-        );
-      } catch (e) {
-        _onLog?.call('takeover resolve error: $e');
-        resolved = null;
+      var remute = false;
+      if (req.follows) {
+        // 队列推进的 run：静音是上一个 run 留下的，继承即可。
+        final pending = await _quiet.pendingVolume();
+        if (pending != null) {
+          volume = pending;
+          muted = true;
+        }
+      } else {
+        final haltFuture = _halt();
+        final m = await _quiet.mute();
+        volume = m.volume;
+        muted = m.muted;
+        run.step(TakeoverStepName.status, m.statusOk, m.statusNote);
+        if (m.muted || m.error != null || m.note.isNotEmpty) {
+          run.step(
+            TakeoverStepName.mute,
+            m.muted,
+            '${m.note}${m.error ?? ''}',
+          );
+        }
+        remute = m.muted && m.error != null;
+        final haltOk = await haltFuture;
+        run.step(TakeoverStepName.stop1, haltOk, '');
+        if (await _sleepOrInactive(run, _timing.settle)) return;
+        if (remute) {
+          await _gateway.setVolume(_deviceId, 0);
+        }
+        final ok2 = await _halt();
+        run.step(TakeoverStepName.stop2, ok2, '');
       }
-      stageMs['resolve'] = _clock.nowMs() - startedMs - stageMs['mute']!;
-      if (stale()) return true;
+      if (_cancelled(run)) return;
 
-      if (resolved == null || !isSpeakerPlayableUrl(resolved.url)) {
-        _emitRecord(
-          TakeoverRecord(
-            query: intent.raw,
-            title: intent.title ?? intent.keyword,
-            artist: intent.artist ?? '',
-            atMs: _clock.nowMs(),
-            success: false,
-            detail: '未找到可播版本',
-            stageMs: stageMs,
-          ),
-        );
-        // 没找到歌不交还原生出声：保持静音满 quietSettle 再恢复，
-        // 等小爱自己的版本也没机会起播（TrackFerry Quiet run）。
-        // 新点歌接手（代际变化）时这份延迟恢复自动作废。
-        quietHold = true;
-        unawaited(_restoreAfterQuietSettle(generation, restoreOnce));
-        return true;
+      if (req.isQuiet || track == null) {
+        // 没找到歌的静默 run：压住音量等小爱也没得放，再归还。
+        restored = true; // 立即恢复改为延迟恢复（下方挂 later）
+        if (await _quiet.hasPending()) {
+          run.step(
+            TakeoverStepName.quiet,
+            true,
+            '音量 $volume 先压住 ${_timing.quietSettle.inSeconds} 秒，等她没得放再还',
+          );
+          final v = volume;
+          unawaited(_restoreAfterQuietSettle(run.gen, v));
+        }
+        run.step(TakeoverStepName.quiet, true, '曲库和线上都没有，停住不出声');
+        _finish(run, RunOutcome.failed, '曲库和线上都没有这首歌，没有出声');
+        req.onEnded?.call(TakeoverEnd.unplayed);
+        return;
       }
 
-      // 第二轮压制紧贴 push 前；与第一轮至少间隔 Settle。
-      final elapsedMs = _clock.nowMs() - halt1AtMs;
-      if (elapsedMs < _settle.inMilliseconds) {
-        await _clock.sleep(
-          Duration(milliseconds: _settle.inMilliseconds - elapsedMs),
-        );
+      if (!await _push(run, track, TakeoverStepName.play)) {
+        if (_cancelled(run)) return;
+        _finish(run, RunOutcome.failed, '推送播放失败');
+        req.onEnded?.call(TakeoverEnd.unplayed);
+        return;
       }
-      if (stale()) return true;
-      await suppressNative();
-      if (stale()) return true;
 
-      final pushStartedMs = _clock.nowMs();
-      final push = await publishViaProxyOrDirect(
-        _streamProxy,
-        resolved.url,
-        onLog: _onLog,
+      final end = await _guard(run, track, restore);
+      if (end != null) {
+        req.onEnded?.call(end);
+        return;
+      }
+      // _guard 已落 confirmed/fetched 结局并置 watching，进 watch。
+      _onNowPlayingChanged?.call(
+        req.nowPlaying ??
+            SpeakerNowPlaying(
+              title: req.title,
+              artist: req.artist,
+              queueIndex: 0,
+              queueLength: 1,
+            ),
       );
-      bool Function()? fetchedSignal;
-      if (push.viaProxy) {
-        fetchedSignal = () => _streamProxy!.wasFetched(push.url);
+      final how = await _watcher.watch(run, track);
+      run.watching = false;
+      if (identical(_currentRun, run)) {
+        _onNowPlayingChanged?.call(null);
       }
-      int? pushReceiptMs;
-      final outcome = await _pushAndVerify(
-        push.url,
-        fetchedSignal: fetchedSignal,
-        onFetchedStale: restoreOnce,
-        cancelled: stale,
-        onPushed: () => pushReceiptMs = _clock.nowMs(),
-      );
-      final confirmDoneMs = _clock.nowMs();
-      stageMs['push'] = (pushReceiptMs ?? confirmDoneMs) - pushStartedMs;
-      stageMs['confirm'] = confirmDoneMs - (pushReceiptMs ?? confirmDoneMs);
-      if (stale()) return true;
-      final fetched = push.viaProxy && _streamProxy!.wasFetched(push.url);
-      if (outcome != PushVerifyOutcome.landed) {
-        _emitRecord(
-          TakeoverRecord(
-            query: intent.raw,
-            title: resolved.title,
-            artist: resolved.artist,
-            atMs: _clock.nowMs(),
-            success: false,
-            detail: switch (outcome) {
-              PushVerifyOutcome.foreignPlaying => '被原生抢播',
-              PushVerifyOutcome.notFetched => '推送未被取流',
-              _ => !push.viaProxy ? '推播未落地（代理不可用，已直推）' : '推播未落地',
-            },
-            sourceName: resolved.sourceName,
-            qualityLabel: resolved.qualityLabel,
-            upstreamHostPath: _hostPathOf(resolved.url),
-            viaProxy: push.viaProxy,
-            fetched: fetched,
-            stageMs: stageMs,
-          ),
-        );
-        return true;
-      }
-
-      // 落地确认即恢复音量（TrackFerry 在 confirmed 时 restore，
-      // 不等守卫结束），守卫在有声状态下继续。
-      await restoreOnce();
-
-      final held = await _guardPushed(
-        push.url,
-        fetchedSignal: fetchedSignal,
-        cancelled: stale,
-      );
-      if (stale()) return true;
-      if (!held) {
-        _emitRecord(
-          TakeoverRecord(
-            query: intent.raw,
-            title: resolved.title,
-            artist: resolved.artist,
-            atMs: _clock.nowMs(),
-            success: false,
-            detail: '被原生抢回',
-            sourceName: resolved.sourceName,
-            qualityLabel: resolved.qualityLabel,
-            upstreamHostPath: _hostPathOf(resolved.url),
-            viaProxy: push.viaProxy,
-            fetched: fetched,
-            stageMs: stageMs,
-          ),
-        );
-        return true;
-      }
-
-      _emitRecord(
-        TakeoverRecord(
-          query: intent.raw,
-          title: resolved.title,
-          artist: resolved.artist,
-          atMs: _clock.nowMs(),
-          success: true,
-          sourceName: resolved.sourceName,
-          qualityLabel: resolved.qualityLabel,
-          upstreamHostPath: _hostPathOf(resolved.url),
-          viaProxy: push.viaProxy,
-          fetched: fetched,
-          stageMs: stageMs,
-        ),
-      );
-
-      final tail =
-          _queueTailProvider?.call(resolved) ?? const <SpeakerQueueItem>[];
-      final relay = _ensureRelay();
-      await relay.startWith(resolved, tail);
-      return true;
+      req.onEnded?.call(how);
     } finally {
-      if (!quietHold) await restoreOnce();
+      await restore();
+      if (identical(_currentRun, run) && run.finished) {
+        _currentRun = null;
+      }
     }
   }
 
-  Future<void> _restoreAfterQuietSettle(
-    int generation,
-    Future<void> Function() restoreOnce,
-  ) async {
+  Future<void> _restoreAfterQuietSettle(int gen, int volume) async {
     try {
-      await _clock.sleep(_quietSettle);
-      if (generation != _playSongGeneration) return;
-      await restoreOnce();
+      await _clock.sleep(_timing.quietSettle);
+      // 新 run 接手了静音就不再归还（代际已变或有 run 在跑）。
+      if (gen != _generation || _currentRun != null) return;
+      final r = await _quiet.putBack(volume);
+      _onLog?.call(
+        'takeover quiet volume restored: ${r.volume} ${r.error ?? ''}',
+      );
     } catch (_) {
-      // 延迟恢复失败不外抛；落盘条目还在，下次启动自检兜底。
+      // 延迟恢复失败不外抛；落盘条目还在，RecoverVolumes 兜底。
     }
   }
 
-  /// 推后守卫（TrackFerry Guard 原值）：落地后 [_guardWindow] 内
-  /// 轮询状态，未确认前 [_guardPollFast]、确认后 [_guardPoll]。
-  /// 身份判定与验证同一套正证据模型：在播的不是我们——外来
-  /// audio_id，或在播却没取我们的流——就 halt + 重推同一 URL
-  /// （最多 [_maxGuardReplays] 次），仍被抢回返回 false。
-  /// 另有流丢失重推：代理信号一直没等到取流、设备又没在播，
-  /// 距推播超过 Guard*3/8（3s）时重推一次（同一 replay 额度）。
-  /// [cancelled] 为真（被新指令取代）时提前退出，返回 true
-  /// 交调用方按代际丢弃。
-  Future<bool> _guardPushed(
-    String url, {
-    bool Function()? fetchedSignal,
-    bool Function()? cancelled,
-  }) async {
-    bool isForeignNow(MinaPlayerStatus status) =>
-        _isForeign(status) ||
-        (fetchedSignal != null && status.isPlaying && !fetchedSignal());
-    var replays = 0;
+  /// guard（蓝本 execute 第 4 段）：返回 null 表示已确认/已取流
+  /// 并应进 watch；返回 End 表示 run 已收尾（结局已落）。
+  Future<TakeoverEnd?> _guard(
+    TakeoverRun run,
+    StreamHandle track,
+    Future<void> Function() restore,
+  ) async {
+    final deadlineMs = _clock.nowMs() + _timing.guard.inMilliseconds;
+    int? fetchedAt = track.fetched ? track.fetchedAtMs : null;
+    if (fetchedAt != null) run.step(TakeoverStepName.fetched, true, '');
     var confirmed = false;
+    var left = false;
+    var replays = 0;
     var pushedAtMs = _clock.nowMs();
-    final deadlineMs = pushedAtMs + _guardWindow.inMilliseconds;
-    final lostAfterMs = _guardWindow.inMilliseconds * 3 ~/ 8;
+
     while (_clock.nowMs() < deadlineMs) {
-      await _clock.sleep(confirmed ? _guardPoll : _guardPollFast);
-      if (cancelled?.call() ?? false) return true;
-      final status = await _gateway.getPlayerStatus(_deviceId);
-      _know(status);
-      if (status != null && isForeignNow(status)) {
-        if (replays >= _maxGuardReplays) return false;
+      final tick = confirmed
+          ? _timing.poll
+          : (fetchedAt != null ? _timing.poll ~/ 4 : _timing.poll ~/ 2);
+      final wake = await _guardWait(run, track, tick, fetchedAt != null);
+      if (_runInactive(run)) {
+        _cancelled(run);
+        return TakeoverEnd.other;
+      }
+      if (run.released) {
+        left = true;
+        run.step(TakeoverStepName.released, true, '有新的口令交给小爱，不再守护');
+        break;
+      }
+      if (wake == _GuardWake.fetched && fetchedAt == null) {
+        fetchedAt = track.fetchedAtMs ?? _clock.nowMs();
+        run.step(TakeoverStepName.fetched, true, '');
+        continue;
+      }
+      if (fetchedAt != null &&
+          !confirmed &&
+          _clock.nowMs() - fetchedAt >= _timing.unmuteAfter.inMilliseconds) {
+        await restore();
+      }
+      final status = await _statusOrNull();
+      if (status == null) continue;
+      _quiet.know(status);
+      if (_isForeign(status)) {
+        if (replays >= _timing.maxReplays) {
+          run.step(TakeoverStepName.foreign, false, '小爱反复抢回播放，放弃');
+          if (_cancelled(run)) return TakeoverEnd.other;
+          _finish(run, RunOutcome.failed, '小爱的播放列表反复抢回音箱');
+          return TakeoverEnd.other;
+        }
         replays++;
-        await suppressNative();
-        await _pushRaw(url);
+        await _haltStep(run, TakeoverStepName.foreign);
+        if (!await _push(run, track, TakeoverStepName.replay)) continue;
         pushedAtMs = _clock.nowMs();
         confirmed = false;
         continue;
       }
-      if (!confirmed &&
-          status != null &&
-          status.isPlaying &&
-          (fetchedSignal == null || fetchedSignal())) {
-        confirmed = true;
-      }
-      if (fetchedSignal != null &&
-          !fetchedSignal() &&
-          status != null &&
+      // 受理了却没来取流、也没在播：流丢了，重推（同一额度）。
+      if (!track.fetched &&
           !status.isPlaying &&
-          replays < _maxGuardReplays &&
-          _clock.nowMs() - pushedAtMs >= lostAfterMs) {
+          replays < _timing.maxReplays &&
+          _clock.nowMs() - pushedAtMs >=
+              _timing.guard.inMilliseconds * 3 ~/ 8) {
         replays++;
-        await _pushRaw(url);
+        await _push(run, track, TakeoverStepName.replay);
         pushedAtMs = _clock.nowMs();
+        continue;
+      }
+      if (!confirmed && fetchedAt != null && status.isPlaying) {
+        confirmed = true;
+        run.step(
+          TakeoverStepName.confirmed,
+          true,
+          '播放中，进度 ${status.positionMs ?? -1} ms',
+        );
+        await restore();
       }
     }
-    return true;
+    await restore();
+    if (confirmed) {
+      _finish(run, RunOutcome.confirmed, '');
+      run.watching = true;
+      return null;
+    }
+    if (fetchedAt != null) {
+      _finish(run, RunOutcome.fetched, '音箱取了流，但播放状态没有确认');
+      run.watching = true;
+      return null;
+    }
+    _finish(run, RunOutcome.dispatched, '播放指令已受理，音箱没有来取流');
+    return left ? TakeoverEnd.other : TakeoverEnd.unplayed;
   }
 
-  /// 守卫认人：与 TrackFerry `foreign` 一致，只在 music API 型号上
-  /// 按 audio_id 判外来（play_url 型号的状态归属语义不同）。
+  /// 守卫等待：以短切片轮询取流/放行信号（蓝本是通道 select，
+  /// 我们用 50ms 切片逼近，取流时刻误差 ≤50ms）。
+  Future<_GuardWake> _guardWait(
+    TakeoverRun run,
+    StreamHandle track,
+    Duration tick,
+    bool hadFetched,
+  ) async {
+    final endMs = _clock.nowMs() + tick.inMilliseconds;
+    while (true) {
+      if (_runInactive(run) || run.released) return _GuardWake.signal;
+      if (!hadFetched && track.fetched) return _GuardWake.fetched;
+      final remainMs = endMs - _clock.nowMs();
+      if (remainMs <= 0) return _GuardWake.tick;
+      await _clock.sleep(
+        Duration(milliseconds: remainMs < 50 ? remainMs : 50),
+      );
+    }
+  }
+
+  /// 守卫/watch 认人（蓝本 foreign）：仅 music API 型号按
+  /// audio_id 判外来。
   bool _isForeign(MinaPlayerStatus status) =>
       _usePlayMusic && status.isForeignPlayback;
 
-  /// 只推不验（守卫重推用）：按型号选推播 API。
-  Future<void> _pushRaw(String url) async {
-    if (_usePlayMusic) {
-      await _gateway.playMusic(_deviceId, url);
-    } else {
-      await _gateway.playUrl(_deviceId, url);
+  /// 一轮压制：pause 与 stop 并发（蓝本 halt，只认 stop 结果）。
+  Future<bool> _halt() async {
+    try {
+      final results = await Future.wait([
+        _gateway.playerPause(_deviceId),
+        _gateway.playerStop(_deviceId),
+      ]);
+      return results[1];
+    } catch (_) {
+      return false;
     }
   }
 
-  Future<PushVerifyOutcome> _pushAndVerify(
-    String url, {
-    bool Function()? fetchedSignal,
-    void Function()? onFetchedStale,
-    bool Function()? cancelled,
-    void Function()? onPushed,
-  }) async {
-    bool ok;
-    if (_usePlayMusic) {
-      ok = await _gateway.playMusic(_deviceId, url);
-    } else {
-      // play_url 无 REPLACE_ALL；压制第二轮已紧贴在推前，直接推。
-      ok = await _gateway.playUrl(_deviceId, url);
+  Future<void> _haltStep(TakeoverRun run, String stepName) async {
+    final ok = await _halt();
+    run.step(stepName, ok, '');
+  }
+
+  /// 推流（蓝本 push）：失败重试 2 次（共 3 次），间隔 300ms。
+  Future<bool> _push(
+    TakeoverRun run,
+    StreamHandle track,
+    String stepName,
+  ) async {
+    var ok = await playUrl(track.url);
+    for (var i = 0; !ok && i < 2; i++) {
+      if (_runInactive(run)) break;
+      run.step(stepName, false, '再试');
+      await _clock.sleep(const Duration(milliseconds: 300));
+      ok = await playUrl(track.url);
     }
-    onPushed?.call();
-    final outcome = await verifyPushLanded(
-      _gateway,
-      _clock,
-      _deviceId,
-      fetchedSignal: fetchedSignal,
-      onFetchedStale: onFetchedStale,
-      cancelled: cancelled,
+    run.step(stepName, ok, ok ? '' : '推送失败');
+    return ok;
+  }
+
+  /// 可取消的睡眠：被取代/停止时提前返回 true。
+  Future<bool> _sleepOrInactive(TakeoverRun run, Duration d) async {
+    final endMs = _clock.nowMs() + d.inMilliseconds;
+    while (true) {
+      if (_runInactive(run)) return true;
+      final remainMs = endMs - _clock.nowMs();
+      if (remainMs <= 0) return _runInactive(run);
+      await _clock.sleep(
+        Duration(milliseconds: remainMs < 100 ? remainMs : 100),
+      );
+    }
+  }
+
+  Future<MinaPlayerStatus?> _statusOrNull() async {
+    try {
+      return await _gateway.getPlayerStatus(_deviceId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 结局落盘（蓝本 finish）：command/quiet run 写 UI 记录，
+  /// push（队列推进）run 只更新正在播放，不写记录。
+  void _finish(TakeoverRun run, RunOutcome outcome, String detail) {
+    if (run.finished) return;
+    run.finished = true;
+    run.outcome = outcome;
+    final req = run.req;
+    if (req.kind == 'push') return;
+    final track = req.track as StreamHandle?;
+    final stageMs = Map<String, int>.of(req.stageMs);
+    int? stepAt(String name) {
+      for (final s in run.steps) {
+        if (s.name == name) return s.atMs;
+      }
+      return null;
+    }
+
+    final muteAt = stepAt(TakeoverStepName.mute);
+    if (muteAt != null) stageMs['mute'] = muteAt;
+    final playAt = stepAt(TakeoverStepName.play);
+    if (playAt != null) stageMs['push'] = playAt - (muteAt ?? 0);
+    final confirmedAt = stepAt(TakeoverStepName.confirmed);
+    if (confirmedAt != null && playAt != null) {
+      stageMs['confirm'] = confirmedAt - playAt;
+    }
+    _onTakeoverRecord?.call(
+      TakeoverRecord(
+        query: req.query,
+        title: req.title,
+        artist: req.artist,
+        atMs: _clock.nowMs(),
+        success: outcome == RunOutcome.confirmed,
+        detail: detail.isNotEmpty
+            ? detail
+            : (outcome == RunOutcome.confirmed ? '已播放' : null),
+        sourceName: req.sourceName,
+        qualityLabel: req.qualityLabel,
+        upstreamHostPath: req.upstreamHostPath,
+        viaProxy: track != null,
+        fetched: track?.fetched ?? false,
+        stageMs: stageMs,
+      ),
     );
-    final landed = outcome == PushVerifyOutcome.landed;
-    if (ok != landed) {
-      _onLog?.call('takeover push receipt=$ok but verify=$outcome');
-    }
-    return outcome;
   }
 
-  /// 上游 URL 的 host+path（不含签名查询参数）；解析失败返回 null。
-  static String? _hostPathOf(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri == null || uri.host.isEmpty) return null;
-    return '${uri.host}${uri.path}';
-  }
+  // ===== 控制（蓝本 control.go 的音量部分；按钮 Press 无 UI 入口不移植） =====
 
-  SpeakerRelay _ensureRelay() {
-    final existing = _relay;
-    if (existing != null) return existing;
-    final relay = SpeakerRelay(
-      gateway: _gateway,
-      clock: _clock,
-      resolver: _resolver,
-      deviceId: _deviceId,
-      usePlayMusic: _usePlayMusic,
-      streamProxy: _streamProxy,
-      onNowPlayingChanged: _onNowPlayingChanged,
-      onSessionEnded: (reason) {
-        _onLog?.call('relay ended: $reason');
-      },
-      onLog: _onLog,
-    );
-    _relay = relay;
-    return relay;
-  }
-
-  // ===== 控制 =====
-
-  Future<void> _handleStop() async {
-    _relay?.stop();
-    await _gateway.playerPause(_deviceId);
-    await _gateway.playerStop(_deviceId);
-  }
-
-  /// 绝对音量：静音持有期间改的是恢复目标（TrackFerry
-  /// `SetVolume`：pending 在就改 pending，不动当前 0 音量，
-  /// 免得小爱的回答又能被听见）；其余时候直接下发。
-  Future<bool> _handleSetVolume(int value) async {
+  /// 设音量（蓝本 `Engine.SetVolume`）：静音持有中只改恢复
+  /// 目标（当前保持 0），否则直发并更新已知音量。
+  Future<bool> setVolumeValue(int value) async {
     final v = value.clamp(0, 100).toInt();
-    if (_mutedHeld && _muteStore != null) {
-      final changed = await _muteStore.changePendingVolume(_deviceId, v);
-      if (changed) {
-        _muteTargetVolume = v;
-        return true;
+    if (_quiet.muteHeld) {
+      final changed = await _quiet.changePendingVolume(v);
+      if (changed) return true;
+    }
+    final ok = await _gateway.setVolume(_deviceId, v);
+    if (ok) {
+      _quiet.knowValue(v);
+      if (v > 0 && !_quiet.muteHeld) {
+        // 已被调回：落盘的待恢复条目作废（recoverOnce 同口径，
+        // 这里顺手清掉免得 20s 后误恢复旧值）。
+        await _quiet.clearPending();
       }
     }
-    await _gateway.setVolume(_deviceId, v);
     return true;
   }
 
-  Future<bool> _handleVolumeStep(VolumeStepIntent intent) async {
-    // 静音持有期间基准是恢复目标，不是当前的 0。
-    if (_mutedHeld && _muteStore != null) {
-      final pending = await _muteStore.readPendingVolume(_deviceId);
+  /// 音量步进：静音持有时以恢复目标为基准。
+  Future<bool> volumeStep({required bool up}) async {
+    if (_quiet.muteHeld) {
+      final pending = await _quiet.pendingVolume();
       if (pending != null) {
-        final target = intent.up
-            ? pending + kSpeakerVolumeStep
-            : pending - kSpeakerVolumeStep;
-        return _handleSetVolume(target);
+        return setVolumeValue(
+          pending + (up ? kSpeakerVolumeStep : -kSpeakerVolumeStep),
+        );
       }
     }
-    final status = await _gateway.getPlayerStatus(_deviceId);
-    _know(status);
+    final status = await _statusOrNull();
+    _quiet.know(status);
     final current = status?.volume;
     if (current == null) {
       _onLog?.call('volume step ignored: current volume unknown');
       return true;
     }
-    final target = intent.up
-        ? current + kSpeakerVolumeStep
-        : current - kSpeakerVolumeStep;
-    await _gateway.setVolume(_deviceId, target.clamp(0, 100).toInt());
-    return true;
+    return setVolumeValue(
+      current + (up ? kSpeakerVolumeStep : -kSpeakerVolumeStep),
+    );
   }
 
-  void _emitRecord(TakeoverRecord record) {
-    _onTakeoverRecord?.call(record);
+  /// RecoverVolumes 一轮（宿主每 20s 调一次）：有 run/quiet
+  /// 持有时跳过。
+  Future<void> recoverVolumesOnce() async {
+    await _quiet.recoverOnce(held: deviceHeld);
   }
+
+  /// 无条件恢复待恢复音量（关闭接管时用）：落盘有值就设回去。
+  Future<void> restoreVolumeNow() async {
+    if (await _quiet.hasPending()) {
+      await _quiet.putBack(-1);
+    }
+  }
+
+  // ===== WatchHost =====
+
+  @override
+  Future<MinaPlayerStatus?> status() => _statusOrNull();
+
+  @override
+  Future<bool> playUrl(String url) async {
+    try {
+      return _usePlayMusic
+          ? await _gateway.playMusic(_deviceId, url)
+          : await _gateway.playUrl(_deviceId, url);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> halt() async {
+    await _halt();
+  }
+
+  @override
+  bool runInactive(TakeoverRun run) => _runInactive(run);
+
+  @override
+  void knowVolume(MinaPlayerStatus? status) => _quiet.know(status);
+
+  @override
+  bool isForeign(MinaPlayerStatus status) => _isForeign(status);
 }
+
+enum _GuardWake { tick, fetched, signal }

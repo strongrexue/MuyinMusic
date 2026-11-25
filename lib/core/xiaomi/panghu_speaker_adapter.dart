@@ -6,7 +6,7 @@ import '../models/search_response.dart';
 import '../music_sources/music_url_resolver.dart';
 import '../../features/player/player_models.dart';
 import 'speaker_url_probe.dart';
-import 'takeover/speaker_relay.dart';
+import 'takeover/dispatch.dart';
 import 'takeover/speaker_resolver.dart';
 
 /// 胖虎音源引擎 → topone 接缝的适配器。
