@@ -2,11 +2,11 @@ plugins {
     id 'com.android.library'
 }
 
-group = 'com.cyshine.music_source_runtime'
+group = 'com.muyin.music_source_runtime'
 version = '0.1.0'
 
 android {
-    namespace = 'com.cyshine.music_source_runtime'
+    namespace = 'com.muyin.music_source_runtime'
     compileSdk = 35
 
     compileOptions {

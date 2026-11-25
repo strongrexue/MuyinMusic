@@ -17,10 +17,10 @@ class MusicSourceRuntimePlugin : public flutter::Plugin {
     // Main runtime and the update-check runtime are two independent bridges,
     // each with its own JS runtime, mirroring the Android/iOS plugins.
     plugin->main_bridge_ = std::make_unique<MusicSourceBridge>(
-        registrar->messenger(), "cy_shine_music/music_source_runtime",
+        registrar->messenger(), "muyin_music/music_source_runtime",
         nullptr);
     plugin->update_bridge_ = std::make_unique<MusicSourceBridge>(
-        registrar->messenger(), "cy_shine_music/music_source_update_runtime",
+        registrar->messenger(), "muyin_music/music_source_update_runtime",
         nullptr);
 
     registrar->AddPlugin(std::move(plugin));
