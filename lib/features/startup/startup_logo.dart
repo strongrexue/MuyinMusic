@@ -1,10 +1,6 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
-import '../../theme/app_motion.dart';
-
-/// The launch mark: a mint sound ring draws itself, then the note settles in.
+/// The launch mark: the app badge settles in with a soft glow.
 class StartupLogo extends StatefulWidget {
   const StartupLogo({super.key, this.size = 112});
 
@@ -15,8 +11,6 @@ class StartupLogo extends StatefulWidget {
 }
 
 class _StartupLogoState extends State<StartupLogo> with TickerProviderStateMixin {
-  static const Color _ringColor = Color(0xFF7FD7BE);
-
   late final AnimationController _entry = AnimationController(
     duration: const Duration(milliseconds: 1200),
     vsync: this,
@@ -52,8 +46,7 @@ class _StartupLogoState extends State<StartupLogo> with TickerProviderStateMixin
     return AnimatedBuilder(
       animation: Listenable.merge([_entry, _glow]),
       builder: (context, child) {
-        final ring = _segment(_entry.value, 0.0, 0.72, AppMotion.emphasizedDecelerate);
-        final reveal = _segment(_entry.value, 0.58, 0.96, Curves.easeOutCubic);
+        final reveal = _segment(_entry.value, 0.05, 0.72, Curves.easeOutCubic);
         final breathe = Curves.easeInOutSine.transform(_glow.value);
         final glowAlpha = reveal * (0.08 + 0.05 * breathe);
         final glowBlur = 22.0 + 10.0 * breathe;
@@ -61,6 +54,7 @@ class _StartupLogoState extends State<StartupLogo> with TickerProviderStateMixin
         return Container(
           width: widget.size,
           height: widget.size,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(widget.size * 0.24),
@@ -84,69 +78,17 @@ class _StartupLogoState extends State<StartupLogo> with TickerProviderStateMixin
               ),
             ],
           ),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CustomPaint(
-                painter: _RingPainter(progress: ring, color: _ringColor),
-              ),
-              Opacity(
-                opacity: reveal,
-                child: Transform.scale(scale: 0.94 + 0.06 * reveal, child: child),
-              ),
-            ],
+          child: Opacity(
+            opacity: reveal,
+            child: Transform.scale(scale: 0.94 + 0.06 * reveal, child: child),
           ),
         );
       },
-      child: Padding(
-        padding: EdgeInsets.all(widget.size * 0.05),
-        child: Image.asset('logo_fg.png', fit: BoxFit.contain),
+      child: SizedBox.square(
+        dimension: widget.size,
+        child: Image.asset('assets/images/app_logo.png', fit: BoxFit.cover),
       ),
     );
-  }
-}
-
-/// Draws the sound ring: an arc that sweeps clockwise, then its bead.
-class _RingPainter extends CustomPainter {
-  const _RingPainter({required this.progress, required this.color});
-
-  final double progress;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (progress <= 0) return;
-
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide * 0.43;
-    final stroke = math.max(1.6, size.shortestSide * 0.022);
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = stroke
-      ..color = color;
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      2 * math.pi * progress.clamp(0.0, 1.0),
-      false,
-      paint,
-    );
-
-    final bead = _segment(progress, 0.86, 1.0);
-    if (bead > 0) {
-      canvas.drawCircle(
-        center + Offset(0, radius),
-        stroke * 1.55 * bead,
-        Paint()..color = color,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _RingPainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.color != color;
   }
 }
 
