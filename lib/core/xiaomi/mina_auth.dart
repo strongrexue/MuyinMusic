@@ -101,8 +101,10 @@ class MinaAuth {
   /// 的完整流程实现：打开 notificationUrl 建会话 → /identity/list
   /// 定方式 → GET verify{Phone,Email} 触发 → 手机再 POST
   /// sendPhoneTicket 真正发短信。每步都带 deviceId cookie（miservice
-  /// 全程显式携带），且严格校验：响应解析失败或 code 显式非 0 都如实
-  /// 返回失败，原因记入 [lastSendCodeError]，绝不把服务器拒绝吞成成功。
+  /// 全程显式携带）并跟随重定向（其传输层默认行为）；响应按
+  /// parse_resp 语义解析，严格校验：非空响应解析失败或 code 显式
+  /// 非 0 都如实返回失败，原因记入 [lastSendCodeError]，绝不把服务
+  /// 器拒绝吞成成功。
   Future<bool> sendVerificationCode() async {
     _lastSendCodeError = null;
     if (_verifyUrl.isEmpty) {
@@ -137,18 +139,23 @@ class MinaAuth {
       Uri.parse(listUrl),
       headers: {'User-Agent': ua},
       extraCookie: deviceCookie,
+      maxRedirects: 10,
     );
-    final listJson = _parseJson(stripXiaomiJsonPrefix(listResp.bodyText));
+    final listParse = _parseAccountResponse(listResp);
+    final listJson = listParse.json;
     if (listJson == null) {
-      return _sendCodeFailed(_serverErrorText('查询验证方式', null));
+      return _sendCodeFailed(
+        _serverErrorText('查询验证方式', null, listParse.failureDetail),
+      );
     }
     final flag = (listJson['flag'] as num?)?.toInt();
     if (flag == null) {
-      return _sendCodeFailed(_serverErrorText('查询验证方式', listJson));
+      return _sendCodeFailed('查询验证方式失败：响应缺少 flag 字段');
     }
     _verifyKind = flag == 8 ? XiaomiVerifyKind.email : XiaomiVerifyKind.phone;
 
-    // 3. 触发发送。
+    // 3. 触发发送。miservice 的传输层默认跟随重定向，这一步同样
+    //    跟随；响应按 parse_resp 语义解析（空体视作无 code）。
     final method = _verifyKind == XiaomiVerifyKind.email ? 'Email' : 'Phone';
     final triggerResp = await _fetch(
       'GET',
@@ -158,12 +165,17 @@ class MinaAuth {
       ),
       headers: {'User-Agent': ua},
       extraCookie: deviceCookie,
+      maxRedirects: 10,
     );
-    final triggerJson = _parseJson(
-      stripXiaomiJsonPrefix(triggerResp.bodyText),
-    );
-    if (!_strictSendCodeOk(triggerJson)) {
-      return _sendCodeFailed(_serverErrorText('触发验证码发送', triggerJson));
+    final triggerParse = _parseAccountResponse(triggerResp);
+    if (!_strictSendCodeOk(triggerParse.json)) {
+      return _sendCodeFailed(
+        _serverErrorText(
+          '触发验证码发送',
+          triggerParse.json,
+          triggerParse.failureDetail,
+        ),
+      );
     }
 
     // 4. 手机需再调 sendPhoneTicket 才真正发出短信。
@@ -177,10 +189,13 @@ class MinaAuth {
         },
         extraCookie: deviceCookie,
         body: _encodeForm({'retry': '0', 'icode': '', '_json': 'true'}),
+        maxRedirects: 10,
       );
-      final sendJson = _parseJson(stripXiaomiJsonPrefix(sendResp.bodyText));
-      if (!_strictSendCodeOk(sendJson)) {
-        return _sendCodeFailed(_serverErrorText('短信发送', sendJson));
+      final sendParse = _parseAccountResponse(sendResp);
+      if (!_strictSendCodeOk(sendParse.json)) {
+        return _sendCodeFailed(
+          _serverErrorText('短信发送', sendParse.json, sendParse.failureDetail),
+        );
       }
     }
     return true;
@@ -652,19 +667,28 @@ class MinaAuth {
   static int? _codeOf(Map<String, Object?> json) =>
       (json['code'] as num?)?.toInt();
 
-  /// 发码链严格校验：解析失败（null）直接算失败；code 显式非 0 也
-  /// 失败。code 缺失时与 miservice 一致暂容忍（其触发/发码步判定为
-  /// `code not in (0, None)` 才报错）——但解析失败绝不放行，这是
-  /// 与旧 _codeOkOrAbsent 的关键区别。
+  /// 发码链严格校验：非空响应解析失败（null）直接算失败；code 显式
+  /// 非 0 也失败。code 缺失时与 miservice 一致容忍（其触发/发码步
+  /// 判定为 `code not in (0, None)` 才报错；空体经 parse_resp 归一
+  /// 为无 code，同样容忍）——但非空垃圾响应绝不放行，这是与旧
+  /// _codeOkOrAbsent 的关键区别。
   static bool _strictSendCodeOk(Map<String, Object?>? json) {
     if (json == null) return false;
     final code = _codeOf(json);
     return code == null || code == 0;
   }
 
-  /// 把服务器返回的 code / 描述拼成可读的失败原因。
-  static String _serverErrorText(String step, Map<String, Object?>? json) {
-    if (json == null) return '$step失败：服务器响应解析失败';
+  /// 把服务器返回的 code / 描述拼成可读的失败原因；解析失败时附
+  /// [_parseAccountResponse] 给出的响应形态描述，便于真机定位。
+  static String _serverErrorText(
+    String step,
+    Map<String, Object?>? json, [
+    String? parseDetail,
+  ]) {
+    if (json == null) {
+      return '$step失败：服务器响应解析失败'
+          '${parseDetail != null ? '（$parseDetail）' : ''}';
+    }
     final code = _codeOf(json);
     var desc = '';
     for (final key in ['desc', 'description', 'message']) {
@@ -681,6 +705,59 @@ class MinaAuth {
   bool _sendCodeFailed(String message) {
     _lastSendCodeError = message;
     return false;
+  }
+
+  /// 按 miservice `parse_resp` 语义解析 account 响应：剥前缀后为
+  /// 空体时视作 `{}`（无 code 字段，触发 / 发码步据此容忍通过，与
+  /// 蓝本 `loads(raw) if raw else {}` 一致）；非空但解码失败、或
+  /// 解出的是非对象 JSON 时判解析失败，并附响应形态描述。
+  static _AccountParse _parseAccountResponse(MinaHttpResponse resp) {
+    final stripped = stripXiaomiJsonPrefix(resp.bodyText);
+    if (stripped.isEmpty) {
+      return const _AccountParse({}, null);
+    }
+    Object? decoded;
+    try {
+      decoded = jsonDecode(stripped);
+    } catch (_) {
+      return _AccountParse(null, _describeResponseShape(resp));
+    }
+    if (decoded is Map) {
+      return _AccountParse(decoded.cast<String, Object?>(), null);
+    }
+    return _AccountParse(
+      null,
+      _describeResponseShape(resp, jsonNotObject: true),
+    );
+  }
+
+  /// 把不可解析的响应概括成可辨识形态：HTTP 状态、字节数、内容
+  /// 类别与起始片段。不带响应原文整段（可能含敏感值）：起始片段
+  /// 最多 24 个字符，连续数字串一律打码。
+  static String _describeResponseShape(
+    MinaHttpResponse resp, {
+    bool jsonNotObject = false,
+  }) {
+    final raw = resp.bodyText;
+    final trimmed = raw.trim();
+    final String kind;
+    if (jsonNotObject) {
+      kind = 'JSON 结构异常（非对象）';
+    } else if (trimmed.isEmpty) {
+      kind = '空响应';
+    } else if (trimmed.startsWith('<')) {
+      kind = 'HTML 页面';
+    } else if (raw.startsWith('&&&START&&&')) {
+      kind = '带 &&&START&&& 前缀但内容非 JSON';
+    } else {
+      kind = '非 JSON 文本';
+    }
+    var head = trimmed.length <= 24 ? trimmed : trimmed.substring(0, 24);
+    head = head
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'\d+'), '***');
+    return 'HTTP ${resp.statusCode}，${resp.bodyBytes.length} 字节，'
+        '$kind，起始「$head」';
   }
 
   static Map<String, Object?>? _parseJson(String text) {
@@ -719,4 +796,13 @@ class MinaAuth {
 
   static String _truncate(String s) =>
       s.length <= 200 ? s : '${s.substring(0, 200)}…';
+}
+
+/// [_parseAccountResponse] 的结果：[json] 为 null 表示解析失败，
+/// [failureDetail] 是可辨识的响应形态描述（不含响应原文）。
+class _AccountParse {
+  const _AccountParse(this.json, this.failureDetail);
+
+  final Map<String, Object?>? json;
+  final String? failureDetail;
 }

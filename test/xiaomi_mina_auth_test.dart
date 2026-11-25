@@ -294,6 +294,138 @@ void main() {
       expect(auth.lastSendCodeError, contains('短信发送失败'));
     });
 
+    test('发码：触发步回空响应体 → 按 parse_resp 语义容忍通过', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      expect(transport.requestsTo('sendPhoneTicket'), hasLength(1));
+    });
+
+    test('发码：触发步 302 跳转后回 JSON → 跟随重定向通过', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          if (!url.contains('step=2')) {
+            return fakeRedirect(
+              'https://account.xiaomi.com/identity/auth/verifyPhone'
+              '?_flag=4&_json=true&step=2',
+            );
+          }
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      expect(
+        transport.requestsTo('/identity/auth/verifyPhone'),
+        hasLength(2),
+      );
+    });
+
+    test('发码：触发步回 HTML → 失败且错误带形态诊断', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('<html><body>error page</body></html>');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isFalse);
+      final error = auth.lastSendCodeError!;
+      expect(error, contains('触发验证码发送失败'));
+      expect(error, contains('HTTP 200'));
+      expect(error, contains('字节'));
+      expect(error, contains('HTML'));
+      expect(transport.requestsTo('sendPhoneTicket'), isEmpty);
+    });
+
+    test('发码：触发步回 JSON 数组（非对象）→ 失败且标注结构异常', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&[1,2,3]');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isFalse);
+      expect(auth.lastSendCodeError, contains('结构异常'));
+    });
+
+    test('发码：sendPhoneTicket 回纯文本 → 失败带形态且数字打码', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('gateway error 123456789 retry later');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isFalse);
+      final error = auth.lastSendCodeError!;
+      expect(error, contains('短信发送失败'));
+      expect(error, contains('非 JSON 文本'));
+      expect(error, contains('***'));
+      expect(error, isNot(contains('123456789')));
+    });
+
     test('发码：list 回 flag=8（带前缀）→ 走邮箱通道，不调 sendPhoneTicket', () async {
       final store = await _seededStore();
       final transport = _verifyFlowTransport((req) {
