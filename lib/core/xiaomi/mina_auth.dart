@@ -105,12 +105,16 @@ class MinaAuth {
   /// parse_resp 语义解析，严格校验：非空响应解析失败或 code 显式
   /// 非 0 都如实返回失败，原因记入 [lastSendCodeError]，绝不把服务
   /// 器拒绝吞成成功。
+  ///
+  /// 全程 UA 用 [kXiaomiOtpUserAgent]（miservice `_verify_otp` 的
+  /// UA_OTP）：这是 H5 验证流程，用 App UA 时依赖会话的触发步会
+  /// 被服务器返回 HTML 验证页而非 JSON（真机实测）。
   Future<bool> sendVerificationCode() async {
     _lastSendCodeError = null;
     if (_verifyUrl.isEmpty) {
       return _sendCodeFailed('没有进行中的验证会话');
     }
-    final ua = await _ua();
+    final ua = kXiaomiOtpUserAgent;
     final deviceCookie = 'deviceId=${_deviceId ?? ''}';
 
     // 1. 打开 notificationUrl 建立验证会话（跟随重定向，最终须 200，
@@ -211,11 +215,12 @@ class MinaAuth {
       return const MinaLoginFailure('验证码校验失败');
     }
 
-    // 跟随重定向链收集 passToken / userId。
+    // 跟随重定向链收集 passToken / userId（仍属 miservice
+    // _verify_otp 流程内，UA 继续用 UA_OTP）。
     await _fetch(
       'GET',
       Uri.parse(location),
-      headers: {'User-Agent': await _ua()},
+      headers: {'User-Agent': kXiaomiOtpUserAgent},
       maxRedirects: 10,
     );
     // miservice 7a'：重定向链可能停在「确认手机号」页，最终 URL 上的
@@ -226,7 +231,7 @@ class MinaAuth {
       await _fetch(
         'GET',
         Uri.parse(confirmUrl),
-        headers: {'User-Agent': await _ua()},
+        headers: {'User-Agent': kXiaomiOtpUserAgent},
         extraCookie: 'deviceId=${_deviceId ?? ''}',
         maxRedirects: 10,
       );
@@ -546,7 +551,7 @@ class MinaAuth {
       'POST',
       url,
       headers: {
-        'User-Agent': await _ua(),
+        'User-Agent': kXiaomiOtpUserAgent,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       extraCookie: 'deviceId=${_deviceId ?? ''}',
@@ -576,7 +581,7 @@ class MinaAuth {
       await _fetch(
         'GET',
         Uri.parse(listUrl),
-        headers: {'User-Agent': await _ua()},
+        headers: {'User-Agent': kXiaomiOtpUserAgent},
         extraCookie: 'deviceId=${_deviceId ?? ''}',
       );
     } catch (_) {
@@ -756,8 +761,33 @@ class MinaAuth {
     head = head
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAll(RegExp(r'\d+'), '***');
+    // HTML 时附带页面 <title>：标题只是页面名（如验证页 / 风控页的
+    // 自称），无敏感值，却能一眼定性这是什么页。限长 40、去内嵌标签。
+    var titlePart = '';
+    if (kind == 'HTML 页面') {
+      final title = _extractHtmlTitle(raw);
+      if (title != null) titlePart = '，页面标题「$title」';
+    }
     return 'HTTP ${resp.statusCode}，${resp.bodyBytes.length} 字节，'
-        '$kind，起始「$head」';
+        '$kind，起始「$head」$titlePart';
+  }
+
+  /// 提取 HTML 的 `<title>` 文本：去内嵌标签、折叠空白、限长 40 字；
+  /// 无 title 或为空时返回 null。
+  static String? _extractHtmlTitle(String html) {
+    final match = RegExp(
+      r'<title[^>]*>([\s\S]*?)</title>',
+      caseSensitive: false,
+    ).firstMatch(html);
+    if (match == null) return null;
+    var title = match
+        .group(1)!
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (title.isEmpty) return null;
+    if (title.length > 40) title = title.substring(0, 40);
+    return title;
   }
 
   static Map<String, Object?>? _parseJson(String text) {

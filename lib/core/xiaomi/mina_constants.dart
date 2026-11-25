@@ -24,6 +24,24 @@ const String kXiaomiIoSid = 'xiaomiio';
 const String kXiaomiUserAgentTemplate =
     'Android-7.1.1-1.0.0-ONEPLUS A3010-136-%s APP/xiaomi.smarthome APPV/62830';
 
+/// OTP 二次验证全流程专用 UA（miservice `UA_OTP`，逐字沿用）。
+///
+/// /identity/* 与 /fe/service/identity/* 是米家 App 内嵌浏览器里的
+/// H5 验证流程：miservice 的 `_verify_otp` 从打开 authStart 到提交
+/// 验证码全程只用这个浏览器 UA。用 App UA 请求时，依赖会话的
+/// verifyPhone 触发步会被服务器（跟随重定向后）返回 HTML 验证页
+/// 而非 JSON（真机实测 1836 字节 `<!DOCTYPE html>`），故 OTP 流程
+/// 的每一步都必须用它，不得与登录 / MiNA 的 App UA 混用。
+const String kXiaomiOtpUserAgent =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) '
+    'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 iOS/26.3.1 '
+    'MiHome/11.3.203 iPhone/iPhone17,2 '
+    'DeviceId/D84D9205859533D504042022029B988E6F7DD180 UserId/8816080 '
+    'APP/com.xiaomi.mihome APPV/11.3.203 Platform/iPhone Region/CN '
+    '/xiaomi/miuibrowser/4.3/smartHome/ios/iPhone17,2/11.3.203 '
+    'APP/com.xiaomi.mihome APPV/11.3.203 iosPassportSDK/4.2.50 iOS/26.3.1 '
+    'MK/aVBob25lMTcsMg== DEVT/aVBob25l DEVS/aU9T BRA/QXBwbGU= L/zh_CN';
+
 /// 默认 HTTP 超时（miot DEFAULT_HTTP_TIMEOUT）。
 const Duration kMinaHttpTimeout = Duration(seconds: 30);
 

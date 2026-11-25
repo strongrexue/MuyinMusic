@@ -356,7 +356,11 @@ void main() {
       final transport = _verifyFlowTransport((req) {
         final url = req.urlText;
         if (url.contains('/identity/auth/verifyPhone')) {
-          return fakeJsonResponse('<html><body>error page</body></html>');
+          return fakeJsonResponse(
+            '<!DOCTYPE html><html><head>'
+            '<title>小米账号 - 身份验证</title>'
+            '</head><body>verify page</body></html>',
+          );
         }
         if (url.contains('/identity/list')) {
           return fakeJsonResponse('&&&START&&&{"flag":4}');
@@ -374,6 +378,8 @@ void main() {
       expect(error, contains('HTTP 200'));
       expect(error, contains('字节'));
       expect(error, contains('HTML'));
+      // HTML 失败要带 <title>，便于真机一眼定性这是什么页。
+      expect(error, contains('页面标题「小米账号 - 身份验证」'));
       expect(transport.requestsTo('sendPhoneTicket'), isEmpty);
     });
 
@@ -484,6 +490,47 @@ void main() {
           reason: part,
         );
       }
+    });
+
+    test('发码链每一步都用 OTP 专用 UA（miservice UA_OTP）', () async {
+      final store = await _seededStore();
+      final transport = _verifyFlowTransport((req) {
+        final url = req.urlText;
+        if (url.contains('/identity/auth/sendPhoneTicket')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse('&&&START&&&{"code":0}');
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{"flag":4}');
+        }
+        if (url.contains('/fe/service/identity/authStart')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      expect(await auth.sendVerificationCode(), isTrue);
+      for (final part in [
+        '/fe/service/identity/authStart',
+        '/identity/list',
+        '/identity/auth/verifyPhone',
+        '/identity/auth/sendPhoneTicket',
+      ]) {
+        final reqs = transport.requestsTo(part);
+        expect(reqs, hasLength(1), reason: part);
+        expect(
+          reqs.single.headers['User-Agent'],
+          kXiaomiOtpUserAgent,
+          reason: part,
+        );
+      }
+      // 登录步（非 OTP 流程）仍用 App UA，不受影响。
+      final step2 = transport.requestsTo('serviceLoginAuth2').single;
+      expect(step2.headers['User-Agent'], isNot(kXiaomiOtpUserAgent));
+      expect(step2.headers['User-Agent'], contains('APP/xiaomi.smarthome'));
     });
 
     test('发码第一步 authStart 跟随重定向；回 403 时发码失败且不再往下走', () async {
