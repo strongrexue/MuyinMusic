@@ -3,11 +3,11 @@ plugins {
     id 'kotlin-android'
 }
 
-group = 'com.cyshine.bass_player'
+group = 'com.muyin.bass_player'
 version = '0.1.0'
 
 android {
-    namespace = 'com.cyshine.bass_player'
+    namespace = 'com.muyin.bass_player'
     compileSdk = 35
 
     compileOptions {

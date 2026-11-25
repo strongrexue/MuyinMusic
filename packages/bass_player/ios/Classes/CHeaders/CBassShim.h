@@ -6,8 +6,8 @@
  * module.modulemap 聚合成模块。
  */
 
-#ifndef CYSHINE_CBASS_SHIM_H
-#define CYSHINE_CBASS_SHIM_H
+#ifndef MUYIN_CBASS_SHIM_H
+#define MUYIN_CBASS_SHIM_H
 
 #include "bass.h"
 #include "bassflac.h"
@@ -16,4 +16,4 @@
 #include "basswv.h"
 #include "bassdsd.h"
 
-#endif /* CYSHINE_CBASS_SHIM_H */
+#endif /* MUYIN_CBASS_SHIM_H */

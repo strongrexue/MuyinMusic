@@ -1,15 +1,15 @@
 Pod::Spec.new do |s|
   s.name             = 'bass_player'
   s.version          = '0.1.0'
-  s.summary          = 'Native BASS playback engine for CyShineMusic.'
+  s.summary          = 'Native BASS playback engine for MuyinMusic.'
   s.description      = <<-DESC
 iOS 侧 BASS 播放引擎。与 Android 端的 packages/bass_player 保持完全相同的
-MethodChannel / EventChannel 契约（com.cyshine.music/bass_player/methods 与
-com.cyshine.music/bass_player/events），因此 lib/ 层不需要任何改动。
+MethodChannel / EventChannel 契约（com.muyin.muyinmusic/bass_player/methods 与
+com.muyin.muyinmusic/bass_player/events），因此 lib/ 层不需要任何改动。
                        DESC
-  s.homepage         = 'https://github.com/KevinllBin/CyShineMusic'
+  s.homepage         = 'https://github.com/KevinllBin/MuyinMusic'
   s.license          = { :type => 'MIT' }
-  s.author           = { 'CyShineMusic iOS port' => 'noreply@localhost' }
+  s.author           = { 'MuyinMusic iOS port' => 'noreply@localhost' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/*.{swift,h,c}'
   s.preserve_paths   = 'Classes/CHeaders/**', 'Frameworks/**'

@@ -1,7 +1,7 @@
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
-import com.cyshine.bass_player.GrooveShiftEngine;
+import com.muyin.bass_player.GrooveShiftEngine;
 import com.un4seen.bass.BASS;
 import com.un4seen.bass.BASSmix;
 import java.nio.*;

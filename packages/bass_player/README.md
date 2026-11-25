@@ -36,7 +36,7 @@ establish sample-for-sample waveform equality with the original app. Physical
 phone listening and notification/lyric acceptance are documented in
 `docs/groove-shift-manual-test.md` at the repository root.
 
-Diagnostics are included in Release builds. The native `CyShineTrace` journal
+Diagnostics are included in Release builds. The native `MuyinTrace` journal
 records source identities, mixer/source clocks and transition stages. Dart
 records received snapshot sequences, EOF guards and metadata handoff decisions.
 Normal clock records and repeated jump records are limited to one per second;
