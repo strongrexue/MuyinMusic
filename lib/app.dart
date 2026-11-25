@@ -25,6 +25,7 @@ import 'features/player/live_activity_service.dart'
     show liveActivitySyncProvider;
 import 'features/playlists/playlist_store.dart';
 import 'features/player/music_home_widget_service.dart';
+import 'features/settings/xiaoai/xiaoai_settings_controller.dart';
 import 'features/songs/local_song_scan_cache.dart';
 import 'features/startup/startup_gate.dart';
 import 'features/update/app_update_prompt.dart';
@@ -79,6 +80,13 @@ class _MuyinMusicAppState extends ConsumerState<MuyinMusicApp>
       ref.read(webDavSyncControllerProvider);
       ref.read(playerControllerProvider.notifier);
       if (Platform.isAndroid) ref.read(musicHomeWidgetSyncProvider);
+      // 小爱接管自启恢复：进程被杀后模块二的监听不会自恢复，
+      // 上次开关为开且会话有效时在这里静默重新 enable（失败只留状态）。
+      if (Platform.isAndroid) {
+        unawaited(
+          ref.read(xiaoaiSettingsProvider.notifier).restoreOnStartup(),
+        );
+      }
       // iOS（尤其巨魔/无 Live Activity 权限）：必须主动接上播放状态监听，
       // 否则 nowPlayingInfo 降级通道不会随播放刷新，系统媒体卡片
       // （灵动岛 / 锁屏）始终为空。与 Android 小组件监听对称。

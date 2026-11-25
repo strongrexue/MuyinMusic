@@ -23,6 +23,8 @@ import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/settings_section.dart';
 import 'features/settings/webdav_sync_page.dart';
+import 'features/settings/xiaoai/xiaoai_device_page.dart';
+import 'features/settings/xiaoai/xiaomi_login_page.dart';
 import 'features/music_sources/music_source_page.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shell/player_pull_scope.dart';
@@ -360,6 +362,32 @@ GoRouter createAppRouter({
                           child: _shellPageContent(
                             state,
                             child: const WebDavSyncPage(),
+                          ),
+                        ),
+                      ),
+                      GoRoute(
+                        path: 'xiaomi-login',
+                        pageBuilder: (context, state) => SettingsRoutePage(
+                          key: state.pageKey,
+                          origin: state.extra is SettingsContainerOrigin
+                              ? state.extra as SettingsContainerOrigin
+                              : null,
+                          child: _shellPageContent(
+                            state,
+                            child: const XiaomiLoginPage(),
+                          ),
+                        ),
+                      ),
+                      GoRoute(
+                        path: 'xiaomi-devices',
+                        pageBuilder: (context, state) => SettingsRoutePage(
+                          key: state.pageKey,
+                          origin: state.extra is SettingsContainerOrigin
+                              ? state.extra as SettingsContainerOrigin
+                              : null,
+                          child: _shellPageContent(
+                            state,
+                            child: const XiaoaiDevicePage(),
                           ),
                         ),
                       ),

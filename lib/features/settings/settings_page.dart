@@ -27,6 +27,8 @@ import '../shell/widgets/scrolling_page_header.dart';
 import '../songs/local_song_scan_cache.dart';
 import '../update/app_update_prompt.dart';
 import 'settings_section.dart';
+import 'xiaoai/xiaoai_settings_controller.dart';
+import 'xiaoai/xiaoai_speaker_card.dart';
 import 'widgets/app_icon_sheet.dart';
 import 'widgets/appearance_theme_settings.dart';
 import 'widgets/discovery_source_order_sheet.dart';
@@ -98,6 +100,11 @@ class SettingsPage extends ConsumerWidget {
                                 ),
                             ],
                           ),
+                        if (section == null &&
+                            ref.watch(xiaoaiCardSupportedProvider)) ...[
+                          const SizedBox(height: 16),
+                          const XiaoaiSpeakerCard(),
+                        ],
                         if (section == SettingsSection.network)
                           SettingsCard(
                             title: null,
