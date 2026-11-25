@@ -122,6 +122,14 @@ class MinaCookieJar {
         }
       }
       if (name.isEmpty) continue;
+      // 值为空或字面 EXPIRED 是服务器的删除标记（身份链上常用它清
+      // 旧 passToken），不是凭据本身：按删除处理，绝不能存进罐里
+      // 再被 value() 当真值取出——TrackFerry 每处取值（逐跳
+      // cookieValue 与 jar 兜底）都跳过 EXPIRED，正是为此。
+      if (value.isEmpty || value == 'EXPIRED') {
+        _byDomain[domain]?.remove(name);
+        continue;
+      }
       _byDomain.putIfAbsent(domain, () => {})[name] = value;
     }
   }
@@ -159,13 +167,18 @@ class MinaCookieJar {
 }
 
 /// 从一组 Set-Cookie 里取指定名字的 cookie 值（取第一段 name=value）。
+///
+/// 空值与字面 EXPIRED 是删除标记，跳过不算命中（TrackFerry
+/// cookieValue 同语义）。
 String? setCookieValue(List<String> setCookies, String name) {
   for (final header in setCookies) {
     final first = header.split(';').first;
     final eq = first.indexOf('=');
     if (eq <= 0) continue;
     if (first.substring(0, eq).trim() == name) {
-      return first.substring(eq + 1).trim();
+      final value = first.substring(eq + 1).trim();
+      if (value.isEmpty || value == 'EXPIRED') continue;
+      return value;
     }
   }
   return null;

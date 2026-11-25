@@ -44,5 +44,36 @@ void main() {
         isNot(contains('identity_session')),
       );
     });
+
+    test('passToken=EXPIRED 是删除标记：不入罐、不回放', () {
+      final jar = MinaCookieJar();
+      jar.absorb(['passToken=EXPIRED; Domain=.xiaomi.com; Path=/'], origin);
+      expect(jar.value('passToken'), isNull);
+      expect(
+        jar.cookieHeaderFor(accountUri),
+        isNot(contains('passToken')),
+      );
+    });
+
+    test('先存真值再收到 EXPIRED → 真值被删除', () {
+      final jar = MinaCookieJar();
+      jar.absorb(['passToken=pt-old; Domain=.xiaomi.com; Path=/'], origin);
+      jar.absorb(['passToken=EXPIRED; Domain=.xiaomi.com; Path=/'], origin);
+      expect(jar.value('passToken'), isNull);
+    });
+
+    test('setCookieValue 跳过 EXPIRED，取后续真值', () {
+      expect(
+        setCookieValue(
+          ['passToken=EXPIRED; Path=/', 'passToken=pt-new; Path=/'],
+          'passToken',
+        ),
+        'pt-new',
+      );
+      expect(
+        setCookieValue(['serviceToken=EXPIRED; Path=/'], 'serviceToken'),
+        isNull,
+      );
+    });
   });
 }

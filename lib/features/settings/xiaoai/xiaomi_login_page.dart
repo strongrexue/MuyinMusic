@@ -15,8 +15,9 @@ import '../../shell/widgets/scrolling_page_header.dart';
 import '../widgets/settings_action.dart';
 import 'xiaoai_settings_controller.dart';
 
-/// 小米账号登录页：账密 →（服务端要求时）图形验证码 →（要求时）短信 /
-/// 邮箱验证码，分步状态全部由模块一 [MinaAuth] 的类型化结果驱动。
+/// 小米账号登录页：账号密码（→ 图形验证码 → 二次验证时由 App 内
+/// 接口发码、回填提交）。分步状态全部由模块一 [MinaAuth] 的类型
+/// 化结果驱动。
 class XiaomiLoginPage extends ConsumerStatefulWidget {
   const XiaomiLoginPage({super.key});
 
@@ -39,6 +40,11 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
 
   /// 非 null 表示已进入二次验证步。
   XiaomiVerifyKind? _verifyKind;
+
+  // 二次验证发码状态：进入验证步自动发一次，之后靠倒计时控制
+  // 重发节奏（与小米侧的发码限频对齐）。
+  bool _sendingCode = false;
+  bool _codeSent = false;
   int _resendSeconds = 0;
   Timer? _resendTimer;
 
@@ -78,8 +84,10 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (_verifyKind == null) _formCard(context) else _verifyCard(context),
-                      if (_verifyKind == null) ...[
+                      if (_verifyKind != null)
+                        _verifyCard(context)
+                      else ...[
+                        _formCard(context),
                         const SizedBox(height: 12),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -260,6 +268,7 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isPhone = _verifyKind == XiaomiVerifyKind.phone;
+    final what = isPhone ? '手机' : '邮箱';
     return SettingsCard(
       separate: false,
       title: null,
@@ -277,10 +286,18 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                '请输入收到的验证码，完成登录。',
+                '密码正确。小米要验证该账号绑定的$what，'
+                '这是它的安全策略，不是出错了。',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurfaceVariant,
+                  height: 1.5,
                 ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '点「发送验证码」，小米会把验证码发到你的$what，'
+                '收到后填到下面即可。',
+                style: theme.textTheme.bodyMedium?.copyWith(height: 1.7),
               ),
               const SizedBox(height: 16),
               prism.FilledInputTheme(
@@ -289,28 +306,35 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
                   prism.Theme.of(context).colorScheme,
                 ),
                 child: _LabeledField(
-                  label: '验证码',
-                  child: prism.TextField(
-                    key: const ValueKey('xiaomi-verify-code-field'),
-                    controller: _verifyCodeController,
-                    enabled: !_busy,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.done,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    onSubmitted: (_) => unawaited(_submitVerify()),
-                    decoration: const prism.InputDecoration(hintText: '输入验证码'),
-                  ),
-                ),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: _busy || _resendSeconds > 0
-                      ? null
-                      : () => unawaited(_sendCode()),
-                  child: Text(
-                    _resendSeconds > 0 ? '重新发送（$_resendSeconds 秒）' : '重新发送',
+                  label: '$what验证码',
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: prism.TextField(
+                          key: const ValueKey('xiaomi-verify-code-field'),
+                          controller: _verifyCodeController,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.done,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onSubmitted: (_) => unawaited(_submitVerify()),
+                          decoration: const prism.InputDecoration(
+                            hintText: '输入验证码',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.tonal(
+                        key: const ValueKey('xiaomi-verify-send-code'),
+                        onPressed:
+                            (_busy || _sendingCode || _resendSeconds > 0)
+                            ? null
+                            : () => unawaited(_sendCode()),
+                        child: Text(_sendCodeLabel),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -340,16 +364,69 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
                 onPressed: _busy
                     ? null
                     : () => setState(() {
+                        _resendTimer?.cancel();
+                        _resendSeconds = 0;
+                        _codeSent = false;
                         _verifyKind = null;
                         _error = null;
                       }),
-                child: const Text('返回修改账号'),
+                child: const Text('重新开始'),
               ),
             ],
           ),
         ),
       ],
     );
+  }
+
+  String get _sendCodeLabel {
+    if (_sendingCode) return '发送中…';
+    if (_resendSeconds > 0) return '重新发送（${_resendSeconds}s）';
+    return _codeSent ? '重新发送' : '发送验证码';
+  }
+
+  /// 走 [MinaAuth.sendVerificationCode] 的接口发码链发一次码；
+  /// 失败把 [MinaAuth.lastSendCodeError] 原样摆到红字区，成功
+  /// 起 60 秒重发倒计时。
+  Future<void> _sendCode() async {
+    if (_sendingCode || _resendSeconds > 0) return;
+    setState(() {
+      _sendingCode = true;
+      _error = null;
+    });
+    final auth = ref.read(minaAuthProvider);
+    final ok = await auth.sendVerificationCode();
+    if (!mounted) return;
+    if (ok) {
+      setState(() {
+        _sendingCode = false;
+        _codeSent = true;
+      });
+      _startResendCountdown();
+    } else {
+      setState(() {
+        _sendingCode = false;
+        _error = '验证码发送失败：${auth.lastSendCodeError ?? '请稍后重试'}';
+      });
+    }
+  }
+
+  void _startResendCountdown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSeconds = 60);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _resendSeconds -= 1;
+        if (_resendSeconds <= 0) {
+          _resendSeconds = 0;
+          timer.cancel();
+        }
+      });
+    });
   }
 
   Future<void> _submitForm() async {
@@ -395,38 +472,6 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
     await _handleResult(result);
   }
 
-  Future<void> _sendCode() async {
-    final auth = ref.read(minaAuthProvider);
-    final ok = await auth.sendVerificationCode();
-    if (!mounted) return;
-    if (!ok) {
-      final detail = auth.lastSendCodeError;
-      setState(() => _error = (detail != null && detail.isNotEmpty)
-          ? '验证码发送失败：$detail'
-          : '验证码发送失败，请稍后重试');
-      return;
-    }
-    _startResendCountdown();
-  }
-
-  void _startResendCountdown() {
-    _resendTimer?.cancel();
-    setState(() => _resendSeconds = 60);
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _resendSeconds -= 1;
-        if (_resendSeconds <= 0) {
-          _resendSeconds = 0;
-          timer.cancel();
-        }
-      });
-    });
-  }
-
   Future<void> _submitVerify() async {
     final code = _verifyCodeController.text.trim();
     if (code.isEmpty) {
@@ -442,18 +487,23 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
     await _handleResult(result);
   }
 
+  /// 登录成功：刷新设置卡状态、提示并返回。
+  Future<void> _onLoginSuccess() async {
+    setState(() => _busy = false);
+    await ref.read(xiaoaiSettingsProvider.notifier).handleLoginSuccess();
+    if (!mounted) return;
+    showAppToast(context, '登录成功', type: AppToastType.success);
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/settings');
+    }
+  }
+
   Future<void> _handleResult(MinaLoginResult result) async {
     switch (result) {
       case MinaLoginSuccess():
-        setState(() => _busy = false);
-        await ref.read(xiaoaiSettingsProvider.notifier).handleLoginSuccess();
-        if (!mounted) return;
-        showAppToast(context, '登录成功', type: AppToastType.success);
-        if (context.canPop()) {
-          context.pop();
-        } else {
-          context.go('/settings');
-        }
+        await _onLoginSuccess();
       case MinaLoginNeedCaptcha(:final error):
         setState(() {
           _busy = false;
@@ -462,13 +512,15 @@ class _XiaomiLoginPageState extends ConsumerState<XiaomiLoginPage> {
           _error = error;
         });
       case MinaLoginNeedVerify(:final kind):
+        // 进入验证步即自动发一次码（1.3.24 真机实证形态），
+        // 失败原因会由 _sendCode 摆到红字区。
         setState(() {
           _busy = false;
           _verifyKind = kind;
           _error = null;
           _verifyCodeController.clear();
         });
-        await _sendCode();
+        unawaited(_sendCode());
       case MinaLoginFailure(:final message):
         setState(() {
           _busy = false;

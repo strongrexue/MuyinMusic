@@ -761,4 +761,148 @@ void main() {
       expect(await store.deviceId(), first);
     });
   });
+
+  group('MinaAuth 提交验证码顺序', () {
+    test('submitVerifyCode 先 GET /identity/list 再 POST verifyPhone', () async {
+      final store = await _seededStore();
+      var serviceLoginCalls = 0;
+      final transport = FakeMinaTransport((req) {
+        final url = req.urlText;
+        if (url.contains('serviceLoginAuth2')) {
+          return fakeJsonResponse(_step2NeedVerifyBody);
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse('&&&START&&&{}');
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse(
+            '&&&START&&&{"code":0,'
+            '"location":"https://account.xiaomi.com/pass/sts?d=2"}',
+          );
+        }
+        if (url.contains('/pass/sts?d=2')) {
+          return fakeJsonResponse(
+            '&&&START&&&{}',
+            setCookies: [
+              'passToken=pt-verify; Path=/',
+              'userId=123456; Path=/',
+            ],
+          );
+        }
+        if (url.contains('/pass/sts?d=3')) {
+          return fakeJsonResponse(
+            '&&&START&&&{}',
+            setCookies: ['serviceToken=tok-verify; Path=/'],
+          );
+        }
+        if (url.contains('serviceLogin')) {
+          serviceLoginCalls++;
+          if (serviceLoginCalls == 1) return fakeJsonResponse(_step1Body);
+          return fakeJsonResponse(
+            '&&&START&&&{"code":0,'
+            '"location":"https://account.xiaomi.com/pass/sts?d=3",'
+            '"ssecurity":"sec2","nonce":42}',
+          );
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      final result = await auth.submitVerifyCode('654321');
+      expect(result, isA<MinaLoginSuccess>());
+
+      final listIdx = transport.requests.indexWhere(
+        (r) => r.method == 'GET' && r.urlText.contains('/identity/list'),
+      );
+      final postIdx = transport.requests.indexWhere(
+        (r) =>
+            r.method == 'POST' &&
+            r.urlText.contains('/identity/auth/verifyPhone'),
+      );
+      expect(listIdx, greaterThanOrEqualTo(0), reason: '应先种 identity_session');
+      expect(postIdx, greaterThan(listIdx), reason: 'verify POST 必须在 list 之后');
+    });
+  });
+
+  group('MinaAuth 提交验证码后续链', () {
+    // 回归：身份链先种 passToken=EXPIRED 删除标记（Domain=.xiaomi.com
+    // 桶），真 passToken 随后在跳转链上以 host-only 形式下发。旧实现
+    // 只靠 jar.value() 取值，会先命中 EXPIRED 并以它换取 → 服务器
+    // 回 70016 → 「验证后换取 serviceToken 失败」。
+    test('verify 两跳采集 passToken/cUserId，EXPIRED 不污染换取', () async {
+      final store = await _seededStore();
+      var serviceLoginCalls = 0;
+      RecordedRequest? exchangeRequest;
+      final transport = FakeMinaTransport((req) {
+        final url = req.urlText;
+        if (url.contains('serviceLoginAuth2')) {
+          return fakeJsonResponse(_step2NeedVerifyBody);
+        }
+        if (url.contains('/identity/list')) {
+          return fakeJsonResponse(
+            '&&&START&&&{}',
+            setCookies: ['passToken=EXPIRED; Domain=.xiaomi.com; Path=/'],
+          );
+        }
+        if (url.contains('/identity/auth/verifyPhone')) {
+          return fakeJsonResponse(
+            '&&&START&&&{"code":0,'
+            '"location":"https://account.xiaomi.com/pass/sts?d=2"}',
+          );
+        }
+        if (url.contains('/pass/sts?d=22')) {
+          return fakeJsonResponse(
+            '&&&START&&&{}',
+            setCookies: [
+              'userId=123456; Path=/',
+              'cUserId=cu-1; Path=/',
+            ],
+          );
+        }
+        if (url.contains('/pass/sts?d=2')) {
+          return fakeRedirect(
+            'https://account.xiaomi.com/pass/sts?d=22',
+            setCookies: ['passToken=pt-real; Path=/'],
+          );
+        }
+        if (url.contains('/pass/sts?d=3')) {
+          return fakeJsonResponse(
+            '&&&START&&&{}',
+            setCookies: ['serviceToken=tok-final; Path=/'],
+          );
+        }
+        if (url.contains('serviceLogin')) {
+          serviceLoginCalls++;
+          if (serviceLoginCalls == 1) return fakeJsonResponse(_step1Body);
+          exchangeRequest = req;
+          final cookie = req.headers['Cookie'] ?? '';
+          if (cookie.contains('passToken=pt-real') &&
+              cookie.contains('cUserId=cu-1')) {
+            return fakeJsonResponse(
+              '&&&START&&&{"code":0,'
+              '"location":"https://account.xiaomi.com/pass/sts?d=3",'
+              '"ssecurity":"sec2","nonce":42}',
+            );
+          }
+          return fakeJsonResponse(
+            '&&&START&&&{"code":70016,"desc":"passToken invalid"}',
+          );
+        }
+        throw StateError('unexpected request: $url');
+      });
+      final auth = await _loginToNeedVerify(transport, store);
+
+      final result = await auth.submitVerifyCode('654321');
+      expect(result, isA<MinaLoginSuccess>());
+
+      final cookie = exchangeRequest!.headers['Cookie'] ?? '';
+      expect(cookie, contains('passToken=pt-real'));
+      expect(cookie, contains('cUserId=cu-1'));
+      expect(cookie, isNot(contains('EXPIRED')));
+
+      final tokens = await store.load();
+      expect(tokens?.passToken, 'pt-real');
+      expect(tokens?.service(kMinaSid)?.serviceToken, 'tok-final');
+    });
+  });
 }

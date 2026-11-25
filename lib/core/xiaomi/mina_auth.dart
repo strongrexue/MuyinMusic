@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -215,14 +216,33 @@ class MinaAuth {
       return const MinaLoginFailure('验证码校验失败');
     }
 
-    // 跟随重定向链收集 passToken / userId（仍属 miservice
-    // _verify_otp 流程内，UA 继续用 UA_OTP）。
-    await _fetch(
-      'GET',
-      Uri.parse(location),
-      headers: {'User-Agent': kXiaomiOtpUserAgent},
-      maxRedirects: 10,
-    );
+    // 逐跳跟随 location 链、从每跳 Set-Cookie 现场收集 passToken /
+    // userId / cUserId（TrackFerry password.go verify 同款：后跳覆盖
+    // 先跳、EXPIRED 不算值）。不能只靠 _jar.value()——它按域名桶的
+    // 插入顺序返回首个值，身份链上先种下的删除标记或旧值会盖住链上
+    // 后到的真 passToken，换取必然被服务器拒（70016）。
+    var hopUrl = Uri.parse(location);
+    var capturedPassToken = '';
+    var capturedUserId = '';
+    var capturedCUserId = '';
+    for (var hop = 0; hop < 10; hop++) {
+      final resp = await _fetch(
+        'GET',
+        hopUrl,
+        headers: {'User-Agent': kXiaomiOtpUserAgent},
+      );
+      capturedPassToken =
+          setCookieValue(resp.setCookies, 'passToken') ?? capturedPassToken;
+      capturedUserId =
+          setCookieValue(resp.setCookies, 'userId') ?? capturedUserId;
+      capturedCUserId =
+          setCookieValue(resp.setCookies, 'cUserId') ?? capturedCUserId;
+      final next = resp.header('location');
+      if (resp.statusCode < 300 || resp.statusCode >= 400 || next == null) {
+        break;
+      }
+      hopUrl = hopUrl.resolve(next);
+    }
     // miservice 7a'：重定向链可能停在「确认手机号」页，最终 URL 上的
     // confirmUrl 续链后才会走到下发 passToken 的终点，先带 cookie
     // GET 它再继续找 passToken。
@@ -236,13 +256,22 @@ class MinaAuth {
         maxRedirects: 10,
       );
     }
-    final passToken = _jar.value('passToken') ?? '';
-    final userId = _jar.value('userId') ?? '';
+    final passToken = capturedPassToken.isNotEmpty
+        ? capturedPassToken
+        : (_jar.value('passToken') ?? '');
+    final userId = capturedUserId.isNotEmpty
+        ? capturedUserId
+        : (_jar.value('userId') ?? '');
     if (passToken.isEmpty) {
       return const MinaLoginFailure('验证后未拿到 passToken');
     }
 
-    final ok = await _exchangeServiceToken(passToken, userId, kMinaSid);
+    final ok = await _exchangeServiceToken(
+      passToken,
+      userId,
+      kMinaSid,
+      cUserIdOverride: capturedCUserId.isNotEmpty ? capturedCUserId : null,
+    );
     if (!ok) {
       return const MinaLoginFailure('验证后换取 serviceToken 失败');
     }
@@ -485,11 +514,16 @@ class MinaAuth {
   }
 
   /// passToken → serviceToken（serviceLogin + Step 3）。
+  ///
+  /// [cUserIdOverride] 为验证链上逐跳采集到的 cUserId（TrackFerry 把
+  /// 它放进 Session 显式带入 Exchange）；为空时从 cookie 罐取
+  /// （续期 / 扫码路径）。
   Future<bool> _exchangeServiceToken(
     String passToken,
     String userId,
-    String sid,
-  ) async {
+    String sid, {
+    String? cUserIdOverride,
+  }) async {
     await _ua();
     final url = Uri.parse(
       '$kXiaomiAccountBaseUrl/pass/serviceLogin?sid=$sid&_json=true',
@@ -500,7 +534,7 @@ class MinaAuth {
       'deviceId=${_deviceId ?? ''}',
       'sdkVersion=3.8.6',
     ];
-    final cUserId = _jar.value('cUserId');
+    final cUserId = cUserIdOverride ?? _jar.value('cUserId');
     if (cUserId != null && cUserId.isNotEmpty) {
       cookieParts.add('cUserId=$cUserId');
     }
@@ -561,8 +595,9 @@ class MinaAuth {
       extraCookie: 'deviceId=${_deviceId ?? ''}',
       body: _encodeForm({
         'ticket': ticket,
-        // trust 取值蓝本分歧未定版：miot 用 'true'、miservice 用
-        // 'false'，当前沿用 miot 的 'true'，待真机抓包定版后再改。
+        // trust 已定版为 'true'：TrackFerry（password.go 的 verify
+        // 表单）与 miot（auth.ts 的 verifyTicket）均为 'true'，
+        // 仅 miservice 用 'false'，以两家在产实现为准。
         'trust': 'true',
         '_json': 'true',
         '_flag': flag,
