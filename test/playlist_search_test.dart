@@ -1,9 +1,9 @@
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
-import 'package:cy_shine_music/features/playlists/playlist_models.dart';
-import 'package:cy_shine_music/features/playlists/playlist_search.dart';
-import 'package:cy_shine_music/features/playlists/resolved_playlist_track.dart';
+import 'package:muyin_music/features/downloads/download_history_entry.dart';
+import 'package:muyin_music/features/playlists/playlist_models.dart';
+import 'package:muyin_music/features/playlists/playlist_search.dart';
+import 'package:muyin_music/features/playlists/resolved_playlist_track.dart';
 
 void main() {
   group('filterResolvedTracksByQuery', () {

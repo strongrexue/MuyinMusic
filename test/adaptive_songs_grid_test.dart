@@ -7,13 +7,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/player/player_audio_handler.dart';
-import 'package:cy_shine_music/features/playlists/playlist_models.dart';
-import 'package:cy_shine_music/features/playlists/playlist_store.dart';
-import 'package:cy_shine_music/features/playlists/widgets/playlist_library_tile.dart';
-import 'package:cy_shine_music/features/songs/widgets/windows_playlist_cover_card.dart';
-import 'package:cy_shine_music/router.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/player/player_audio_handler.dart';
+import 'package:muyin_music/features/playlists/playlist_models.dart';
+import 'package:muyin_music/features/playlists/playlist_store.dart';
+import 'package:muyin_music/features/playlists/widgets/playlist_library_tile.dart';
+import 'package:muyin_music/features/songs/widgets/windows_playlist_cover_card.dart';
+import 'package:muyin_music/router.dart';
 
 import 'helpers/prism_test_environment.dart';
 

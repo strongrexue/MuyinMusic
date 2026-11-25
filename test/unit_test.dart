@@ -6,35 +6,35 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/lyric_format.dart';
-import 'package:cy_shine_music/core/models/lyric_info.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/models/music_url.dart';
-import 'package:cy_shine_music/core/sdk/internal/builders.dart';
-import 'package:cy_shine_music/core/sdk/internal/crypto_util.dart';
-import 'package:cy_shine_music/core/sdk/internal/format.dart';
-import 'package:cy_shine_music/core/sdk/internal/kg_krc.dart';
-import 'package:cy_shine_music/core/sdk/internal/kw_lyricx.dart';
-import 'package:cy_shine_music/core/sdk/internal/mg_mrc.dart';
-import 'package:cy_shine_music/core/sdk/internal/qrc.dart';
-import 'package:cy_shine_music/core/sdk/internal/tx_qrc_lyric.dart';
-import 'package:cy_shine_music/core/sdk/internal/tx_lyric_routing.dart';
-import 'package:cy_shine_music/core/sdk/internal/wy_yrc.dart';
-import 'package:cy_shine_music/core/services/embedded_artwork_cache.dart';
-import 'package:cy_shine_music/core/services/file_naming.dart';
-import 'package:cy_shine_music/core/services/flac_metadata_writer.dart';
-import 'package:cy_shine_music/core/services/lyric_builder.dart';
-import 'package:cy_shine_music/core/services/tagger.dart';
-import 'package:cy_shine_music/core/storage/base_url.dart';
-import 'package:cy_shine_music/core/sync/sync_models.dart';
-import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
-import 'package:cy_shine_music/core/ui/flow_palette.dart';
-import 'package:cy_shine_music/features/player/flowing_light_spec.dart';
-import 'package:cy_shine_music/features/player/lyric_parser.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/lyric_format.dart';
+import 'package:muyin_music/core/models/lyric_info.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/models/music_url.dart';
+import 'package:muyin_music/core/sdk/internal/builders.dart';
+import 'package:muyin_music/core/sdk/internal/crypto_util.dart';
+import 'package:muyin_music/core/sdk/internal/format.dart';
+import 'package:muyin_music/core/sdk/internal/kg_krc.dart';
+import 'package:muyin_music/core/sdk/internal/kw_lyricx.dart';
+import 'package:muyin_music/core/sdk/internal/mg_mrc.dart';
+import 'package:muyin_music/core/sdk/internal/qrc.dart';
+import 'package:muyin_music/core/sdk/internal/tx_qrc_lyric.dart';
+import 'package:muyin_music/core/sdk/internal/tx_lyric_routing.dart';
+import 'package:muyin_music/core/sdk/internal/wy_yrc.dart';
+import 'package:muyin_music/core/services/embedded_artwork_cache.dart';
+import 'package:muyin_music/core/services/file_naming.dart';
+import 'package:muyin_music/core/services/flac_metadata_writer.dart';
+import 'package:muyin_music/core/services/lyric_builder.dart';
+import 'package:muyin_music/core/services/tagger.dart';
+import 'package:muyin_music/core/storage/base_url.dart';
+import 'package:muyin_music/core/sync/sync_models.dart';
+import 'package:muyin_music/features/downloads/download_history_entry.dart';
+import 'package:muyin_music/core/ui/flow_palette.dart';
+import 'package:muyin_music/features/player/flowing_light_spec.dart';
+import 'package:muyin_music/features/player/lyric_parser.dart';
 // player_models (not player_controller): the controller's closure pulls in
 // audio_service / settings_store → Flutter, which breaks `dart test`.
-import 'package:cy_shine_music/features/player/player_models.dart';
+import 'package:muyin_music/features/player/player_models.dart';
 
 void main() {
   group('WebDAV sync snapshot', () {

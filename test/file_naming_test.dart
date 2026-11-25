@@ -1,6 +1,6 @@
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/services/file_naming.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/services/file_naming.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 MusicInfo track({required String name, required String singer}) => MusicInfo(

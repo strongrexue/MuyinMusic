@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:cy_shine_music/features/shell/player_transition.dart';
+import 'package:muyin_music/features/shell/player_transition.dart';
 
 void main() {
   test('cover bends across before growing and lands on measured endpoints', () {

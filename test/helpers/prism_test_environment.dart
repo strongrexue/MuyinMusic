@@ -1,5 +1,5 @@
-import 'package:cy_shine_music/core/ui/widgets/prism_environment.dart';
-import 'package:cy_shine_music/theme/liquid_glass_mode.dart';
+import 'package:muyin_music/core/ui/widgets/prism_environment.dart';
+import 'package:muyin_music/theme/liquid_glass_mode.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

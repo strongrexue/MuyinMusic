@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
-import 'package:cy_shine_music/features/player/player_session_snapshot.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/features/downloads/download_history_entry.dart';
+import 'package:muyin_music/features/player/player_session_snapshot.dart';
 
 void main() {
   group('PlayerSessionSnapshot', () {

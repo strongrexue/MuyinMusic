@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/features/player/sleep_timer_controller.dart';
+import 'package:muyin_music/features/player/sleep_timer_controller.dart';
 
 void main() {
   testWidgets('expires once at the deadline and clears remaining time', (

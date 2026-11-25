@@ -1,8 +1,8 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/features/player/bluetooth_lyric_metadata.dart';
-import 'package:cy_shine_music/features/player/player_models.dart';
+import 'package:muyin_music/features/player/bluetooth_lyric_metadata.dart';
+import 'package:muyin_music/features/player/player_models.dart';
 
 void main() {
   const track = PlayerTrack(

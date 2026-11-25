@@ -5,10 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/equalizer/equalizer_store.dart';
-import 'package:cy_shine_music/features/equalizer/equalizer_page.dart';
-import 'package:cy_shine_music/features/shell/shell_toolbar_visibility.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/equalizer/equalizer_store.dart';
+import 'package:muyin_music/features/equalizer/equalizer_page.dart';
+import 'package:muyin_music/features/shell/shell_toolbar_visibility.dart';
 
 import 'helpers/prism_test_environment.dart';
 

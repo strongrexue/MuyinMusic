@@ -5,15 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/playlists/playlist_detail_page.dart';
-import 'package:cy_shine_music/features/playlists/playlist_detail_toolbar_state.dart';
-import 'package:cy_shine_music/features/playlists/playlist_models.dart';
-import 'package:cy_shine_music/features/playlists/playlist_store.dart';
-import 'package:cy_shine_music/features/shell/shell_toolbar_visibility.dart';
-import 'package:cy_shine_music/features/songs/widgets/songs_placeholders.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/playlists/playlist_detail_page.dart';
+import 'package:muyin_music/features/playlists/playlist_detail_toolbar_state.dart';
+import 'package:muyin_music/features/playlists/playlist_models.dart';
+import 'package:muyin_music/features/playlists/playlist_store.dart';
+import 'package:muyin_music/features/shell/shell_toolbar_visibility.dart';
+import 'package:muyin_music/features/songs/widgets/songs_placeholders.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'helpers/prism_test_environment.dart';

@@ -6,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/songs/ignored_local_songs_page.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/songs/ignored_local_songs_page.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -2,9 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/discovery/discovery_controller.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/discovery/discovery_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

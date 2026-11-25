@@ -6,15 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/api/api_client.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_controller.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_metadata_parser.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_models.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_runtime.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_store.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_updates.dart';
-import 'package:cy_shine_music/core/storage/settings_store.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/api/api_client.dart';
+import 'package:muyin_music/core/music_sources/music_source_controller.dart';
+import 'package:muyin_music/core/music_sources/music_source_metadata_parser.dart';
+import 'package:muyin_music/core/music_sources/music_source_models.dart';
+import 'package:muyin_music/core/music_sources/music_source_runtime.dart';
+import 'package:muyin_music/core/music_sources/music_source_store.dart';
+import 'package:muyin_music/core/music_sources/music_source_updates.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

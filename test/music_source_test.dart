@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_metadata_parser.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_models.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_runtime.dart';
-import 'package:cy_shine_music/core/music_sources/music_url_resolver.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/music_sources/music_source_metadata_parser.dart';
+import 'package:muyin_music/core/music_sources/music_source_models.dart';
+import 'package:muyin_music/core/music_sources/music_source_runtime.dart';
+import 'package:muyin_music/core/music_sources/music_url_resolver.dart';
 
 void main() {
   test(

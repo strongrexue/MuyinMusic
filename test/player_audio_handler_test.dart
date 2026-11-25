@@ -6,8 +6,8 @@ import 'package:bass_player/bass_player.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/features/player/player_audio_handler.dart';
-import 'package:cy_shine_music/features/player/vivo_music_metadata.dart';
+import 'package:muyin_music/features/player/player_audio_handler.dart';
+import 'package:muyin_music/features/player/vivo_music_metadata.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

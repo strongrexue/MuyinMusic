@@ -4,9 +4,9 @@
 
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/sdk/internal/builders.dart';
-import 'package:cy_shine_music/core/sdk/kg_sdk.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/sdk/internal/builders.dart';
+import 'package:muyin_music/core/sdk/kg_sdk.dart';
 
 void main() {
   test(

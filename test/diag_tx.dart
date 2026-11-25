@@ -9,9 +9,9 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/core/sdk/internal/crypto_util.dart';
-import 'package:cy_shine_music/core/sdk/internal/sdk_http.dart';
-import 'package:cy_shine_music/core/sdk/tx_sdk.dart';
+import 'package:muyin_music/core/sdk/internal/crypto_util.dart';
+import 'package:muyin_music/core/sdk/internal/sdk_http.dart';
+import 'package:muyin_music/core/sdk/tx_sdk.dart';
 
 const _part1 = [23, 14, 6, 36, 16, 40, 7, 19];
 const _part2 = [16, 1, 32, 12, 19, 27, 8, 5];

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:cy_shine_music/core/services/app_update_service.dart';
+import 'package:muyin_music/core/services/app_update_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pub_semver/pub_semver.dart';

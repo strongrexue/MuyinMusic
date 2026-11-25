@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:cy_shine_music/core/services/storage_browser_service.dart';
-import 'package:cy_shine_music/features/settings/widgets/storage_folder_picker_sheet.dart';
+import 'package:muyin_music/core/services/storage_browser_service.dart';
+import 'package:muyin_music/features/settings/widgets/storage_folder_picker_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

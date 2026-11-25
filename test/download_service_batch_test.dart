@@ -4,9 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/services/download_service.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/services/download_service.dart';
 
 void main() {
   test(

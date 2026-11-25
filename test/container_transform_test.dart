@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/ui/container_transform.dart';
-import 'package:cy_shine_music/theme/app_motion.dart';
+import 'package:muyin_music/core/ui/container_transform.dart';
+import 'package:muyin_music/theme/app_motion.dart';
 
 void main() {
   test('hero progress remaps fastOutSlowIn onto the container curve', () {

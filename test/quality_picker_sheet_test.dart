@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/models/download_capabilities.dart';
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_controller.dart';
-import 'package:cy_shine_music/core/services/download_service.dart';
-import 'package:cy_shine_music/features/music_sources/music_source_action_guard.dart';
-import 'package:cy_shine_music/features/search/widgets/quality_picker_sheet.dart';
+import 'package:muyin_music/core/models/download_capabilities.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/music_sources/music_source_controller.dart';
+import 'package:muyin_music/core/services/download_service.dart';
+import 'package:muyin_music/features/music_sources/music_source_action_guard.dart';
+import 'package:muyin_music/features/search/widgets/quality_picker_sheet.dart';
 
 void main() {
   testWidgets('download picker uses immediate per-track quality sizes', (

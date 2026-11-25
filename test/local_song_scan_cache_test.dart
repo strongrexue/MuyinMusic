@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart'
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/features/songs/local_song_scan_cache.dart';
+import 'package:muyin_music/features/songs/local_song_scan_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

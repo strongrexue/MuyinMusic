@@ -1,4 +1,4 @@
-import 'package:cy_shine_music/core/app_info.dart';
+import 'package:muyin_music/core/app_info.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -18,6 +18,6 @@ void main() {
 
     await container.read(packageInfoProvider.future);
 
-    expect(container.read(appVersionLabelProvider), '沐音 1.0.0');
+    expect(container.read(appVersionLabelProvider), '胖虎音乐 1.0.0');
   });
 }

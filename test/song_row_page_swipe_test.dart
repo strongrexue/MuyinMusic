@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
-import 'package:cy_shine_music/features/songs/widgets/song_row.dart';
+import 'package:muyin_music/features/downloads/download_history_entry.dart';
+import 'package:muyin_music/features/songs/widgets/song_row.dart';
 
 import 'helpers/prism_test_environment.dart';
 

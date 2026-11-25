@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'dart:async';
 
-import 'package:cy_shine_music/core/app_info.dart';
-import 'package:cy_shine_music/core/services/app_update_service.dart';
-import 'package:cy_shine_music/core/ui/app_toast.dart';
-import 'package:cy_shine_music/core/ui/widgets/prism_environment.dart';
-import 'package:cy_shine_music/features/update/app_update_prompt.dart';
+import 'package:muyin_music/core/app_info.dart';
+import 'package:muyin_music/core/services/app_update_service.dart';
+import 'package:muyin_music/core/ui/app_toast.dart';
+import 'package:muyin_music/core/ui/widgets/prism_environment.dart';
+import 'package:muyin_music/features/update/app_update_prompt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -56,7 +56,7 @@ void main() {
     expect(find.byKey(const ValueKey('app-update-dialog')), findsOneWidget);
     expect(find.text('发现新版本'), findsOneWidget);
     expect(find.textContaining('1.0.1  →  1.1.0'), findsOneWidget);
-    expect(find.textContaining('沐音 1.1.0'), findsOneWidget);
+    expect(find.textContaining('胖虎音乐 1.1.0'), findsOneWidget);
     expect(outcome, isNull);
 
     await tester.tap(find.byKey(const ValueKey('app-update-later')));
@@ -192,7 +192,7 @@ AppRelease _release({required String version, required String pageUri}) {
     version: Version.parse(version),
     tagName: 'v$version',
     pageUri: Uri.parse(pageUri),
-    title: '沐音 $version',
+    title: '胖虎音乐 $version',
   );
 }
 

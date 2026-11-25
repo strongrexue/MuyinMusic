@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_models.dart';
-import 'package:cy_shine_music/core/music_sources/music_source_store.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/music_sources/music_source_models.dart';
+import 'package:muyin_music/core/music_sources/music_source_store.dart';
 
 const _recordsKey = 'music_source_records_v1';
 const _legacyActiveIdKey = 'active_music_source_id_v1';

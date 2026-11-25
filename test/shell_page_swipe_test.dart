@@ -6,17 +6,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/api/music_api.dart';
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/models/playlist_summary.dart';
-import 'package:cy_shine_music/core/models/search_response.dart';
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/discovery/discovery_controller.dart';
-import 'package:cy_shine_music/features/player/player_audio_handler.dart';
-import 'package:cy_shine_music/features/player/player_controller.dart';
-import 'package:cy_shine_music/features/search/search_controller.dart';
-import 'package:cy_shine_music/features/shell/app_shell.dart';
+import 'package:muyin_music/core/api/music_api.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/models/playlist_summary.dart';
+import 'package:muyin_music/core/models/search_response.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/discovery/discovery_controller.dart';
+import 'package:muyin_music/features/player/player_audio_handler.dart';
+import 'package:muyin_music/features/player/player_controller.dart';
+import 'package:muyin_music/features/search/search_controller.dart';
+import 'package:muyin_music/features/shell/app_shell.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

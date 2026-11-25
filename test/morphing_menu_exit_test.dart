@@ -3,8 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/ui/widgets/morphing_menu_button.dart';
-import 'package:cy_shine_music/core/ui/widgets/morphing_menu_surface.dart';
+import 'package:muyin_music/core/ui/widgets/morphing_menu_button.dart';
+import 'package:muyin_music/core/ui/widgets/morphing_menu_surface.dart';
 
 void main() {
   testWidgets(

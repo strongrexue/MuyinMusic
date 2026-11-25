@@ -1,5 +1,5 @@
-import 'package:cy_shine_music/features/player/sleep_timer_controller.dart';
-import 'package:cy_shine_music/features/player/widgets/player_sleep_timer_sheet.dart';
+import 'package:muyin_music/features/player/sleep_timer_controller.dart';
+import 'package:muyin_music/features/player/widgets/player_sleep_timer_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

@@ -4,8 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cy_shine_music/core/services/app_logger.dart';
-import 'package:cy_shine_music/core/services/log_category.dart';
+import 'package:muyin_music/core/services/app_logger.dart';
+import 'package:muyin_music/core/services/log_category.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -6,18 +6,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prism_ui/icons/icons.dart' as prism_glyph;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/music_info.dart';
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/core/ui/artwork_colors.dart';
-import 'package:cy_shine_music/core/ui/flow_palette.dart';
-import 'package:cy_shine_music/features/player/player_audio_handler.dart';
-import 'package:cy_shine_music/features/player/player_controller.dart';
-import 'package:cy_shine_music/features/player/widgets/player_action_row.dart';
-import 'package:cy_shine_music/features/player/widgets/player_control_color.dart';
-import 'package:cy_shine_music/features/player/widgets/player_palette.dart';
-import 'package:cy_shine_music/features/playlists/playlist_models.dart';
-import 'package:cy_shine_music/features/songs/liked_songs_store.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/music_info.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/core/ui/artwork_colors.dart';
+import 'package:muyin_music/core/ui/flow_palette.dart';
+import 'package:muyin_music/features/player/player_audio_handler.dart';
+import 'package:muyin_music/features/player/player_controller.dart';
+import 'package:muyin_music/features/player/widgets/player_action_row.dart';
+import 'package:muyin_music/features/player/widgets/player_control_color.dart';
+import 'package:muyin_music/features/player/widgets/player_palette.dart';
+import 'package:muyin_music/features/playlists/playlist_models.dart';
+import 'package:muyin_music/features/songs/liked_songs_store.dart';
 
 import 'helpers/prism_test_environment.dart';
 

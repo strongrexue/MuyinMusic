@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/features/downloads/download_history_entry.dart';
-import 'package:cy_shine_music/features/songs/song_search.dart';
+import 'package:muyin_music/features/downloads/download_history_entry.dart';
+import 'package:muyin_music/features/songs/song_search.dart';
 
 void main() {
   group('filterSongsByQuery', () {

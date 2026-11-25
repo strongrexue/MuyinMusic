@@ -1,4 +1,4 @@
-import 'package:cy_shine_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/enums.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

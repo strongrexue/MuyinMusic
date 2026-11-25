@@ -1,8 +1,8 @@
 import 'package:test/test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/models/playlist_summary.dart';
-import 'package:cy_shine_music/features/discovery/discovery_browse_cache.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/models/playlist_summary.dart';
+import 'package:muyin_music/features/discovery/discovery_browse_cache.dart';
 
 List<PlaylistSummary> playlists(
   int count, {

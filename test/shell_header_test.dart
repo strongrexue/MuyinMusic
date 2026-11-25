@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cy_shine_music/core/storage/settings_store.dart';
-import 'package:cy_shine_music/features/shell/shell_route_utils.dart';
-import 'package:cy_shine_music/features/shell/widgets/shell_header.dart';
-import 'package:cy_shine_music/features/shell/widgets/toolbar_metrics.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
+import 'package:muyin_music/features/shell/shell_route_utils.dart';
+import 'package:muyin_music/features/shell/widgets/shell_header.dart';
+import 'package:muyin_music/features/shell/widgets/toolbar_metrics.dart';
 
 import 'helpers/prism_test_environment.dart';
 

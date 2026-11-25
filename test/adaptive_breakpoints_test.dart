@@ -1,12 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:cy_shine_music/core/models/enums.dart';
-import 'package:cy_shine_music/core/ui/app_breakpoints.dart';
-import 'package:cy_shine_music/features/discovery/leaderboards_page.dart';
-import 'package:cy_shine_music/features/discovery/widgets/leaderboard_spotlight.dart';
-import 'package:cy_shine_music/features/discovery/widgets/masonry_playlist_grid.dart';
-import 'package:cy_shine_music/features/home/home_feed.dart';
-import 'package:cy_shine_music/features/songs/songs_page.dart';
+import 'package:muyin_music/core/models/enums.dart';
+import 'package:muyin_music/core/ui/app_breakpoints.dart';
+import 'package:muyin_music/features/discovery/leaderboards_page.dart';
+import 'package:muyin_music/features/discovery/widgets/leaderboard_spotlight.dart';
+import 'package:muyin_music/features/discovery/widgets/masonry_playlist_grid.dart';
+import 'package:muyin_music/features/home/home_feed.dart';
+import 'package:muyin_music/features/songs/songs_page.dart';
 
 void main() {
   group('AppBreakpoints', () {
