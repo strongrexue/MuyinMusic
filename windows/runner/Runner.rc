@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "MuyinMusic" "\0"
-            VALUE "FileDescription", "MuyinMusic" "\0"
+            VALUE "CompanyName", "胖虎音乐" "\0"
+            VALUE "FileDescription", "胖虎音乐" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "MuyinMusic" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 MuyinMusic. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 胖虎音乐. All rights reserved." "\0"
             VALUE "OriginalFilename", "MuyinMusic.exe" "\0"
-            VALUE "ProductName", "MuyinMusic" "\0"
+            VALUE "ProductName", "胖虎音乐" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -37,7 +37,7 @@ K90 resolved quieter, muffled playback. Both backends remain available through
 `OUTPUT_BACKEND` in `BassPlayerPlugin.kt`: `AUDIO_TRACK` selects AudioTrack, while
 `AAUDIO` uses BASS's default AAudio output on Android 8.1+ (OpenSL ES on older
 devices). This selection changes the output backend only; BASS decoding and
-the equalizer chain are shared. Output diagnostics are logged under `CyShineBass`.
+the equalizer chain are shared. Output diagnostics are logged under `MuyinBass`.
 
 BASS is free only for non-commercial use. Review every `*-LICENSE.txt` file in
 this directory and the bundled SSL notices before redistributing or monetizing
