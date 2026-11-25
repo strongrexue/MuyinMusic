@@ -25,7 +25,7 @@ class ArtworkColors {
       palette == FlowPalette.fallback ? null : Color(palette.accentsArgb.first);
 }
 
-const _channel = MethodChannel('cy_shine_music/artwork_colors');
+const _channel = MethodChannel('muyin_music/artwork_colors');
 const _maxCachedColors = 12;
 typedef _LoadKey = ({ImageProvider<Object> provider, String? requestGroup});
 // These process-wide maps are the single shared cache for player and details.

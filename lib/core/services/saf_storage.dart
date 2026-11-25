@@ -11,7 +11,7 @@ import 'windows_folder_picker.dart';
 
 /// The stored location is either a legacy filesystem path or an opaque SAF URI.
 class SafStorage {
-  static const _channel = MethodChannel('cy_shine_music/saf_storage');
+  static const _channel = MethodChannel('muyin_music/saf_storage');
   static final Map<String, String> _labels = {};
   static const _labelPrefix = 'saf_directory_label:';
 

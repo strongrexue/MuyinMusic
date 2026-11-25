@@ -4,12 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 网络类型通道约定（Dart / Android / iOS 三端必须一致）：
-/// - MethodChannel 'cy_shine_music/network_type'：方法 getNetworkType，
+/// - MethodChannel 'muyin_music/network_type'：方法 getNetworkType，
 ///   返回 'wifi' 或 'cellular'。
-/// - EventChannel 'cy_shine_music/network_type_events'：推送 'wifi' 或
+/// - EventChannel 'muyin_music/network_type_events'：推送 'wifi' 或
 ///   'cellular' 字符串。
-const String kNetworkTypeMethodChannel = 'cy_shine_music/network_type';
-const String kNetworkTypeEventChannel = 'cy_shine_music/network_type_events';
+const String kNetworkTypeMethodChannel = 'muyin_music/network_type';
+const String kNetworkTypeEventChannel = 'muyin_music/network_type_events';
 
 /// 与原生两端通信的无状态服务。单独抽出来便于测试时替换/覆盖。
 class NetworkTypeService {

@@ -131,7 +131,7 @@ class _StartupLoading extends StatelessWidget {
                 const StartupLogo(size: 124),
                 const SizedBox(height: 28),
                 Text(
-                  '沐音',
+                  '胖虎音乐',
                   style: theme.textTheme.headlineMedium?.copyWith(
                     color: scheme.onSurface,
                     fontWeight: FontWeight.w600,

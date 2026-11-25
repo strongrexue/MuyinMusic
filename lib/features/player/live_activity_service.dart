@@ -21,8 +21,8 @@ const bool kEnableLiveActivity = false;
 /// 灵动岛 / 锁屏实时活动（Live Activity）的驱动。
 ///
 /// 只在 iOS 上生效，且系统「设置 → 栖弦 → 实时活动」打开时才真正工作。
-/// 原生实现见 ios/Runner/CyShineLiveActivityBridge.swift，
-/// 渲染见 ios/CyShineMusicWidget/CyShineLiveActivityWidget.swift。
+/// 原生实现见 ios/Runner/MuyinLiveActivityBridge.swift，
+/// 渲染见 ios/MuyinMusicWidget/MuyinLiveActivityWidget.swift。
 ///
 /// 更新频率刻意压得很低：只在**换歌 / 播放暂停 / 跳转**时推一次。
 /// 进度条由原生侧的 `ProgressView(timerInterval:)` 自己推进，
@@ -57,10 +57,10 @@ class LiveActivityService {
   LiveActivityService(this._ref);
 
   static const MethodChannel _channel = MethodChannel(
-    'cy_shine_music/live_activity',
+    'muyin_music/live_activity',
   );
   static const MethodChannel _nowPlayingChannel =
-      MethodChannel('cy_shine_music/now_playing');
+      MethodChannel('muyin_music/now_playing');
 
   final Ref _ref;
   bool _available = false;

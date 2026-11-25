@@ -1019,7 +1019,7 @@ bool _isTopLevelMenuLocation(String location) {
   return location == '/' || location == '/songs' || location == '/settings';
 }
 
-const _appTaskChannel = MethodChannel('cy_shine_music/app_task');
+const _appTaskChannel = MethodChannel('muyin_music/app_task');
 
 Future<void> _moveAppTaskToBack() async {
   try {

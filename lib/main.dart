@@ -97,7 +97,7 @@ Future<void> _startApp() async {
   runApp(
     UncontrolledProviderScope(
       container: container,
-      child: const CyShineMusicApp(),
+      child: const MuyinMusicApp(),
     ),
   );
 }

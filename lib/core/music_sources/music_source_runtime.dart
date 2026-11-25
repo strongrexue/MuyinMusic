@@ -35,7 +35,7 @@ class MusicSourceRuntime {
     _channel.setMethodCallHandler(_handleNativeEvent);
   }
 
-  static const String _channelName = 'cy_shine_music/music_source_runtime';
+  static const String _channelName = 'muyin_music/music_source_runtime';
   final Dio _dio;
   final MethodChannel _channel;
   final void Function(MusicSourceUpdateNotice)? _onUpdate;
@@ -376,7 +376,7 @@ final musicSourceUpdateRuntimeProvider = Provider<MusicSourceRuntime>((ref) {
   final updates = ref.read(musicSourceUpdatesProvider.notifier);
   final runtime = MusicSourceRuntime(
     ref.watch(apiClientProvider),
-    channel: const MethodChannel('cy_shine_music/music_source_update_runtime'),
+    channel: const MethodChannel('muyin_music/music_source_update_runtime'),
     onUpdate: updates.receive,
   );
   ref.onDispose(() => unawaited(runtime.disposeRuntime()));

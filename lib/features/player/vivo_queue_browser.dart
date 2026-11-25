@@ -52,7 +52,7 @@ class VivoQueueBrowser {
         MediaItem(
           id: emptyItemId,
           title: '暂无播放队列',
-          artist: '请先在沐音播放歌曲',
+          artist: '请先在胖虎音乐播放歌曲',
           extras: {
             VivoMusicMetadata.pageKey: 1,
             VivoMusicMetadata.hasMoreKey: false,

@@ -33,18 +33,18 @@ import 'theme/app_motion.dart';
 import 'theme/app_theme.dart';
 import 'core/storage/glass_preview_provider.dart';
 
-class CyShineMusicApp extends ConsumerStatefulWidget {
-  const CyShineMusicApp({super.key});
+class MuyinMusicApp extends ConsumerStatefulWidget {
+  const MuyinMusicApp({super.key});
 
   @override
-  ConsumerState<CyShineMusicApp> createState() => _CyShineMusicAppState();
+  ConsumerState<MuyinMusicApp> createState() => _MuyinMusicAppState();
 }
 
-class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
+class _MuyinMusicAppState extends ConsumerState<MuyinMusicApp>
     with WidgetsBindingObserver {
   String? _lastLoggedScheme;
   static const _audioIntentChannel = MethodChannel(
-    'cy_shine_music/audio_intent',
+    'muyin_music/audio_intent',
   );
   bool _externalAudioReady = false;
   bool _handlingExternalAudio = false;
@@ -336,7 +336,7 @@ class _CyShineMusicAppState extends ConsumerState<CyShineMusicApp>
     );
 
     return MaterialApp.router(
-      title: '沐音',
+      title: '胖虎音乐',
       localizationsDelegates: const [PrismChineseStrings.delegate],
       debugShowCheckedModeBanner: false,
       themeAnimationDuration: Duration.zero,

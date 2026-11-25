@@ -3,12 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 enum AppIconVariant {
-  classic('classic', '经典白'),
-  midnight('midnight', '午夜蓝'),
-  sky('sky', '晴空蓝'),
-  lavender('lavender', '雾紫'),
-  mint('mint', '薄荷青'),
-  peach('peach', '暖桃粉');
+  classic('classic', '胖虎·经典'),
+  midnight('midnight', '胖虎·沉浸'),
+  sky('sky', '胖虎·耳机'),
+  lavender('lavender', '胖虎·黑胶'),
+  mint('mint', '胖虎·吉他'),
+  peach('peach', '胖虎·麦克风');
 
   const AppIconVariant(this.code, this.label);
 
@@ -32,7 +32,7 @@ final appIconProvider =
     );
 
 class AppIconController extends AsyncNotifier<AppIconVariant> {
-  static const _channel = MethodChannel('cy_shine_music/app_icon');
+  static const _channel = MethodChannel('muyin_music/app_icon');
 
   @override
   Future<AppIconVariant> build() async {

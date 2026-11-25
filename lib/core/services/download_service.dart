@@ -114,7 +114,7 @@ class DownloadService {
   DownloadService(this._ref);
 
   final Ref _ref;
-  static const _mediaScanChannel = MethodChannel('cy_shine_music/media_scan');
+  static const _mediaScanChannel = MethodChannel('muyin_music/media_scan');
   static const int batchConcurrency = 3;
 
   final Set<String> _batchDownloadKeys = {};

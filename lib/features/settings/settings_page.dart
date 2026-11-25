@@ -571,7 +571,7 @@ class SettingsPage extends ConsumerWidget {
                                       ? '读取中'
                                       : appIcon?.hasError == true
                                       ? '读取失败'
-                                      : appIcon?.valueOrNull?.label ?? '经典白',
+                                      : appIcon?.valueOrNull?.label ?? '胖虎·经典',
                                   trailing: Icons.chevron_right,
                                   onTap: () => _chooseAppIcon(context, ref),
                                 ),
@@ -639,7 +639,9 @@ class SettingsPage extends ConsumerWidget {
                             ],
                           ),
                         ],
-                        if (section == SettingsSection.about)
+                        if (section == SettingsSection.about) ...[
+                          const _DedicatedNoticeCard(),
+                          const SizedBox(height: 16),
                           SettingsCard(
                             title: null,
                             children: [
@@ -659,6 +661,7 @@ class SettingsPage extends ConsumerWidget {
                               ),
                             ],
                           ),
+                        ],
                         if (section == SettingsSection.debug)
                           SettingsCard(
                             title: null,
@@ -793,11 +796,7 @@ class SettingsPage extends ConsumerWidget {
       // Windows 下 file_picker 抛的是 WindowsException，不是 PlatformException，
       // 旧代码只 catch PlatformException 会让异常逃逸，表现为点击后毫无反应。
       if (context.mounted) {
-        showAppToast(
-          context,
-          '无法选择文件夹，请重试',
-          type: AppToastType.error,
-        );
+        showAppToast(context, '无法选择文件夹，请重试', type: AppToastType.error);
       }
       return;
     }
@@ -844,11 +843,7 @@ class SettingsPage extends ConsumerWidget {
       // Windows 下 file_picker 抛的是 WindowsException，不是 PlatformException，
       // 补通用兜底避免异常逃逸导致点击后毫无反应。
       if (context.mounted) {
-        showAppToast(
-          context,
-          '无法打开系统目录选择器，请重试',
-          type: AppToastType.error,
-        );
+        showAppToast(context, '无法打开系统目录选择器，请重试', type: AppToastType.error);
       }
       return;
     }
@@ -1093,6 +1088,62 @@ class SettingsPage extends ConsumerWidget {
     } finally {
       if (toolbar.mounted) toolbar.state = wasToolbarVisible;
     }
+  }
+}
+
+/// 关于页顶部的专用说明卡：暖色 tint 独立成卡，圆角与内边距同页内
+/// 其它设置卡片，暗色下降低 tint 透明度避免刺眼。
+class _DedicatedNoticeCard extends StatelessWidget {
+  const _DedicatedNoticeCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final cardFill = prism.SurfaceLevel.card.colorOf(
+      prism.Theme.of(context).colorScheme,
+    );
+    final fill = Color.alphaBlend(
+      const Color(
+        0xFFF5A623,
+      ).withValues(alpha: theme.brightness == Brightness.dark ? 0.16 : 0.20),
+      cardFill,
+    );
+    return ClipRSuperellipse(
+      borderRadius: prism.AppRadius.xl,
+      child: ColoredBox(
+        color: fill,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.groups_outlined, size: 20, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    '胖虎精英群专用',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '本应用由群内成员共同开发维护，仅供群内学习交流使用。请勿分享、出售或用于任何商业用途，感谢每一位成员的付出与支持。',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

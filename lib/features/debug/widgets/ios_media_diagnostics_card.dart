@@ -25,9 +25,9 @@ class IosMediaDiagnosticsCard extends ConsumerStatefulWidget {
 
 class _IosMediaDiagnosticsCardState
     extends ConsumerState<IosMediaDiagnosticsCard> {
-  static const _taskChannel = MethodChannel('cy_shine_music/app_task');
+  static const _taskChannel = MethodChannel('muyin_music/app_task');
   static const _nowPlayingChannel =
-      MethodChannel('cy_shine_music/now_playing');
+      MethodChannel('muyin_music/now_playing');
 
   String _result = '尚未读取。先点「① 读取当前状态」。';
   bool _busy = false;
@@ -144,7 +144,7 @@ class _IosMediaDiagnosticsCardState
         }
         buffer.writeln('\n判读：applicationIdentifier 应以本 App 的');
         buffer.writeln('bundleId 结尾（appIdMatchesBundle = true）；');
-        buffer.writeln('显示（无）或指向别的 App，点卡就回不了沐音。');
+        buffer.writeln('显示（无）或指向别的 App，点卡就回不了胖虎音乐。');
         setState(() => _result = buffer.toString());
       });
 

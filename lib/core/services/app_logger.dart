@@ -184,7 +184,7 @@ class AppLogger {
         : (Platform.isIOS ? 'ios-runtime' : null);
     if (scope == null) return;
     try {
-      final data = await const MethodChannel('cy_shine_music/app_task')
+      final data = await const MethodChannel('muyin_music/app_task')
           .invokeMapMethod<String, dynamic>('diagnostics')
           .timeout(const Duration(seconds: 2));
       String json;
@@ -217,7 +217,7 @@ class AppLogger {
   static Future<void> logIosMediaSession(String reason) async {
     if (!Platform.isIOS) return;
     try {
-      final data = await const MethodChannel('cy_shine_music/app_task')
+      final data = await const MethodChannel('muyin_music/app_task')
           .invokeMapMethod<String, dynamic>('mediaSession')
           .timeout(const Duration(seconds: 2));
       final summary = data?['summary'] ?? '(空)';
@@ -235,7 +235,7 @@ class AppLogger {
   static Future<void> logIosWidgetStatus(String reason) async {
     if (!Platform.isIOS) return;
     try {
-      final data = await const MethodChannel('cy_shine_music/app_task')
+      final data = await const MethodChannel('muyin_music/app_task')
           .invokeMapMethod<String, dynamic>('widgetStatus')
           .timeout(const Duration(seconds: 3));
       if (data == null) {
@@ -439,7 +439,7 @@ class AppLogger {
     final snapshot = await pending;
     if (!Platform.isAndroid) return snapshot.path;
     final result = await const MethodChannel(
-      'cy_shine_music/app_task',
+      'muyin_music/app_task',
     ).invokeMapMethod<String, dynamic>('exportLog', {'path': snapshot.path});
     final path = result?['path'] as String?;
     if (path == null) throw StateError('日志导出未返回保存位置');
@@ -499,7 +499,7 @@ class AppLogger {
     }
     if (Platform.isAndroid) {
       try {
-        await const MethodChannel('cy_shine_music/app_task')
+        await const MethodChannel('muyin_music/app_task')
             .invokeMethod<void>('clearCrashLog')
             .timeout(const Duration(seconds: 2));
       } catch (_) {}
