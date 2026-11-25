@@ -1,7 +1,7 @@
-// CyShineMusic iOS —— 桌面音乐小组件桥。
+// MuyinMusic iOS —— 桌面音乐小组件桥。
 //
 // 与 Android 的 packages/music_home_widget 契约一致：
-//   MethodChannel cy_shine_music/home_widget
+//   MethodChannel muyin_music/home_widget
 //     Dart -> 原生：ready / openApp / update{trackId,title,artist,cover,headers}
 //                   updatePlayback{playing,loading}
 //     原生 -> Dart：control(action: toggle|previous|next) / openPlayer
@@ -11,7 +11,7 @@
 //   iOS 对应物是 WidgetKit Extension，跑在**独立进程**里，主 App 无法直接驱动它，
 //   只能通过 App Group 的 UserDefaults 共享数据 + WidgetCenter.reloadAllTimelines()
 //   通知刷新。因此这里的职责是：把 Dart 推来的播放状态写进 App Group，并触发刷新。
-//   真正的卡片 UI 在 ios/CyShineMusicWidget/ 里。
+//   真正的卡片 UI 在 ios/MuyinMusicWidget/ 里。
 //
 // 注意：lib/features/player/music_home_widget_service.dart 目前有
 // `if (!Platform.isAndroid) return;` 守卫，所以主 App 不会调用这里。
@@ -24,14 +24,14 @@ import WidgetKit
 
 public final class MusicHomeWidgetPlugin: NSObject, FlutterPlugin {
 
-  static let channelName = "cy_shine_music/home_widget"
+  static let channelName = "muyin_music/home_widget"
 
   /// 主 App 与 Widget Extension 共用的 App Group。
-  /// 必须与 ios/Runner/Runner.entitlements、ios/CyShineMusicWidget/*.entitlements
+  /// 必须与 ios/Runner/Runner.entitlements、ios/MuyinMusicWidget/*.entitlements
   /// 以及 Xcode 里两个 target 的 App Groups capability 完全一致。
-  static let appGroupIdentifier = "group.com.cyshine.music"
+  static let appGroupIdentifier = "group.com.muyin.muyinmusic"
 
-  /// App Group 内共享的键，Widget Extension 侧读同名键（见 CyShineWidgetStore.swift）。
+  /// App Group 内共享的键，Widget Extension 侧读同名键（见 MuyinWidgetStore.swift）。
   enum SharedKey {
     static let trackId = "widget.trackId"
     static let title = "widget.title"

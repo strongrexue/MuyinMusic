@@ -2,11 +2,11 @@ plugins {
     id 'com.android.library'
 }
 
-group = 'com.cyshine.music_home_widget'
+group = 'com.muyin.music_home_widget'
 version = '0.1.0'
 
 android {
-    namespace = 'com.cyshine.music_home_widget'
+    namespace = 'com.muyin.music_home_widget'
     compileSdk = 35
 
     compileOptions {

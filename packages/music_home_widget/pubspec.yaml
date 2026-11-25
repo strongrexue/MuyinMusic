@@ -16,7 +16,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.cyshine.music_home_widget
+        package: com.muyin.music_home_widget
         pluginClass: MusicHomeWidgetPlugin
       ios:
         pluginClass: MusicHomeWidgetPlugin

@@ -1,18 +1,18 @@
 Pod::Spec.new do |s|
   s.name             = 'music_home_widget'
   s.version          = '0.1.0'
-  s.summary          = 'iOS home-screen music card bridge for CyShineMusic.'
+  s.summary          = 'iOS home-screen music card bridge for MuyinMusic.'
   s.description      = <<-DESC
 iOS 侧桌面音乐卡片桥。与 Android 的 packages/music_home_widget 保持相同的
-MethodChannel 契约（cy_shine_music/home_widget）。
+MethodChannel 契约（muyin_music/home_widget）。
 
 架构差异：Android 用 AppWidget 由主 App 直接渲染；iOS 用 WidgetKit Extension
 （独立进程），主 App 把播放状态写入 App Group UserDefaults 并触发
-WidgetCenter 刷新，卡片 UI 在 ios/CyShineMusicWidget/ 里读取同一份数据。
+WidgetCenter 刷新，卡片 UI 在 ios/MuyinMusicWidget/ 里读取同一份数据。
                        DESC
-  s.homepage         = 'https://github.com/KevinllBin/CyShineMusic'
+  s.homepage         = 'https://github.com/KevinllBin/MuyinMusic'
   s.license          = { :type => 'MIT' }
-  s.author           = { 'CyShineMusic iOS port' => 'noreply@localhost' }
+  s.author           = { 'MuyinMusic iOS port' => 'noreply@localhost' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*.swift'
   s.frameworks       = 'WidgetKit'
