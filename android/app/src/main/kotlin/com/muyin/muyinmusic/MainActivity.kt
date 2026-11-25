@@ -256,20 +256,6 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "muyin_music/xiaoai_monitor")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "start" -> {
-                        XiaoaiMonitorService.start(applicationContext)
-                        result.success(null)
-                    }
-                    "stop" -> {
-                        XiaoaiMonitorService.stop(applicationContext)
-                        result.success(null)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, appTaskChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

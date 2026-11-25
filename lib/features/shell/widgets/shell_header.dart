@@ -145,9 +145,6 @@ class ShellHeader extends ConsumerWidget {
     if (location == '/songs/search') return '搜索本地歌曲';
     if (location == '/settings/sources') return '音源管理';
     if (location == '/settings/webdav') return 'WebDAV 同步';
-    if (location == '/settings/xiaomi') return '小爱音箱';
-    if (location == '/settings/xiaomi-login') return '登录小米账号';
-    if (location == '/settings/xiaomi-devices') return '选择音箱';
     if (location == '/settings/equalizer') return '均衡器';
     switch (location) {
       case '/history':

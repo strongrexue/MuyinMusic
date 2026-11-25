@@ -73,9 +73,6 @@ bool isPlayerReturnLocation(String location) {
     '/settings' ||
     '/settings/sources' ||
     '/settings/webdav' ||
-    '/settings/xiaomi' ||
-    '/settings/xiaomi-login' ||
-    '/settings/xiaomi-devices' ||
     '/settings/equalizer' ||
     '/debug' => true,
     _ => false,

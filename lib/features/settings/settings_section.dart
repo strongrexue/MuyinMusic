@@ -59,9 +59,6 @@ String? settingsParentLocation(String location) {
   return switch (location) {
     '/settings/sources' => SettingsSection.network.location,
     '/settings/webdav' => SettingsSection.sync.location,
-    '/settings/xiaomi' => '/settings',
-    '/settings/xiaomi-login' => '/settings/xiaomi',
-    '/settings/xiaomi-devices' => '/settings/xiaomi',
     '/settings/equalizer' => SettingsSection.playback.location,
     '/debug' => SettingsSection.debug.location,
     _ => null,
