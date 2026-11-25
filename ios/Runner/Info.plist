@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>沐音</string>
+	<string>胖虎音乐</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>cy_shine_music</string>
+	<string>胖虎音乐</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -53,9 +53,11 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.cyshine.music</string>
+			<string>com.muyin.muyinmusic</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>muyinmusic</string>
+				<!-- 旧 scheme 保留注册，兼容已分享出去的历史深链。 -->
 				<string>cyshinemusic</string>
 			</array>
 		</dict>
