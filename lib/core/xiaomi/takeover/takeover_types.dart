@@ -91,6 +91,7 @@ abstract final class TakeoverStepName {
   static const paused = 'paused';
   static const continued = 'continued';
   static const talked = 'talked';
+  static const restarted = 'restarted';
   static const resume = 'resume';
   static const stopped = 'stopped';
   static const ended = 'ended';

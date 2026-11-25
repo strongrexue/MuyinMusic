@@ -60,7 +60,7 @@ class TakeoverWatcher {
     var pausedAtMs = 0;
     var resumes = 0;
     var lastOkMs = _clock.nowMs();
-    var restartArmed = true;
+    int? handledRestartAt;
 
     void pauseClock(int whenMs) {
       if (!sounding) return;
@@ -224,11 +224,33 @@ class TakeoverWatcher {
       }
       if (_clock.nowMs() >= limitMs) return TakeoverEnd.other;
 
-      // 音箱从头又取了一遍：播完了（或回拖，见 <80% 分支）。
-      if (restartArmed && track.restarted) {
-        restartArmed = false;
-        if (length > 0 && at() < length * 8 ~/ 10) {
-          playClock(0, _clock.nowMs() + tm.startLag.inMilliseconds);
+      // 音箱从头重取（流层 restart 事件：宽限期外、无请求在途
+      // 的从头请求）：按重取时刻的播放位置分流。未到 80% 且
+      // 上一请求未供满 90% → 中途断流后音箱自愈从头重播，时钟
+      // 按重取时刻重同步到 0 并记 step——1.3.29《体面》实证：
+      // 断流后音箱自取重播，旧逻辑只认 restartGap（9/10 时长）
+      // 的循环信号，中途重取既无日志也无重同步，时钟仍按原
+      // 时间轴走，到 length+slack 误判播完、歌没放完就切走。
+      // 已近尾声 → 单曲循环重取，走 finish 停循环；歌尾重取
+      // 若落在 slack 窗口内会先于时钟判尾触发，与蓝本 ended
+      // 定时器/Restarted 竞速同理，finish 是同一个。时钟判尾
+      // 是给「播完不重取」型结尾的兜底（见状态评估段）。
+      final restartAt = track.restartAtMs;
+      if (restartAt != null && restartAt != handledRestartAt) {
+        handledRestartAt = restartAt;
+        final posAtRestart = sounding
+            ? base + math.max(0, restartAt - anchor)
+            : base;
+        final nearEnd =
+            (length > 0 && posAtRestart >= length * 8 ~/ 10) ||
+            track.restartServedRatio >= 0.9;
+        if (!nearEnd) {
+          playClock(0, restartAt + tm.startLag.inMilliseconds);
+          run.step(
+            TakeoverStepName.restarted,
+            true,
+            '音箱从头重取，时钟重同步',
+          );
           continue;
         }
         return finish('音箱又从头放了');
@@ -341,7 +363,13 @@ class TakeoverWatcher {
         if (foreign >= 12) {
           return (await over(TakeoverStepName.stopped, '音箱在放别的'))!;
         }
-        if (byUser || talkedUntilMs == 0) {
+        // 偏离蓝本一处（断流实证驱动）：蓝本此分支只管谈话恢复，
+        // 无谈话的静默靠墙钟 ended 定时器兜底判尾；我们的发声
+        // 时钟在暂停后冻结、没有墙钟兜底，推流中途死亡（条目
+        // lost + 设备不在播、无人说话）会够不到 again、躺平到
+        // maxPause。故把 lost 并入恢复分支的入口条件：用户明确
+        // 暂停（byUser）与让行（yield_）仍旧只等，不抢播。
+        if (byUser || yield_ || (talkedUntilMs == 0 && !lost)) {
           if (now - pausedAtMs > tm.maxPause.inMilliseconds) {
             return (await over(TakeoverStepName.stopped, '停了很久，不再等'))!;
           }

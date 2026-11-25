@@ -224,6 +224,8 @@ class FakeStreamHandle implements StreamHandle {
   bool fetchedValue = false;
   int fetchedAtMsValue = 0;
   bool restartedValue = false;
+  int? restartAtMsValue;
+  double restartServedRatioValue = -1;
   bool lostValue = false;
   int fetchCountValue = 0;
 
@@ -236,6 +238,10 @@ class FakeStreamHandle implements StreamHandle {
   int get fetchedAtMs => fetchedAtMsValue;
   @override
   bool get restarted => restartedValue;
+  @override
+  int? get restartAtMs => restartAtMsValue;
+  @override
+  double get restartServedRatio => restartServedRatioValue;
   @override
   bool get lost => lostValue;
   @override

@@ -54,6 +54,16 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
   /// 一次点歌最多尝试解析的搜索候选数。
   static const _maxCandidates = 5;
 
+  /// 同分时的平台偏好（只作 tie-break，不压过标题/歌手匹配分）：
+  /// 酷我优先。依据是 2026-11-25 同晚对照——TrackFerry 的洛雪
+  /// 路由落酷我且全程稳定，我们聚合搜索同分时 QQ 靠合并原序
+  /// 胜出、当晚 4 次推播全在 QQ 320k 链上中途断流（CDN 慢连接
+  /// 掐断）。蓝本侧其洛雪后端返回顺序里酷我居前、按序逐个
+  /// 尝试，与此对齐。注意我们的聚合搜索是 App 内多源合并、
+  /// 与蓝本的洛雪后端不是同一实现，此偏好只复刻其结果顺序。
+  static int _sourceRank(MusicSource source) =>
+      source == MusicSource.kw ? 0 : 1;
+
   @override
   Future<ResolvedSong?> resolveTopOne(SpeakerResolveRequest request) async {
     final deadline = _now().add(_resolveBudget);
@@ -91,13 +101,18 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
     }
     final candidates = [...response.list];
     if (candidates.isEmpty) return null;
-    // 按 hint 打分排序（稳定排序，同分保持搜索原序）。
+    // 按 hint 打分排序（稳定排序）；同分先按平台偏好、再保持
+    // 搜索原序。
     final scored = [
       for (var i = 0; i < candidates.length; i++)
         (index: i, info: candidates[i], score: _score(candidates[i], request)),
     ]..sort((a, b) {
       final byScore = b.score.compareTo(a.score);
-      return byScore != 0 ? byScore : a.index.compareTo(b.index);
+      if (byScore != 0) return byScore;
+      final bySource = _sourceRank(
+        a.info.source,
+      ).compareTo(_sourceRank(b.info.source));
+      return bySource != 0 ? bySource : a.index.compareTo(b.index);
     });
 
     var tried = 0;
@@ -142,6 +157,7 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
       final url = result.url.trim();
       if (url.isEmpty) continue;
       if (!isSpeakerPlayableUrl(url)) continue;
+      int? probedDurationMs;
       try {
         final probe = await _urlProbe.probe(
           url,
@@ -151,6 +167,7 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
           _onLog?.call('speaker probe rejected ${probe.rejectReason}');
           continue;
         }
+        probedDurationMs = probe.estimatedDurationMs;
       } catch (e) {
         _onLog?.call('speaker probe rejected error: $e');
         continue;
@@ -159,7 +176,11 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
         url: url,
         title: music.name,
         artist: music.singer,
-        durationMs: parseMusicIntervalMs(music.interval),
+        // 时长链：候选元数据 interval 优先；缺失时用探测对实际
+        // 文件的实测估算兜底（蓝本 check 的 audio.Duration 口径：
+        // 实测时长驱动 ended 判尾）。两者皆无则 watch 只能靠
+        // restarted 判尾，循环开头会漏出声（1.3.29 实证）。
+        durationMs: parseMusicIntervalMs(music.interval) ?? probedDurationMs,
         sourceName: music.source.label,
         qualityLabel: quality.code,
       );

@@ -63,6 +63,17 @@ abstract interface class StreamHandle {
   /// 首次取流后隔 [restartGap] 再来一次从头请求即为真。
   bool get restarted;
 
+  /// 最近一次「实质重取」事件的时刻（毫秒）：首次取流宽限期
+  /// （10 秒，覆盖启动期探测/重连）之后、无其它请求在途时又来
+  /// 从头请求。包含中途断流后音箱自愈从头重播与播完单曲循环
+  /// 两种情形，由 watch 按重取时刻的播放位置分流。无为 null。
+  int? get restartAtMs;
+
+  /// [restartAtMs] 事件时上一请求已供字节占总字节的比例
+  /// （0..1），总长未知为 -1。watch 判「是否近尾声」的第二依据
+  /// （时长元数据缺失时靠它区分循环重取与中途自愈）。
+  double get restartServedRatio;
+
   /// 音箱是否没取完就断了：有过请求、当前无请求在途、
   /// 已取字节少于总字节（蓝本 `Handle.Lost`）。
   bool get lost;

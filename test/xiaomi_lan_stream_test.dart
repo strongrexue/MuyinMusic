@@ -190,15 +190,21 @@ void main() {
     expect(result.headers.contentType?.mimeType, 'audio/mpeg');
   });
 
-  test('上游忽略 Range 恒 200 → 代理回 200 全量', () async {
+  test('上游忽略 Range 恒 200 → spool 吸收：Range 由本地文件作答 206', () async {
+    // 旧透传语义是把上游的 200 全量原样回给音箱；spool 化后
+    // 下载器恒全量取回整文件，音箱的 Range 在文件侧正确作答
+    // （与文件条目/中段条目的 Range 语义一致）。
     final handle = await publishSong(path: '/norange.mp3');
     final result = await _httpGet(
       handle.url,
       headers: {HttpHeaders.rangeHeader: 'bytes=100-199'},
     );
-    expect(result.statusCode, 200);
-    expect(result.bytes, songBytes);
-    expect(result.headers.value(HttpHeaders.contentRangeHeader), isNull);
+    expect(result.statusCode, 206);
+    expect(result.bytes, songBytes.sublist(100, 200));
+    expect(
+      result.headers.value(HttpHeaders.contentRangeHeader),
+      'bytes 100-199/${songBytes.length}',
+    );
   });
 
   test('未知 token → 404', () async {

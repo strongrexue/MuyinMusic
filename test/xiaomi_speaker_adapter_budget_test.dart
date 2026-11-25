@@ -9,11 +9,12 @@ import 'package:muyin_music/core/xiaomi/panghu_speaker_adapter.dart';
 import 'package:muyin_music/core/xiaomi/speaker_url_probe.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_resolver.dart';
 
-MusicInfo fakeSong(String id) => MusicInfo(
+MusicInfo fakeSong(String id, [MusicSource source = MusicSource.tx]) =>
+    MusicInfo(
   id: id,
   name: '晴天',
   singer: '周杰伦',
-  source: MusicSource.tx,
+  source: source,
   interval: '04:29',
   meta: const MusicMeta(
     songId: 'song-1',
@@ -88,6 +89,14 @@ class RejectingProbe extends SpeakerUrlProbe {
   }
 }
 
+/// 探测一律放行的假探测器。
+class AcceptingProbe extends SpeakerUrlProbe {
+  @override
+  Future<ProbeResult> probe(String url, {int? expectedDurationMs}) async {
+    return const ProbeResult(ok: true, estimatedDurationMs: 269000);
+  }
+}
+
 void main() {
   group('PanghuSpeakerSongResolver 解析预算', () {
     test('预算耗尽后不再试新候选，如实未命中', () async {
@@ -135,6 +144,28 @@ void main() {
       expect(result, isNull);
       expect(urlResolver.resolveCalls, 3);
       expect(probe.probeCalls, 3);
+    });
+
+    test('同分候选优先酷我（与 TrackFerry 洛雪路由对齐）', () async {
+      // 同名同歌手同分：QQ 在搜索原序靠前，仍应先试酷我并命中。
+      final api = FakeMusicApi([
+        fakeSong('tx-1', MusicSource.tx),
+        fakeSong('kw-1', MusicSource.kw),
+      ]);
+      final urlResolver = FakeUrlResolver();
+      final resolver = PanghuSpeakerSongResolver(
+        api: api,
+        urlResolver: urlResolver,
+        urlProbe: AcceptingProbe(),
+        resolveBudget: const Duration(seconds: 8),
+        now: () => DateTime(2026, 1, 1, 12),
+      );
+      final result = await resolver.resolveTopOne(
+        const SpeakerResolveRequest(keyword: '周杰伦晴天'),
+      );
+      expect(result, isNotNull);
+      expect(result!.url, 'http://example.com/kw-1.mp3');
+      expect(urlResolver.resolveCalls, 1); // 酷我一次命中，没轮到 QQ
     });
   });
 }

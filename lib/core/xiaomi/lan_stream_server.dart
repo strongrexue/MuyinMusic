@@ -74,6 +74,7 @@ class _UpstreamSource {
 class _StreamEntry implements StreamHandle {
   _StreamEntry({
     required this.server,
+    required this.token,
     required this.url,
     required this.upstreamUrl,
     required this.labelText,
@@ -88,6 +89,9 @@ class _StreamEntry implements StreamHandle {
   });
 
   final LanStreamServer server;
+
+  /// URL 里的 token（spool 临时文件命名用）。
+  final String token;
 
   @override
   final String url;
@@ -118,6 +122,16 @@ class _StreamEntry implements StreamHandle {
   int? _fetchedAtMsField;
   int _fetchCountField = 0;
 
+  /// 实质重取事件（watch 时钟重同步用）：宽限期外、无请求
+  /// 在途时的从头请求时刻与当时上一请求的已供比例快照。
+  int? restartAtMsField;
+  double restartServedRatioField = -1;
+
+  /// 全速预读 spool 状态：首个请求触发后台整文件下载到临时
+  /// 文件，后续请求从文件按前沿供流（见 [_Spool]）。
+  bool spoolStarted = false;
+  _Spool? spool;
+
   @override
   String get label => labelText;
 
@@ -137,6 +151,12 @@ class _StreamEntry implements StreamHandle {
   bool get restarted => restartedFlag;
 
   @override
+  int? get restartAtMs => restartAtMsField;
+
+  @override
+  double get restartServedRatio => restartServedRatioField;
+
+  @override
   bool get lost =>
       served.requests > 0 &&
       !served.open &&
@@ -146,6 +166,55 @@ class _StreamEntry implements StreamHandle {
   @override
   Future<({StreamHandle handle, int startMs})?> resume(int atMs) =>
       server._resume(this, atMs);
+
+  /// 删除 spool 临时文件（条目过期/服务停止时 best-effort）。
+  void deleteSpoolFile() {
+    final file = spool?.file;
+    if (file == null) return;
+    try {
+      file.deleteSync();
+    } catch (_) {
+      // 已不存在等，忽略。
+    }
+  }
+}
+
+/// 预读 spool：一首歌的整文件后台下载状态。首个请求触发后，
+/// 下载器以网络全速（而非音箱约 40KB/s 的消费速率）把整文件
+/// 拉到临时文件，[frontier] 是已落盘字节数；供流从文件按前沿
+/// tail-follow，上游连接的存续与音箱请求彻底解耦——CDN 按
+/// 慢速连接掐断、网络秒级抖动都只影响下载器（其内部 steady
+/// 自行重开续传），对音箱不可见。蓝本 stream 是消费速率透传
+/// （io.Copy），无此层；这是手机侧自研鲁棒性（手机 Wi-Fi +
+/// 电池环境与有线 NAS 不同），非蓝本对齐项。
+class _Spool {
+  _Spool(this.file);
+
+  final File file;
+
+  /// 总字节数；上游响应头到达前为 -1（无总长上游则一直 -1，
+  /// done 后以 [frontier] 为准）。
+  int total = -1;
+  int frontier = 0;
+  bool done = false;
+  Object? error;
+  final Completer<void> _ready = Completer<void>();
+
+  /// 总长已知（或下载已失败）时完成。
+  Future<void> get ready => _ready.future;
+
+  void markReady() {
+    if (!_ready.isCompleted) _ready.complete();
+  }
+}
+
+/// spool 下载源：总长 + 字节流 + 收尾。
+class _SpoolSource {
+  _SpoolSource({required this.total, required this.body, required this.close});
+
+  final int total;
+  final Stream<List<int>> body;
+  final void Function() close;
 }
 
 /// 局域网流服务：把平台直链在本机起一个无签名、带 token 的 HTTP 地址，
@@ -189,7 +258,12 @@ class LanStreamServer implements SpeakerStreamProxy {
   final int _basePort;
   final int Function() _nowMs;
   final Future<String?> Function() _lanIpLookup;
-  final void Function(String message)? _onLog;
+  void Function(String message)? _onLog;
+
+  /// 诊断日志汇：宿主（接管控制器）在构造后接线，把推流事件
+  /// 并入接管诊断日志。此前生产环境从没接上，断流在推流层
+  /// 零证据（1.3.29《后来》中途断流实证）。
+  set onLog(void Function(String message)? value) => _onLog = value;
 
   HttpServer? _server;
   final Map<String, _StreamEntry> _entries = {};
@@ -226,6 +300,9 @@ class LanStreamServer implements SpeakerStreamProxy {
   Future<void> stop() async {
     final server = _server;
     _server = null;
+    for (final entry in _entries.values) {
+      entry.deleteSpoolFile();
+    }
     _entries.clear();
     if (server != null) {
       await server.close(force: true);
@@ -289,9 +366,14 @@ class LanStreamServer implements SpeakerStreamProxy {
     ].join();
     final now = _nowMs();
     // 蓝本 register：publish 时顺带清理过期条目。
-    _entries.removeWhere((_, entry) => now > entry.expiresAtMs);
+    _entries.removeWhere((_, entry) {
+      if (now <= entry.expiresAtMs) return false;
+      entry.deleteSpoolFile();
+      return true;
+    });
     final entry = _StreamEntry(
       server: this,
+      token: token,
       url: 'http://$ip:${_server!.port}/stream/$token.mp3',
       upstreamUrl: upstreamUrl,
       labelText: labelText,
@@ -312,6 +394,11 @@ class LanStreamServer implements SpeakerStreamProxy {
   static int _restartGapMs(int durationMs) =>
       durationMs > 0 ? durationMs * 9 ~/ 10 : 15 * 1000;
 
+  /// 实质重取事件的宽限：首次取流后 10 秒内的从头请求视为
+  /// 启动期探测/重连（蓝本 restartGap 注释要防的正是这类），
+  /// 不记事件；宽限外的从头请求只可能是播完循环或断流自愈。
+  static const int _restartNoticeMs = 10 * 1000;
+
   static bool _fromStart(String? range) {
     if (range == null) return true;
     return range.replaceAll(' ', '').startsWith('bytes=0-');
@@ -328,6 +415,7 @@ class LanStreamServer implements SpeakerStreamProxy {
     final entry = match == null ? null : _entries[match.group(1)!];
     // 蓝本：条目不存在或已过期 → 404（过期判定用请求时刻）。
     if (entry == null || _nowMs() > entry.expiresAtMs) {
+      _log('stream fetch rejected: path=${request.uri.path}');
       response.statusCode = HttpStatus.notFound;
       await response.close();
       return;
@@ -345,14 +433,33 @@ class LanStreamServer implements SpeakerStreamProxy {
         'stream fetched: label=${entry.labelText} count=1 '
         'method=${request.method} range=${range ?? ''}',
       );
-    } else if (!entry.restartedFlag &&
-        _fromStart(range) &&
-        now - entry._fetchedAtMsField! >= _restartGapMs(entry.durationMs)) {
-      entry.restartedFlag = true;
-      _log(
-        'stream restarted: label=${entry.labelText} '
-        'count=${entry._fetchCountField + 1} method=${request.method}',
-      );
+    } else {
+      if (!entry.restartedFlag &&
+          _fromStart(range) &&
+          now - entry._fetchedAtMsField! >= _restartGapMs(entry.durationMs)) {
+        entry.restartedFlag = true;
+        _log(
+          'stream restarted: label=${entry.labelText} '
+          'count=${entry._fetchCountField + 1} method=${request.method}',
+        );
+      }
+      // 实质重取事件（与上面的 gap 标志独立）：宽限期外、无
+      // 请求在途时的从头请求。快照上一请求已供比例供 watch
+      // 分流（近满=循环重取、未满=中途自愈）。1.3.29《体面》
+      // 的自愈重取在约 40 秒处发生，被 9/10 时长的 gap 吞掉，
+      // watch 既无日志也无时钟重同步——本事件补上这个信号。
+      if (_fromStart(range) &&
+          !entry.served.open &&
+          now - entry._fetchedAtMsField! >= _restartNoticeMs &&
+          entry.restartAtMsField != now) {
+        entry.restartAtMsField = now;
+        final t = entry.served.total;
+        entry.restartServedRatioField = t > 0 ? entry.served.bytes / t : -1;
+        _log(
+          'stream restart noticed: label=${entry.labelText} '
+          'served=${entry.served.bytes}/$t',
+        );
+      }
     }
     entry._fetchCountField++;
     final count = entry._fetchCountField;
@@ -484,12 +591,19 @@ class LanStreamServer implements SpeakerStreamProxy {
       fresh = null;
     }
     if (fresh == null || fresh.isEmpty || fresh == entry.upstreamUrl) {
+      _log(
+        'stream refresh failed: label=${entry.labelText} '
+        'range=${range ?? ''}',
+      );
       if (rejected != null) return rejected;
       throw failure ?? StateError('upstream open failed');
     }
     rejected?.close();
     entry.upstreamUrl = fresh;
-    _log('stream upstream refreshed: label=${entry.labelText}');
+    _log(
+      'stream upstream refreshed: label=${entry.labelText} '
+      'range=${range ?? ''}',
+    );
     return _openAgain(fresh, range);
   }
 
@@ -565,79 +679,258 @@ class LanStreamServer implements SpeakerStreamProxy {
     }
   }
 
-  // —— 转供（蓝本 proxy + steady）——
+  // —— 转供（spool 预读 + 文件供流）——
 
+  /// 普通条目供流：首个请求触发 spool 下载，之后所有请求
+  /// （含本次）都从 spool 文件作答。偏离蓝本说明：蓝本 proxy
+  /// 是 io.Copy 消费速率透传；我们 1.3.29 一晚 4 次中途卡顿
+  /// 全在透传链上（上游按音箱约 40KB/s 的慢速下载被 CDN
+  /// 掐断/网络抖动直接穿透到音箱），故改为全速预读。
   Future<void> _proxy(HttpRequest request, _StreamEntry entry, int count) async {
-    final response = request.response;
-    final range = request.headers.value(HttpHeaders.rangeHeader);
-    _UpstreamSource holder;
-    try {
-      holder = await _openEntry(entry, range);
-    } catch (e) {
-      _log('stream proxy open failed: $e');
-      _beginServed(entry, count, HttpStatus.badGateway);
-      response.statusCode = HttpStatus.badGateway;
-      await response.close();
-      return;
-    }
-    final upstream = holder.response;
-    if (upstream.statusCode >= 400) {
-      try {
-        await upstream.drain<void>();
-      } catch (_) {}
-      holder.close();
-      _beginServed(entry, count, HttpStatus.badGateway);
-      response.statusCode = HttpStatus.badGateway;
-      await response.close();
-      return;
-    }
-    // 蓝本 proxy：只透传 Content-Length / Content-Range / Accept-Ranges
-    // 三个头 + 上游状态码原样；Cache-Control: no-store 已在 _handle 设；
-    // Content-Type 固定 audio/mpeg——我们的候选都经 MP3 探测，蓝本
-    // 按首字节嗅探类型的 sniffer 分支不适用，故不移植嗅探。
-    final contentRange = upstream.headers.value(
-      HttpHeaders.contentRangeHeader,
+    _startProxySpool(entry);
+    await _serveSpool(request, entry, count, entry.spool!);
+  }
+
+  /// 启动条目的 spool 下载（只启动一次）。下载器独立于任何
+  /// 音箱请求存活：音箱断开/重取都不影响它把整文件拉完。
+  void _startSpool(
+    _StreamEntry entry,
+    Future<_SpoolSource> Function() open,
+  ) {
+    if (entry.spoolStarted) return;
+    entry.spoolStarted = true;
+    final spool = _Spool(
+      File('${Directory.systemTemp.path}/muyin_spool_${entry.token}.bin'),
     );
-    final acceptRanges = upstream.headers.value(HttpHeaders.acceptRangesHeader);
-    if (contentRange != null) {
-      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    entry.spool = spool;
+    // 先建空文件：供流侧在 ready 后立即 open 读，不能等下载器
+    // 建文件（竞态会让首个请求读到不存在的文件）。
+    try {
+      spool.file.createSync();
+    } catch (_) {}
+    unawaited(() async {
+      RandomAccessFile? raf;
+      _SpoolSource? src;
+      try {
+        src = await open();
+        spool.total = src.total;
+        spool.markReady();
+        raf = await spool.file.open(mode: FileMode.write);
+        await for (final chunk in src.body) {
+          if (chunk.isEmpty) continue;
+          await raf.writeFrom(chunk);
+          spool.frontier += chunk.length;
+        }
+        spool.done = true;
+        _log(
+          'stream spooled: label=${entry.labelText} '
+          'bytes=${spool.frontier}',
+        );
+      } catch (e) {
+        spool.error = e;
+        spool.markReady();
+        _log('stream spool failed: label=${entry.labelText} $e');
+      } finally {
+        try {
+          src?.close();
+        } catch (_) {}
+        try {
+          await raf?.close();
+        } catch (_) {}
+      }
+    }());
+  }
+
+  /// 普通条目的下载源：整文件 GET（不带 Range，音箱的 Range
+  /// 由 spool 文件侧作答）+ steady 断流续传（其 reopen/refresh/
+  /// lost 日志即下载侧证据）。上游 ≥400 按失败处理。
+  void _startProxySpool(_StreamEntry entry) {
+    _startSpool(entry, () async {
+      final holder = await _openEntry(entry, null);
+      if (holder.response.statusCode >= 400) {
+        final code = holder.response.statusCode;
+        try {
+          await holder.response.drain<void>();
+        } catch (_) {}
+        holder.close();
+        throw StateError('upstream HTTP $code');
+      }
+      final steady = _steadyParams(holder.response);
+      if (steady == null) {
+        // 无总长（chunked 上游）：裸流下载，done 后以 frontier
+        // 为总长。QQ 等平台均带 Content-Length，此路罕用。
+        return _SpoolSource(
+          total: -1,
+          body: holder.response,
+          close: holder.close,
+        );
+      }
+      return _SpoolSource(
+        total: steady.$3,
+        body: _steadyChunks(
+          entry: entry,
+          initial: holder,
+          start: steady.$1,
+          end: steady.$2,
+          total: steady.$3,
+        ),
+        close: () {},
+      );
+    });
+  }
+
+  /// 中段条目的下载源：虚拟文件全量 = head + 上游自 off 起的
+  /// steady 流（组成与旧 _middle 的 body 相同，只是改为整文件
+  /// 一次性下载、请求侧统一走 spool 文件作答）。
+  void _startMiddleSpool(_StreamEntry entry) {
+    _startSpool(entry, () async {
+      final total = entry.virtualTotal!;
+      final headLen = entry.head!.length;
+      final srcFrom = entry.off;
+      final srcTo = entry.off + total - headLen - 1;
+      _UpstreamSource? holder;
+      Stream<List<int>>? tail;
+      if (srcTo >= srcFrom) {
+        final (h, srcTotal) = await _sourceRange(entry, srcFrom, srcTo);
+        holder = h;
+        tail = _steadyChunks(
+          entry: entry,
+          initial: h,
+          start: srcFrom,
+          end: srcTo + 1,
+          total: srcTotal,
+        );
+      }
+      final head = entry.head!;
+      Stream<List<int>> body() async* {
+        if (headLen > 0) yield head;
+        if (tail != null) yield* tail;
+      }
+
+      return _SpoolSource(
+        total: total,
+        body: body(),
+        close: holder?.close ?? () {},
+      );
+    });
+  }
+
+  /// 从 spool 文件作答一个请求（200/206/416/HEAD 语义与蓝本
+  /// middle/serve 一致）：Range 段未落盘时等前沿推进；整文件
+  /// GET 走 tail-follow（边下边供，速率由音箱决定、缓冲深度
+  /// = 已下载未消费字节，随下载推进单调增长，整文件下完后
+  /// 剩余播放全程本地供流）。下载失败/文件短于声明时截断
+  /// 关闭——音箱会自行重取，重取仍走本文件（已落盘部分在）。
+  Future<void> _serveSpool(
+    HttpRequest request,
+    _StreamEntry entry,
+    int count,
+    _Spool spool,
+  ) async {
+    final response = request.response;
+    // 等总长（首个上游响应头）或下载失败。
+    try {
+      await spool.ready.timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      // 用已知状态继续判定（下方按 error/frontier 收尾）。
     }
-    if (acceptRanges != null) {
-      response.headers.set(HttpHeaders.acceptRangesHeader, acceptRanges);
+    if (spool.total < 0 && spool.error != null) {
+      _beginServed(entry, count, HttpStatus.badGateway);
+      response.statusCode = HttpStatus.badGateway;
+      await response.close();
+      return;
     }
-    if (upstream.contentLength >= 0) {
-      response.contentLength = upstream.contentLength;
+    if (spool.total < 0) {
+      // 无总长上游：等下载完成以 frontier 为总长（上限 20 秒）。
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (!spool.done && spool.error == null) {
+        if (DateTime.now().isAfter(deadline)) break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      if (spool.error != null || spool.frontier <= 0) {
+        _beginServed(entry, count, HttpStatus.badGateway);
+        response.statusCode = HttpStatus.badGateway;
+        await response.close();
+        return;
+      }
     }
-    response.statusCode = upstream.statusCode;
+    final total = spool.total >= 0 ? spool.total : spool.frontier;
+    var from = 0;
+    var to = total - 1;
+    var code = HttpStatus.ok;
+    String? contentRange;
+    final range = _parseRangeHeader(
+      request.headers.value(HttpHeaders.rangeHeader),
+      total,
+    );
+    if (range != null) {
+      from = range.$1;
+      to = range.$2;
+      if (from > to) {
+        response.headers.set(HttpHeaders.contentRangeHeader, 'bytes */$total');
+        _beginServed(entry, count, HttpStatus.requestedRangeNotSatisfiable);
+        response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        await response.close();
+        return;
+      }
+      code = HttpStatus.partialContent;
+      contentRange = 'bytes $from-$to/$total';
+    }
     _beginServed(
       entry,
       count,
-      upstream.statusCode,
+      code,
       contentRange: contentRange,
-      contentLength: upstream.contentLength,
+      contentLength: total,
     );
+    response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+    if (contentRange != null) {
+      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    }
+    response.contentLength = to - from + 1;
+    response.statusCode = code;
     if (request.method == 'HEAD') {
-      // HEAD 不走 steady（蓝本 proxy 同）。
-      try {
-        await upstream.drain<void>();
-      } catch (_) {}
-      holder.close();
       await response.close();
       return;
     }
-    // 蓝本 steady 门槛：200 有 Content-Length 或 206 有 Content-Range。
-    Stream<List<int>> body = upstream;
-    final steady = _steadyParams(upstream);
-    if (steady != null) {
-      body = _steadyChunks(
-        entry: entry,
-        initial: holder,
-        start: steady.$1,
-        end: steady.$2,
-        total: steady.$3,
-      );
+    RandomAccessFile? raf;
+    try {
+      raf = await spool.file.open(mode: FileMode.read);
+      var cursor = from;
+      while (cursor <= to) {
+        if (cursor < spool.frontier) {
+          final n = min(to, spool.frontier - 1) - cursor + 1;
+          await raf.setPosition(cursor);
+          final data = await raf.read(n);
+          if (data.isEmpty) {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+            continue;
+          }
+          response.add(data);
+          _addServed(entry, count, data.length);
+          await response.flush();
+          cursor += data.length;
+        } else if (spool.done || spool.error != null) {
+          // 文件短于声明/下载失败：截断关闭，音箱自行重取。
+          // 注：Dart HttpServer 在 contentLength 未满足时 close
+          // 会丢弃已 add 的 body，音箱可能只收到中止信号——
+          // 与旧透传路径同行为，不影响其重取决策。
+          break;
+        } else {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+    } catch (_) {
+      // 音箱断开等：静默收尾（served 统计已记录，lost 由
+      // watch 判定；下载器不受影响继续拉完）。
+    } finally {
+      try {
+        await raf?.close();
+      } catch (_) {}
+      try {
+        await response.close();
+      } catch (_) {}
     }
-    await _pump(request, entry, count, body, closeSource: holder);
   }
 
   /// steady 的 (起点, 终点(不含), 总长)；不满足门槛返回 null。
@@ -674,7 +967,10 @@ class LanStreamServer implements SpeakerStreamProxy {
       }
       await response.close();
     } catch (e) {
-      _log('stream proxy failed: $e');
+      _log(
+        'stream proxy failed: label=${entry.labelText} '
+        'served=${entry.served.bytes}/${entry.served.total} $e',
+      );
       if (!wroteBody) {
         try {
           response.statusCode = HttpStatus.badGateway;
@@ -740,6 +1036,10 @@ class LanStreamServer implements SpeakerStreamProxy {
           yield chunk;
         }
         if (!broke) break;
+        _log(
+          'stream reopen: label=${entry.labelText} '
+          'off=$off/$total cause=$cause',
+        );
         current.close();
         _UpstreamSource? next;
         while (next == null) {
@@ -770,7 +1070,16 @@ class LanStreamServer implements SpeakerStreamProxy {
         }
         current = next;
         sinceReopen = 0;
+        _log('stream reopened: label=${entry.labelText} off=$off');
       }
+    } catch (e) {
+      // steady 放弃：本次响应随之失败，音箱大概率播报失败——
+      // 这行是断流定性的关键证据（断点偏移 + 已供/总量）。
+      _log(
+        'stream lost: label=${entry.labelText} '
+        'off=$off/$total cause=$e',
+      );
+      rethrow;
     } finally {
       current.close();
     }
@@ -1076,102 +1385,13 @@ class LanStreamServer implements SpeakerStreamProxy {
     await _pump(request, entry, count, body());
   }
 
-  /// 蓝本 middle：对虚拟长度解析 Range 作答（200/206/416），body =
-  /// head 切片 + 上游 Range 流（带 steady）。
+  /// 蓝本 middle 的 spool 版：虚拟文件（head + 上游自 off 起）
+  /// 整文件预读落盘，请求侧按虚拟长度 Range 作答（200/206/
+  /// 416），与旧 _middle 的对外语义一致。旧版每请求现开上游
+  /// 子段流，续播条目同样暴露在透传断流下，故一并 spool 化。
   Future<void> _middle(HttpRequest request, _StreamEntry entry, int count) async {
-    final response = request.response;
-    final total = entry.virtualTotal!;
-    final headLen = entry.head!.length;
-    int from = 0;
-    int to = total - 1;
-    var code = HttpStatus.ok;
-    final rangeRaw = request.headers.value(HttpHeaders.rangeHeader);
-    String? contentRange;
-    if (rangeRaw != null) {
-      final rng = rangeRaw.replaceAll(' ', '');
-      if (rng.startsWith('bytes=')) {
-        final dash = rng.indexOf('-', 6);
-        final a = dash < 0 ? rng.substring(6) : rng.substring(6, dash);
-        final bStr = dash < 0 ? '' : rng.substring(dash + 1);
-        if (a.isEmpty) {
-          final n = int.tryParse(bStr);
-          if (n != null) from = max(0, total - n);
-        } else {
-          final n = int.tryParse(a);
-          if (n != null) {
-            from = n;
-            final m = int.tryParse(bStr);
-            if (m != null) to = min(to, m);
-          }
-        }
-        if (from > to) {
-          response.headers.set(
-            HttpHeaders.contentRangeHeader,
-            'bytes */$total',
-          );
-          _beginServed(entry, count, HttpStatus.requestedRangeNotSatisfiable);
-          response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
-          await response.close();
-          return;
-        }
-        code = HttpStatus.partialContent;
-        contentRange = 'bytes $from-$to/$total';
-      }
-    }
-    // body 来源先打开（失败回 502），再写响应头。
-    _UpstreamSource? holder;
-    int srcTotal = 0;
-    if (to >= headLen) {
-      final srcFrom = entry.off + (from - headLen < 0 ? 0 : from - headLen);
-      final srcTo = entry.off + to - headLen;
-      try {
-        final (h, t) = await _sourceRange(entry, srcFrom, srcTo);
-        holder = h;
-        srcTotal = t;
-      } catch (_) {
-        _beginServed(entry, count, HttpStatus.badGateway);
-        response.statusCode = HttpStatus.badGateway;
-        await response.close();
-        return;
-      }
-    }
-    response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-    response.contentLength = to - from + 1;
-    if (contentRange != null) {
-      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
-    }
-    response.statusCode = code;
-    _beginServed(
-      entry,
-      count,
-      code,
-      contentRange: contentRange,
-      contentLength: to - from + 1,
-    );
-    if (request.method == 'HEAD') {
-      holder?.close();
-      await response.close();
-      return;
-    }
-    final heldSource = holder;
-    final bodySrcFrom = entry.off + (from - headLen < 0 ? 0 : from - headLen);
-    final bodySrcEnd = entry.off + to - headLen + 1;
-    Stream<List<int>> body() async* {
-      if (from < headLen) {
-        yield entry.head!.sublist(from, min(headLen, to + 1));
-      }
-      if (heldSource != null) {
-        yield* _steadyChunks(
-          entry: entry,
-          initial: heldSource,
-          start: bodySrcFrom,
-          end: bodySrcEnd,
-          total: srcTotal,
-        );
-      }
-    }
-
-    await _pump(request, entry, count, body(), closeSource: holder);
+    _startMiddleSpool(entry);
+    await _serveSpool(request, entry, count, entry.spool!);
   }
 
   void _log(String message) => _onLog?.call(message);

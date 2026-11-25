@@ -129,7 +129,11 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
        _onLog = onLog,
        super(
          XiaoaiTakeoverState(diagnosticLog: diagnosticLog?.entries ?? const []),
-       );
+       ) {
+    // 推流事件（取流/重开/换链/断流）并入接管诊断日志：流服务
+    // 由 provider 独立构造，此前 onLog 无人接，断流零证据。
+    _streamServer.onLog = _log;
+  }
 
   final SpeakerGateway _gateway;
   final SpeakerSongResolver _resolver;

@@ -174,7 +174,7 @@ void main() {
       expect(freshHits, 1);
     });
 
-    test('播完重取时旧链已过期 → 换链续供，不回 502', () async {
+    test('播完重取时旧链已过期 → spool 本地续供，不回 502、不必换链', () async {
       final handle = await server.publish(
         '$upstreamBase/song.mp3',
         durationMs: 2612,
@@ -183,12 +183,14 @@ void main() {
       );
       expect(handle, isNotNull);
       expect((await _httpGet(handle!.url)).statusCode, 200);
-      // 歌播完，签名链过期；固件从头重取（单曲循环）。
+      // 歌播完，签名链过期；固件从头重取（单曲循环）。spool
+      // 化后整文件已落盘，重取直接本地作答——旧语义靠换链
+      // 续供（freshHits≥1），现在连上游都不用打，更强。
       songExpired = true;
       final again = await _httpGet(handle.url);
       expect(again.statusCode, 200);
       expect(again.bytes, mp3);
-      expect(freshHits, greaterThanOrEqualTo(1));
+      expect(freshHits, 0);
     });
 
     test('无换链回调 + 旧链 403 → 仍回 502（原行为不变）', () async {
