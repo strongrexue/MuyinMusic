@@ -271,7 +271,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 - (void) updateNowPlayingInfo {
     BOOL updated = NO;
     if (mediaItem) {
-        // title/artist 由 CyShineNowPlayingChannel 通道写入（title=歌名，artist=歌词行）
+        // title/artist 由 MuyinNowPlayingChannel 通道写入（title=歌名，artist=歌词行）
         // 此处不再写，避免覆盖锁屏卡的歌词滚动语义
         updated |= [self updateNowPlayingField:MPMediaItemPropertyAlbumTitle value:mediaItem[@"album"]];
         NSNumber *duration = mediaItem[@"duration"];
@@ -299,7 +299,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     }
     if (updated) {
         //NSLog(@"### updating nowPlayingInfo");
-        // 合并写入：保留 CyShineNowPlayingChannel 已写的 title/artist，
+        // 合并写入：保留 MuyinNowPlayingChannel 已写的 title/artist，
         // 只覆盖本通道维护的 album/duration/artwork/rate/position 等字段
         NSMutableDictionary *merged = [NSMutableDictionary dictionary];
         NSDictionary *current = center.nowPlayingInfo;
