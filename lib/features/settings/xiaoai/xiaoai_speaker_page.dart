@@ -212,39 +212,37 @@ class _XiaoaiSpeakerPageState extends ConsumerState<XiaoaiSpeakerPage> {
           ),
         ],
       ],
-      if (takeover.diagnosticLog.isNotEmpty) ...[
-        const Divider(height: 1),
-        Material(
-          type: MaterialType.transparency,
-          child: ExpansionTile(
-            key: const ValueKey('xiaoai-diagnostic-log'),
-            tilePadding: EdgeInsets.zero,
-            childrenPadding: EdgeInsets.zero,
-            title: Text('诊断日志', style: theme.textTheme.bodyLarge),
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final line in takeover.diagnosticLog.reversed.take(20))
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 3),
-                        child: Text(
-                          line,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-            ],
-          ),
+      // 诊断日志常驻直显（不折叠）：重启后打开即见落盘日志；
+      // 确无日志时给明确空态文案，避免该区只剩一片灰底空白。
+      const Divider(height: 1),
+      const SizedBox(height: 10),
+      Text(
+        '诊断日志',
+        key: const ValueKey('xiaoai-diagnostic-log'),
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: scheme.onSurfaceVariant,
         ),
-      ],
+      ),
+      const SizedBox(height: 4),
+      if (takeover.diagnosticLog.isEmpty)
+        Text(
+          '暂无诊断日志',
+          key: const ValueKey('xiaoai-diagnostic-log-empty'),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        )
+      else
+        for (final line in takeover.diagnosticLog.reversed.take(20))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Text(
+              line,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
       const SizedBox(height: 8),
       Center(
         child: TextButton(

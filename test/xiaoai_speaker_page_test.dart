@@ -303,7 +303,7 @@ void main() {
     expect(dy3 < dy2 && dy2 < dy1, isTrue);
   });
 
-  testWidgets('有诊断日志时显示「诊断日志」区，展开可见条目', (tester) async {
+  testWidgets('有诊断日志时显示「诊断日志」区，条目直显无需展开', (tester) async {
     final prefs = await SharedPreferences.getInstance();
     final settings = _makeSettingsController(
       prefs,
@@ -332,8 +332,7 @@ void main() {
     );
 
     expect(find.text('诊断日志'), findsOneWidget);
-    await tester.tap(find.text('诊断日志'));
-    await tester.pumpAndSettle();
+    expect(find.byType(ExpansionTile), findsNothing);
     expect(
       find.text('16:20:05 takeover mute failed: setVolume(0) not acknowledged'),
       findsOneWidget,
@@ -344,6 +343,33 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('无诊断日志时显示明确空态文案，不出现折叠灰块', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final settings = _makeSettingsController(
+      prefs,
+      loggedIn: true,
+      devices: const [_device],
+    );
+    await settings.handleLoginSuccess();
+    await settings.setTakeoverEnabled(true);
+
+    // 初始 state（diagnosticLog 为空）直接渲染：日志区在、空态文案可见。
+    await _pumpPage(
+      tester,
+      settings: settings,
+      takeover: _FakeTakeoverController(),
+      prefs: prefs,
+    );
+
+    expect(find.text('诊断日志'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('xiaoai-diagnostic-log-empty')),
+      findsOneWidget,
+    );
+    expect(find.text('暂无诊断日志'), findsOneWidget);
+    expect(find.byType(ExpansionTile), findsNothing);
   });
 
   testWidgets('未选设备时拨开关先引导去选设备，不调用 enable', (tester) async {

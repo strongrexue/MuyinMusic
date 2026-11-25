@@ -83,6 +83,8 @@ class _StreamEntry implements StreamHandle {
     this.head,
     this.off = 0,
     this.virtualTotal,
+    this.filePath,
+    this.urlRefresher,
   });
 
   final LanStreamServer server;
@@ -90,7 +92,16 @@ class _StreamEntry implements StreamHandle {
   @override
   final String url;
 
-  final String upstreamUrl;
+  /// 上游直链（文件条目为空串）；换链成功后会被新地址覆盖
+  /// （蓝本 Opener 把新地址留在闭包里供后续打开）。
+  String upstreamUrl;
+
+  /// 本机文件条目（蓝本 Song）：从磁盘供流，与 [upstreamUrl]
+  /// 二选一。
+  final String? filePath;
+
+  /// 直链过期时向平台换新地址的回调（蓝本 Opener 的 refresh）。
+  final Future<String?> Function()? urlRefresher;
   final String labelText;
   final int durationMs;
   final int createdAtMs;
@@ -226,11 +237,35 @@ class LanStreamServer implements SpeakerStreamProxy {
     String upstreamUrl, {
     int? durationMs,
     String? label,
+    Future<String?> Function()? urlRefresher,
   }) {
     return _register(
       upstreamUrl: upstreamUrl,
       labelText: label ?? '',
       durationMs: durationMs ?? 0,
+      urlRefresher: urlRefresher,
+    );
+  }
+
+  @override
+  Future<StreamHandle?> publishFile(
+    String filePath, {
+    int? durationMs,
+    String? label,
+  }) async {
+    // 蓝本 Song 的前置是文件此刻可读（routing 的 openable 检查）：
+    // 不存在/空文件直接判备歌失败，让 step 跳过这一首。
+    try {
+      final file = File(filePath);
+      if (!await file.exists() || await file.length() <= 0) return null;
+    } catch (_) {
+      return null;
+    }
+    return _register(
+      upstreamUrl: '',
+      labelText: label ?? '',
+      durationMs: durationMs ?? 0,
+      filePath: filePath,
     );
   }
 
@@ -241,6 +276,8 @@ class LanStreamServer implements SpeakerStreamProxy {
     List<int>? head,
     int off = 0,
     int? virtualTotal,
+    String? filePath,
+    Future<String?> Function()? urlRefresher,
   }) async {
     if (_server == null) return null;
     final ip = await _lanIpLookup();
@@ -264,6 +301,8 @@ class LanStreamServer implements SpeakerStreamProxy {
       head: head,
       off: off,
       virtualTotal: virtualTotal,
+      filePath: filePath,
+      urlRefresher: urlRefresher,
     );
     _entries[token] = entry;
     return entry;
@@ -322,7 +361,13 @@ class LanStreamServer implements SpeakerStreamProxy {
     response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
     try {
       if (entry.head != null) {
-        await _middle(request, entry, count);
+        if (entry.filePath != null) {
+          await _middleFile(request, entry, count);
+        } else {
+          await _middle(request, entry, count);
+        }
+      } else if (entry.filePath != null) {
+        await _serveFile(request, entry, count);
       } else {
         await _proxy(request, entry, count);
       }
@@ -405,14 +450,57 @@ class LanStreamServer implements SpeakerStreamProxy {
     }
   }
 
+  /// 蓝本 Opener：打开一条上游。先走 openAgain；连接失败或平台
+  /// 回 ≥400（416 除外）且条目带换链回调时，向平台换一个新地址
+  /// 再开一次——新地址覆盖条目直链，后续打开都用它（蓝本把
+  /// 新地址留在 Opener 闭包里）。没有回调或换不到链时把原失败
+  /// 原样交回（异常抛出 / ≥400 的 holder 返回给调用方处理）。
+  ///
+  /// 这是播完重取不失败的关键：平台签名直链几分钟就过期，歌
+  /// 播完时固件从头重取若还用旧链只会吃 403、被我们回成 502，
+  /// 固件随即播报「播放失败，请检查网络」。
+  Future<_UpstreamSource> _openEntry(_StreamEntry entry, String? range) async {
+    _UpstreamSource? rejected;
+    Object? failure;
+    try {
+      final holder = await _openAgain(entry.upstreamUrl, range);
+      final code = holder.response.statusCode;
+      if (code < 400 || code == HttpStatus.requestedRangeNotSatisfiable) {
+        return holder;
+      }
+      rejected = holder;
+    } catch (e) {
+      failure = e;
+    }
+    final refresher = entry.urlRefresher;
+    if (refresher == null) {
+      if (rejected != null) return rejected;
+      throw failure ?? StateError('upstream open failed');
+    }
+    String? fresh;
+    try {
+      fresh = await refresher();
+    } catch (_) {
+      fresh = null;
+    }
+    if (fresh == null || fresh.isEmpty || fresh == entry.upstreamUrl) {
+      if (rejected != null) return rejected;
+      throw failure ?? StateError('upstream open failed');
+    }
+    rejected?.close();
+    entry.upstreamUrl = fresh;
+    _log('stream upstream refreshed: label=${entry.labelText}');
+    return _openAgain(fresh, range);
+  }
+
   /// 蓝本 item.source：Range GET，要求 206 且 Content-Range 起点吻合，
   /// 返回 (source, 上游总长)；不满足即 _NoSeek。
   Future<(_UpstreamSource, int)> _sourceRange(
-    String url,
+    _StreamEntry entry,
     int from,
     int endInclusive,
   ) async {
-    final holder = await _openOnce(url, 'bytes=$from-$endInclusive');
+    final holder = await _openEntry(entry, 'bytes=$from-$endInclusive');
     final parsed = _parseContentRange(
       holder.response.headers.value(HttpHeaders.contentRangeHeader) ?? '',
     );
@@ -431,7 +519,28 @@ class LanStreamServer implements SpeakerStreamProxy {
     int from,
     int n,
   ) {
+    if (entry.filePath != null) return _peekFile(entry, from, n);
     return _peekInner(entry, from, n).timeout(const Duration(seconds: 8));
+  }
+
+  /// 文件条目的 peek：字节直接读盘（蓝本 Song 的源是本地文件）。
+  Future<({List<int> bytes, int total})> _peekFile(
+    _StreamEntry entry,
+    int from,
+    int n,
+  ) async {
+    final file = File(entry.filePath!);
+    final total = await file.length();
+    if (from >= total) return (bytes: const <int>[], total: total);
+    final raf = await file.open();
+    try {
+      await raf.setPosition(from);
+      final want = n < total - from ? n : total - from;
+      final bytes = await raf.read(want);
+      return (bytes: bytes, total: total);
+    } finally {
+      await raf.close();
+    }
   }
 
   Future<({List<int> bytes, int total})> _peekInner(
@@ -440,7 +549,7 @@ class LanStreamServer implements SpeakerStreamProxy {
     int n,
   ) async {
     final (holder, total) = await _sourceRange(
-      entry.upstreamUrl,
+      entry,
       from,
       from + n - 1,
     );
@@ -463,7 +572,7 @@ class LanStreamServer implements SpeakerStreamProxy {
     final range = request.headers.value(HttpHeaders.rangeHeader);
     _UpstreamSource holder;
     try {
-      holder = await _openAgain(entry.upstreamUrl, range);
+      holder = await _openEntry(entry, range);
     } catch (e) {
       _log('stream proxy open failed: $e');
       _beginServed(entry, count, HttpStatus.badGateway);
@@ -521,7 +630,7 @@ class LanStreamServer implements SpeakerStreamProxy {
     final steady = _steadyParams(upstream);
     if (steady != null) {
       body = _steadyChunks(
-        url: entry.upstreamUrl,
+        entry: entry,
         initial: holder,
         start: steady.$1,
         end: steady.$2,
@@ -590,7 +699,7 @@ class LanStreamServer implements SpeakerStreamProxy {
   /// 放弃并让本次响应失败）；重开等待 [100ms,400ms,1s,2s,4s] 至多 5
   /// 次；自上次重开起读满 256KB 后失败计数清零。
   Stream<List<int>> _steadyChunks({
-    required String url,
+    required _StreamEntry entry,
     required _UpstreamSource initial,
     required int start,
     required int end,
@@ -640,7 +749,7 @@ class LanStreamServer implements SpeakerStreamProxy {
           await Future<void>.delayed(_reopenWait[fails]);
           fails++;
           try {
-            final holder = await _openOnce(url, 'bytes=$off-${end - 1}');
+            final holder = await _openEntry(entry, 'bytes=$off-${end - 1}');
             final parsed = _parseContentRange(
               holder.response.headers.value(HttpHeaders.contentRangeHeader) ??
                   '',
@@ -693,6 +802,8 @@ class LanStreamServer implements SpeakerStreamProxy {
         head: const [],
         off: off,
         virtualTotal: first.total - off,
+        filePath: entry.filePath,
+        urlRefresher: entry.urlRefresher,
       );
       if (handle == null) return null;
       return (handle: handle, startMs: atMs);
@@ -795,6 +906,176 @@ class LanStreamServer implements SpeakerStreamProxy {
     return 72000 * v2[br] ~/ rate + pad;
   }
 
+  /// 单段 Range 解析（与蓝本 middle 同口径）：无 Range 头或解析
+  /// 不出返回 null（按全量作答）；返回 (from, toInclusive)，to 已
+  /// 夹到 total-1；from>to 由调用方判 416。
+  static (int, int)? _parseRangeHeader(String? rangeRaw, int total) {
+    if (rangeRaw == null) return null;
+    final rng = rangeRaw.replaceAll(' ', '');
+    if (!rng.startsWith('bytes=')) return null;
+    final dash = rng.indexOf('-', 6);
+    if (dash < 0) return null;
+    final a = rng.substring(6, dash);
+    final bStr = rng.substring(dash + 1);
+    var from = 0;
+    var to = total - 1;
+    if (a.isEmpty) {
+      final n = int.tryParse(bStr);
+      if (n == null) return null;
+      from = max(0, total - n);
+    } else {
+      final n = int.tryParse(a);
+      if (n == null) return null;
+      from = n;
+      final m = int.tryParse(bStr);
+      if (m != null) to = min(to, m);
+    }
+    return (from, to);
+  }
+
+  /// 文件条目供流（蓝本 Song 的 serve）：磁盘文件按 Range 作答
+  /// （200/206/416）。本地字节没有过期问题——音箱播完从头重取
+  /// 永远成功，收尾交给 watch 的 stop-loop 与队列推进的下一首
+  /// 推送，不会触发固件的「播放失败」播报。
+  Future<void> _serveFile(
+    HttpRequest request,
+    _StreamEntry entry,
+    int count,
+  ) async {
+    final response = request.response;
+    final file = File(entry.filePath!);
+    final int total;
+    try {
+      total = await file.length();
+    } catch (e) {
+      _log('stream file read failed: ${entry.labelText} $e');
+      _beginServed(entry, count, HttpStatus.badGateway);
+      response.statusCode = HttpStatus.badGateway;
+      await response.close();
+      return;
+    }
+    var from = 0;
+    var to = total - 1;
+    var code = HttpStatus.ok;
+    String? contentRange;
+    final range = _parseRangeHeader(
+      request.headers.value(HttpHeaders.rangeHeader),
+      total,
+    );
+    if (range != null) {
+      from = range.$1;
+      to = range.$2;
+      if (from > to) {
+        response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes */$total',
+        );
+        _beginServed(entry, count, HttpStatus.requestedRangeNotSatisfiable);
+        response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        await response.close();
+        return;
+      }
+      code = HttpStatus.partialContent;
+      contentRange = 'bytes $from-$to/$total';
+    }
+    response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+    if (contentRange != null) {
+      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    }
+    response.contentLength = to - from + 1;
+    response.statusCode = code;
+    _beginServed(
+      entry,
+      count,
+      code,
+      contentRange: contentRange,
+      contentLength: to - from + 1,
+    );
+    if (request.method == 'HEAD') {
+      await response.close();
+      return;
+    }
+    await _pump(request, entry, count, file.openRead(from, to + 1));
+  }
+
+  /// 文件版 middle：虚拟文件 = head 切片 + 源文件自 off 起的
+  /// 内容，字节全部读盘（本地歌的中段续播）。
+  Future<void> _middleFile(
+    HttpRequest request,
+    _StreamEntry entry,
+    int count,
+  ) async {
+    final response = request.response;
+    final total = entry.virtualTotal!;
+    final headLen = entry.head!.length;
+    final file = File(entry.filePath!);
+    final int srcTotal;
+    try {
+      srcTotal = await file.length();
+    } catch (e) {
+      _log('stream file read failed: ${entry.labelText} $e');
+      _beginServed(entry, count, HttpStatus.badGateway);
+      response.statusCode = HttpStatus.badGateway;
+      await response.close();
+      return;
+    }
+    var from = 0;
+    var to = total - 1;
+    var code = HttpStatus.ok;
+    String? contentRange;
+    final range = _parseRangeHeader(
+      request.headers.value(HttpHeaders.rangeHeader),
+      total,
+    );
+    if (range != null) {
+      from = range.$1;
+      to = range.$2;
+      if (from > to) {
+        response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes */$total',
+        );
+        _beginServed(entry, count, HttpStatus.requestedRangeNotSatisfiable);
+        response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        await response.close();
+        return;
+      }
+      code = HttpStatus.partialContent;
+      contentRange = 'bytes $from-$to/$total';
+    }
+    response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+    response.contentLength = to - from + 1;
+    if (contentRange != null) {
+      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    }
+    response.statusCode = code;
+    _beginServed(
+      entry,
+      count,
+      code,
+      contentRange: contentRange,
+      contentLength: to - from + 1,
+    );
+    if (request.method == 'HEAD') {
+      await response.close();
+      return;
+    }
+    Stream<List<int>> body() async* {
+      if (from < headLen) {
+        yield entry.head!.sublist(from, min(headLen, to + 1));
+      }
+      if (to >= headLen) {
+        final srcFrom = entry.off + (from - headLen < 0 ? 0 : from - headLen);
+        final srcTo = entry.off + to - headLen;
+        if (srcFrom <= srcTo && srcFrom < srcTotal) {
+          yield* file.openRead(srcFrom, min(srcTo, srcTotal - 1) + 1);
+        }
+      }
+    }
+
+    await _pump(request, entry, count, body());
+  }
+
   /// 蓝本 middle：对虚拟长度解析 Range 作答（200/206/416），body =
   /// head 切片 + 上游 Range 流（带 steady）。
   Future<void> _middle(HttpRequest request, _StreamEntry entry, int count) async {
@@ -844,7 +1125,7 @@ class LanStreamServer implements SpeakerStreamProxy {
       final srcFrom = entry.off + (from - headLen < 0 ? 0 : from - headLen);
       final srcTo = entry.off + to - headLen;
       try {
-        final (h, t) = await _sourceRange(entry.upstreamUrl, srcFrom, srcTo);
+        final (h, t) = await _sourceRange(entry, srcFrom, srcTo);
         holder = h;
         srcTotal = t;
       } catch (_) {
@@ -881,7 +1162,7 @@ class LanStreamServer implements SpeakerStreamProxy {
       }
       if (heldSource != null) {
         yield* _steadyChunks(
-          url: entry.upstreamUrl,
+          entry: entry,
           initial: heldSource,
           start: bodySrcFrom,
           end: bodySrcEnd,

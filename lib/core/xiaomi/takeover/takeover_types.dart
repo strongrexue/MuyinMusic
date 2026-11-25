@@ -42,7 +42,9 @@ class TakeoverTiming {
   /// 守卫/丢失重推上限（蓝本 MaxReplays）。
   final int maxReplays;
 
-  /// 时钟判尾的富余（蓝本 EndSlack；我们 Duration 恒不用，保留）。
+  /// 时钟判尾的富余（蓝本 EndSlack：ended 定时器在
+  /// fetchedAt + Duration + EndSlack 触发 finish；我们用 watch
+  /// 自维护发声时钟的同值阈值等价实现）。
   final Duration endSlack;
 
   /// watch 最长跟随（蓝本 MaxWatch）。

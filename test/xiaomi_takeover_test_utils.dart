@@ -250,8 +250,12 @@ class FakeStreamHandle implements StreamHandle {
 /// 假推流代理：publish 返回可脚本化的句柄（或 null 模拟失败）。
 class FakeStreamProxy implements SpeakerStreamProxy {
   final List<String> publishedUrls = [];
+  final List<String> publishedFiles = [];
   FakeStreamHandle? nextHandle;
   bool publishFails = false;
+
+  /// publishFile 返回 null 的文件路径（模拟文件已删除/读不到）。
+  final Set<String> filePublishFails = {};
 
   /// 自动生成的句柄是否直接标记已取流（队列推进等多首场景用）。
   bool autoFetched = false;
@@ -261,6 +265,7 @@ class FakeStreamProxy implements SpeakerStreamProxy {
     String upstreamUrl, {
     int? durationMs,
     String? label,
+    Future<String?> Function()? urlRefresher,
   }) async {
     publishedUrls.add(upstreamUrl);
     if (publishFails) return null;
@@ -270,6 +275,25 @@ class FakeStreamProxy implements SpeakerStreamProxy {
           url: 'http://192.168.50.10:18761/stream/token.mp3',
           label: label ?? '',
           lengthMs: durationMs ?? 269000,
+        )..fetchedValue = autoFetched);
+    nextHandle = null;
+    return handle;
+  }
+
+  @override
+  Future<StreamHandle?> publishFile(
+    String filePath, {
+    int? durationMs,
+    String? label,
+  }) async {
+    publishedFiles.add(filePath);
+    if (publishFails || filePublishFails.contains(filePath)) return null;
+    final handle =
+        nextHandle ??
+        (FakeStreamHandle(
+          url: 'http://192.168.50.10:18761/stream/file.mp3',
+          label: label ?? '',
+          lengthMs: durationMs ?? 0,
         )..fetchedValue = autoFetched);
     nextHandle = null;
     return handle;

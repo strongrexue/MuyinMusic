@@ -123,8 +123,8 @@ class TakeoverQuiet {
 
   /// 静音（蓝本 `mute()`）：串行执行。
   ///
-  /// 已有落盘待恢复音量时沿用它并视为已静音（上一轮/上个进程
-  /// 压的）；否则先读状态确认当前音量（防记错），volume>0 才
+  /// 已有落盘待恢复音量时沿用它作恢复目标，但仍重发一次
+  /// setVolume(0) 压住（落盘不证明此刻音量为 0）；否则先读状态确认当前音量（防记错），volume>0 才
   /// 先落盘后置 0；当前音量是 0 时用内存记住的上次音量；
   /// 音量未知则不静音（没把握恢复就不压）。
   Future<MuteResult> mute() {
@@ -140,13 +140,21 @@ class TakeoverQuiet {
     }
     final pending = await store.readPendingVolume(_deviceId);
     if (pending != null) {
-      _muteHeld = true;
+      // 沿用待恢复音量：落盘值只是恢复目标，不证明音箱此刻在 0
+      // （音量可能已被恢复/调高，或落盘是上个进程的残留）。蓝本
+      // 此路径仍下发一次 SetVolume(0) 重新压住（quiet.go mute 的
+      // pending 分支），且不读状态——全程只有这一次网络往返。
+      // 此前移植漏了这次下发：残留 pending 时 Quiet 谎报已静音，
+      // 原生开场白全音量漏出。
+      final ok = await setVolumeVerified(0);
+      _muteHeld = ok;
       return MuteResult(
         volume: pending,
-        muted: true,
+        muted: ok,
         statusOk: true,
         statusNote: '沿用待恢复音量 $pending',
-        note: '沿用待恢复音量 $pending',
+        note: ok ? '沿用待恢复音量 $pending' : '静音没有下发成功',
+        error: ok ? null : 'setVolume(0) not acknowledged',
       );
     }
     MinaPlayerStatus? status;

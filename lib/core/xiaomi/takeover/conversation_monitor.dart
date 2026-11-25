@@ -219,8 +219,16 @@ class ConversationMonitor {
 
     for (final record in fresh) {
       if (session != null && session != _session) break;
-      // stale 记录照常投递（见类注释）：只记日志，分发层决定不执行。
+      // 检测延迟（蓝本 observe.handle 的「延迟ms」日志与 commands
+      // 表 upstream_ms/seen_ms 口径）：记录的上游时间戳 → 本轮
+      // seen 的毫秒差，每条新记录都记一行，事后可直接量检测
+      // 链路慢在哪一段。
       final lagMs = seenMs - record.timeMs;
+      _onLog?.call(
+        'conversation detected: lag=${lagMs}ms '
+        'upstream=${record.timeMs} seen=$seenMs query=${record.query}',
+      );
+      // stale 记录照常投递（见类注释）：只记日志，分发层决定不执行。
       if (lagMs > staleAfterMs) {
         _onLog?.call(
           'conversation record stale: lag ${lagMs}ms, query=${record.query}',

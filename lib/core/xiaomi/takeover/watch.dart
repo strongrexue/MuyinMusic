@@ -314,7 +314,13 @@ class TakeoverWatcher {
         if (talkedUntilMs != 0 && now > talkedUntilMs + 2000) {
           talkedUntilMs = 0;
         }
-        if (length > 0 && at() > length + 8000) {
+        // 判尾（蓝本 ended 定时器：fetchedAt + Duration + EndSlack
+        // 即 finish）：我们用自维护的发声时钟 at() 等价实现——
+        // 暂停不推进 at()，不会像蓝本的墙钟定时器那样在长暂停
+        // 后误判播完（偏离蓝本一处，语义更稳）。阈值取 EndSlack
+        // 原值 1.5s：收尾（stop-loop/下一首推送）抢在固件循环
+        // 重取把过期直链打成失败播报之前落地。
+        if (length > 0 && at() > length + tm.endSlack.inMilliseconds) {
           return finish('播完了');
         }
       } else {

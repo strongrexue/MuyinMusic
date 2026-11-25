@@ -194,15 +194,25 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
       text.toLowerCase().replaceAll(RegExp(r'[\s\p{P}]+', unicode: true), '');
 }
 
-/// 「该歌之后」的音箱队列：按歌名/歌手在 App 当前队列里定位
-/// [song]，取其后的部分。定位不到（语音点的歌不在队列里）返回
-/// 空列表——只播这一首，不硬凑接力。
+/// 音箱续播列表（接管时刻 App 播放队列的快照口径）：按歌名/
+/// 歌手在 App 当前队列里定位 [song]——定位到就取它后面的
+/// 部分；定位不到（语音点的歌不在队列里）就从队列当前项起
+/// 顺延（含当前项）。队列为空返回空列表——只播这一首。
+///
+/// 快照只在接管点歌这一刻读取一次；音箱侧队列独立推进，
+/// 不读也不改 App 自己的播放位置/状态。
 List<SpeakerQueueItem> buildSpeakerQueueTail(
   PlayerState playerState,
   ResolvedSong song,
 ) {
   final queue = playerState.queue;
   if (queue.isEmpty) return const [];
+  SpeakerQueueItem itemAt(int i) => SpeakerQueueItem(
+    title: queue[i].name,
+    artist: queue[i].singer,
+    durationMs: parseMusicIntervalMs(queue[i].musicInfo?.interval),
+    exactMusic: queue[i].musicInfo,
+  );
   final title = _normForMatch(song.title);
   final artist = _normForMatch(song.artist);
   var anchor = -1;
@@ -217,16 +227,13 @@ List<SpeakerQueueItem> buildSpeakerQueueTail(
       break;
     }
   }
-  if (anchor < 0) return const [];
-  return [
-    for (var i = anchor + 1; i < queue.length; i++)
-      SpeakerQueueItem(
-        title: queue[i].name,
-        artist: queue[i].singer,
-        durationMs: parseMusicIntervalMs(queue[i].musicInfo?.interval),
-        exactMusic: queue[i].musicInfo,
-      ),
-  ];
+  if (anchor >= 0) {
+    return [for (var i = anchor + 1; i < queue.length; i++) itemAt(i)];
+  }
+  // 不在队列里：从当前项起顺延。queueIndex 越界（无当前项）
+  // 时夹到最近的有效位置。
+  final start = playerState.queueIndex.clamp(0, queue.length - 1);
+  return [for (var i = start; i < queue.length; i++) itemAt(i)];
 }
 
 String _normForMatch(String text) =>

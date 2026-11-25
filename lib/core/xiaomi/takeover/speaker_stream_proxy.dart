@@ -17,8 +17,23 @@ abstract interface class SpeakerStreamProxy {
   ///
   /// [durationMs] 是歌曲时长（已知时传，用于重取间隔判定与
   /// watch 时钟），未知传 null。
+  ///
+  /// [urlRefresher]：上游直链过期被拒时的换链回调（蓝本
+  /// `online.Opener`：打开失败就向平台要一个新地址再试，并把
+  /// 新地址留给后续打开）。返回 null 表示换不到链，按打开失败
+  /// 处理。
   Future<StreamHandle?> publish(
     String upstreamUrl, {
+    int? durationMs,
+    String? label,
+    Future<String?> Function()? urlRefresher,
+  });
+
+  /// 把本机文件注册为局域网流（蓝本 `Streams.Song`：曲库文件
+  /// 从磁盘供流，重取永远成功，不存在直链过期）。文件不存在
+  /// 或读不到返回 null。
+  Future<StreamHandle?> publishFile(
+    String filePath, {
     int? durationMs,
     String? label,
   });

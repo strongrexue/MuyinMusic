@@ -52,6 +52,39 @@ void main() {
       );
     });
 
+    test('落盘待恢复音量已存在：Quiet 仍重发 setVolume(0) 且不读状态，'
+        '解析未返回时已下发（蓝本 quiet.go pending 分支）', () async {
+      final h = _Harness();
+      // 上一轮/上个进程残留的待恢复音量；音箱此刻实际音量未知，
+      // 落盘值不证明它在 0——Quiet 必须重新压一次。
+      h.store.values['device-1'] = 25;
+      final gate = Completer<ResolvedSong?>();
+      h.resolver.handler = (_) => gate.future;
+      h.proxy.nextHandle = FakeStreamHandle(
+        url: 'http://192.168.50.10:18761/stream/t.mp3',
+      )..fetchedValue = true;
+
+      final done = h.dispatcher.onCommand(_record('播放歌曲周杰伦晴天'), 0);
+      await pumpMicrotasks();
+      // 解析还堵着：重发的 setVolume(0) 已下发，且全程没有读状态
+      // （pending 路径只有这一次网络往返，蓝本量级）。
+      expect(h.gateway.callNames, ['setVolume']);
+      expect(h.gateway.calls.single.detail, '0');
+      // 恢复目标仍是落盘的 25，没有被覆盖。
+      expect(h.store.values['device-1'], 25);
+
+      gate.complete(h.resolver.result);
+      await done;
+      await _elapse(h.clock, const Duration(seconds: 10));
+      expect(h.records.single.success, isTrue);
+      // 结局恢复的是落盘的 25，落盘清除。
+      expect(
+        h.gateway.calls.where((c) => c.name == 'setVolume').last.detail,
+        '25',
+      );
+      expect(h.store.values.containsKey('device-1'), isFalse);
+    });
+
     test('步序：status/mute/stop1 → settle → stop2 → play（蓝本步序）', () async {
       final h = _Harness();
       h.proxy.nextHandle = FakeStreamHandle(

@@ -200,6 +200,34 @@ void main() {
       expect(ConversationMonitor.staleAfterMs, 120000);
     });
 
+    test('检测延迟日志：每条新记录记 upstream→seen 的毫秒差', () async {
+      final logs = <String>[];
+      final clock = FakeTakeoverClock(10000);
+      final results = <ConversationFetchResult>[
+        ConversationFetchSuccess([rec(9000, '播放a')]),
+        ConversationFetchSuccess([rec(9500, '播放晴天'), rec(9800, '下一首')]),
+      ];
+      final monitor = ConversationMonitor(
+        fetcher: () async => results.removeAt(0),
+        clock: clock,
+        onRecord: (r, seenMs) {},
+        onLog: logs.add,
+      );
+      await monitor.pollOnce();
+      // 首轮只建基线：不投递也不记检测延迟。
+      expect(logs.where((l) => l.contains('conversation detected')), isEmpty);
+      await monitor.pollOnce();
+      expect(
+        logs.where((l) => l.contains('conversation detected')).toList(),
+        [
+          'conversation detected: lag=500ms upstream=9500 seen=10000 '
+              'query=播放晴天',
+          'conversation detected: lag=200ms upstream=9800 seen=10000 '
+              'query=下一首',
+        ],
+      );
+    });
+
     test('seenMs 随每轮 poll 开始时刻变化', () async {
       final seen = <int>[];
       final clock = FakeTakeoverClock(10000);
