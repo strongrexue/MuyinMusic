@@ -13,6 +13,9 @@ enum AppUpdateCheckOutcome {
   upToDate,
   failed,
   alreadyChecking,
+
+  /// 自动检查时命中的版本已被用户「忽略此版本」，静默跳过提示。
+  ignoredVersion,
 }
 
 bool _appUpdateCheckInProgress = false;
@@ -65,6 +68,14 @@ Future<AppUpdateCheckOutcome> checkForAppUpdate(
       return AppUpdateCheckOutcome.upToDate;
     }
 
+    // 「忽略此版本」只压住自动提示；手动检查（showFeedback）永远绕过，
+    // 有新版本必弹。忽略记录的是单个版本号，出现更新的版本仍会提示。
+    if (!showFeedback &&
+        ref.read(settingsProvider).ignoredAppUpdateVersion ==
+            latest.tagName) {
+      return AppUpdateCheckOutcome.ignoredVersion;
+    }
+
     await _showUpdateDialog(
       context,
       ref,
@@ -102,7 +113,7 @@ Future<void> _showUpdateDialog(
             key: const ValueKey('app-update-ignore'),
             onPressed: () =>
                 Navigator.of(dialogContext).pop(_AppUpdateAction.ignore),
-            child: const Text('忽略更新'),
+            child: const Text('忽略此版本'),
           ),
           prism.TextButton(
             key: const ValueKey('app-update-later'),
@@ -120,7 +131,8 @@ Future<void> _showUpdateDialog(
           '$currentVersion  →  ${release.version}\n\n'
           '${release.title}\n'
           '将打开胖虎音乐的更新页面，由你选择并下载更新包。\n\n'
-          '忽略更新后，启动时将不再自动检查，可在设置中手动检查更新。',
+          '忽略此版本后，启动时不再提示该版本；有更新的版本仍会提示，'
+          '也可在设置中手动检查更新。',
         ),
       ),
     ),
@@ -129,12 +141,14 @@ Future<void> _showUpdateDialog(
   if (action == _AppUpdateAction.ignore) {
     await ref
         .read(settingsProvider.notifier)
-        .setCheckForUpdatesOnStartup(false);
+        .setIgnoredAppUpdateVersion(release.tagName);
     if (context.mounted) {
-      showAppToast(context, '已关闭启动时检查更新，可在设置中手动检查');
+      showAppToast(context, '已忽略此版本，可在设置中手动检查更新');
     }
     return;
   }
+  // 「稍后再说」或点遮罩关闭：不写任何持久状态，只 snooze 本次启动；
+  // 下次冷启动会重新检查并再次提示，误触可自愈。
   if (action != _AppUpdateAction.download) return;
 
   try {

@@ -192,6 +192,75 @@ void main() {
     });
   });
 
+  group('SpeakerRelay 身份门（外来 audio_id）', () {
+    test('连续 2 次读到原生在播 → 按外部停止收尾', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      final resolver = FakeSpeakerResolver()
+        ..byKeyword['李荣浩 麻雀'] = songB;
+      RelayEndReason? endedReason;
+      gateway.statusFn = () => const MinaPlayerStatus(
+        statusCode: 1,
+        positionMs: 20000,
+        durationMs: 300000,
+        audioId: '9999999999999999999',
+      );
+      final relay = buildRelay(
+        gateway,
+        clock,
+        resolver,
+        onEnded: (r) => endedReason = r,
+      );
+      const longSong = ResolvedSong(
+        url: 'http://example.com/a.mp3',
+        title: '晴天',
+        artist: '周杰伦',
+        durationMs: 300000,
+      );
+      await relay.startWith(longSong, const [
+        SpeakerQueueItem(title: '麻雀', artist: '李荣浩'),
+      ]);
+      // 20s 校准间隔：两轮外来采样命中身份门。
+      await elapse(clock, 45);
+      expect(endedReason, RelayEndReason.externalStop);
+      expect(relay.isActive, isFalse);
+      expect(gateway.callNames, isNot(contains('playMusic')));
+    });
+
+    test('外来采样的 position 不记账：不会被回零探测误判播完切歌', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      final resolver = FakeSpeakerResolver()
+        ..byKeyword['李荣浩 麻雀'] = songB;
+      var foreign = true;
+      gateway.statusFn = () => foreign
+          ? const MinaPlayerStatus(
+              statusCode: 1,
+              positionMs: 50000,
+              durationMs: 60000,
+              audioId: '9999999999999999999',
+            )
+          : const MinaPlayerStatus(
+              statusCode: 1,
+              positionMs: 100,
+              durationMs: 60000,
+            );
+      final relay = buildRelay(gateway, clock, resolver);
+      await relay.startWith(songA, const [
+        SpeakerQueueItem(title: '麻雀', artist: '李荣浩', durationMs: 300000),
+      ]);
+      // 第一轮校准读到外来 position=50000：若记账，下一轮我们的
+      // position=100 会触发「曾 >10s 又跌回 <3s」的播完切歌。
+      await elapse(clock, 6);
+      foreign = false;
+      await elapse(clock, 6);
+      expect(relay.isActive, isTrue);
+      expect(relay.nowPlaying?.queueIndex, 0);
+      expect(gateway.callNames, isNot(contains('playMusic')));
+      relay.stop();
+    });
+  });
+
   group('SpeakerRelay 手动上下首', () {
     test('next 顺序推进，播完结束；previous 回上一首（走缓存）', () async {
       final clock = FakeTakeoverClock();

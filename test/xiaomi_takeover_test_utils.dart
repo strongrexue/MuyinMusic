@@ -5,6 +5,33 @@ import 'package:muyin_music/core/xiaomi/mina_models.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_gateway.dart';
 import 'package:muyin_music/core/xiaomi/takeover/speaker_resolver.dart';
 import 'package:muyin_music/core/xiaomi/takeover/takeover_clock.dart';
+import 'package:muyin_music/core/xiaomi/takeover/takeover_engine.dart';
+
+/// 内存版待恢复音量存储（TrackFerry PendingVolume 语义：
+/// save 已有不覆盖、change 只改已有）。
+class FakeTakeoverMuteStore implements TakeoverMuteStore {
+  final Map<String, int> values = {};
+
+  @override
+  Future<int?> readPendingVolume(String deviceId) async => values[deviceId];
+
+  @override
+  Future<void> savePendingVolume(String deviceId, int volume) async {
+    values.putIfAbsent(deviceId, () => volume);
+  }
+
+  @override
+  Future<bool> changePendingVolume(String deviceId, int volume) async {
+    if (!values.containsKey(deviceId)) return false;
+    values[deviceId] = volume;
+    return true;
+  }
+
+  @override
+  Future<void> clearPendingVolume(String deviceId) async {
+    values.remove(deviceId);
+  }
+}
 
 /// 手动推进的假时钟：sleep 挂起，直到 [advance] 推过其截止时刻。
 class FakeTakeoverClock implements TakeoverClock {

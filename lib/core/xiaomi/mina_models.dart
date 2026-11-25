@@ -254,6 +254,7 @@ class MinaPlayerStatus {
     this.volume,
     this.positionMs,
     this.durationMs,
+    this.audioId,
   });
 
   /// 原始 status：1=播放中，2=暂停，0=停止（个别型号播完返回 3）。
@@ -264,11 +265,25 @@ class MinaPlayerStatus {
   final int? positionMs;
   final int? durationMs;
 
+  /// 当前媒体的 audio_id（play_song_detail.audio_id）；没有该字段
+  /// 或为空时为 null（归属未知，不能据此判外来）。
+  final String? audioId;
+
   bool get isPlaying => statusCode == 1;
   bool get isPaused => statusCode == 2;
 
   /// 0/2/3 都视为未在播放（miot device_state 的 idle 判定）。
   bool get isIdle => statusCode != 1;
+
+  /// 在播的确定不是我们推播的媒体（TrackFerry `foreign` 判定：
+  /// Playing && AudioID 非空 && AudioID != OurAudioID）。
+  /// 归属只认 audio_id：position/status 本身区分不了是谁在播，
+  /// 原生小爱的播放曾因此被误记为接管成功。
+  bool get isForeignPlayback =>
+      isPlaying &&
+      audioId != null &&
+      audioId!.isNotEmpty &&
+      audioId != kDefaultMusicAudioId;
 
   static MinaPlayerStatus? tryParseInfo(Object? data) {
     if (data is! Map) return null;
@@ -286,15 +301,21 @@ class MinaPlayerStatus {
     final detail = decoded['play_song_detail'];
     int? position;
     int? duration;
+    String? audioId;
     if (detail is Map) {
       position = (detail['position'] as num?)?.toInt();
       duration = (detail['duration'] as num?)?.toInt();
+      // audio_id 在蓝本里以 JSON 数字到达（json.Number），也可能是
+      // 字符串；统一 toString，空串归一为 null（归属未知）。
+      final rawAudioId = detail['audio_id']?.toString();
+      if (rawAudioId != null && rawAudioId.isNotEmpty) audioId = rawAudioId;
     }
     return MinaPlayerStatus(
       statusCode: status.toInt(),
       volume: (decoded['volume'] as num?)?.toInt(),
       positionMs: position,
       durationMs: duration,
+      audioId: audioId,
     );
   }
 }

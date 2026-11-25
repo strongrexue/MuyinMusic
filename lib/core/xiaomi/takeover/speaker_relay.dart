@@ -106,6 +106,9 @@ class SpeakerRelay {
   int? _lastPositionMs;
   int _idleHits = 0;
 
+  /// 连续读到外来 audio_id 在播的次数（身份门，见 _evaluate）。
+  int _foreignHits = 0;
+
   bool get isActive => _active;
   int get currentIndex => _index;
 
@@ -289,6 +292,18 @@ class SpeakerRelay {
         : _trackStartedAtMs + _durationMs!;
 
     if (status != null) {
+      // 身份门（TrackFerry `foreign` 口径）：在播的是外来 audio_id
+      // 时，那是原生/别人接管了音箱——它的 position/duration 不是
+      // 我们的进度，一律不记账；连续 2 次按外部停止收尾，不打架。
+      // 只在 music API 型号上按 audio_id 认人（relay 的 usePlayMusic）。
+      if (usePlayMusic && status.isForeignPlayback) {
+        _foreignHits++;
+        if (_foreignHits >= _externalStopConfirmCount) {
+          _endSession(RelayEndReason.externalStop);
+        }
+        return;
+      }
+      _foreignHits = 0;
       // 设备流长补齐未知时长。
       if (_durationMs == null &&
           status.durationMs != null &&
@@ -365,6 +380,7 @@ class SpeakerRelay {
     _maxPositionMs = 0;
     _lastPositionMs = null;
     _idleHits = 0;
+    _foreignHits = 0;
   }
 
   void _endSession(RelayEndReason reason) {

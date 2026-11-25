@@ -26,15 +26,27 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
     required MusicUrlResolver urlResolver,
     SpeakerUrlProbe? urlProbe,
     void Function(String message)? onLog,
+    Duration resolveBudget = const Duration(seconds: 8),
+    DateTime Function()? now,
   }) : _api = api,
        _urlResolver = urlResolver,
        _urlProbe = urlProbe ?? SpeakerUrlProbe(),
-       _onLog = onLog;
+       _onLog = onLog,
+       _resolveBudget = resolveBudget,
+       _now = now ?? DateTime.now;
 
   final MusicApi _api;
   final MusicUrlResolver _urlResolver;
   final SpeakerUrlProbe _urlProbe;
   final void Function(String message)? _onLog;
+
+  /// 一次解析（搜索+逐候选解析+探测）的总时间预算。首个通过探测
+  /// 的候选立即返回（它就是已通过的最佳候选）；预算耗尽仍无候选
+  /// 通过则如实未命中，不无限拖长接管的静音窗口。
+  /// 注：TrackFerry 无此参数——它靠 Quiet 全程静音罩住决策期；
+  /// 本预算是移动端防解析失控的自设上限，与静音罩并行生效。
+  final Duration _resolveBudget;
+  final DateTime Function() _now;
 
   /// 单个候选最多尝试的音质数（避免在坏源上无限试错）。
   static const _maxQualityAttempts = 6;
@@ -44,18 +56,20 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
 
   @override
   Future<ResolvedSong?> resolveTopOne(SpeakerResolveRequest request) async {
+    final deadline = _now().add(_resolveBudget);
     final exact = request.exactMusic;
     if (exact is MusicInfo) {
-      return _resolveExact(exact);
+      return _resolveExact(exact, deadline);
     }
 
-    var resolved = await _searchAndResolve(request.keyword, request);
+    var resolved = await _searchAndResolve(request.keyword, request, deadline);
     if (resolved != null) return resolved;
 
     // topone 规范的空白变体重试：ASR/曲库的空格差异会整批错过。
     final compact = request.keyword.replaceAll(RegExp(r'\s+'), '');
     if (compact.isNotEmpty && compact != request.keyword) {
-      resolved = await _searchAndResolve(compact, request);
+      if (_now().isAfter(deadline)) return null;
+      resolved = await _searchAndResolve(compact, request, deadline);
     }
     return resolved;
   }
@@ -63,6 +77,7 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
   Future<ResolvedSong?> _searchAndResolve(
     String keyword,
     SpeakerResolveRequest request,
+    DateTime deadline,
   ) async {
     final SearchResponse response;
     try {
@@ -88,14 +103,18 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
     var tried = 0;
     for (final entry in scored) {
       if (tried >= _maxCandidates) break;
+      if (_now().isAfter(deadline)) {
+        _onLog?.call('speaker resolve budget exhausted');
+        return null;
+      }
       tried++;
-      final resolved = await _resolveExact(entry.info);
+      final resolved = await _resolveExact(entry.info, deadline);
       if (resolved != null) return resolved;
     }
     return null;
   }
 
-  Future<ResolvedSong?> _resolveExact(MusicInfo music) async {
+  Future<ResolvedSong?> _resolveExact(MusicInfo music, DateTime deadline) async {
     final qualities = <Quality>[];
     final seen = <Quality>{};
     // 先 MP3 音质（按原排序），再其余音质兜底。
@@ -109,6 +128,10 @@ class PanghuSpeakerSongResolver implements SpeakerSongResolver {
     var attempts = 0;
     for (final quality in qualities) {
       if (attempts >= _maxQualityAttempts) break;
+      if (_now().isAfter(deadline)) {
+        _onLog?.call('speaker resolve budget exhausted');
+        return null;
+      }
       attempts++;
       final MusicUrl result;
       try {

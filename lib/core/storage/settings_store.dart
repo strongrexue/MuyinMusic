@@ -54,6 +54,11 @@ const String _kLyricFontSizeKey = 'lyric_font_size';
 const String _kAutoPlayOnStartupKey = 'auto_play_on_startup';
 const String _kSkipStartupScreenKey = 'skip_startup_screen';
 const String _kCheckForUpdatesOnStartupKey = 'check_for_updates_on_startup';
+const String _kIgnoredAppUpdateVersionKey = 'ignored_app_update_version';
+// 旧版更新弹窗的「忽略更新」会把启动检查全局关掉且设置里无处恢复，
+// 用这个标记对存量安装做一次复位迁移。
+const String _kAppUpdateStartupCheckResetKey =
+    'app_update_startup_check_reset_v1';
 const String _kNetworkAdapterModeKey = 'network_adapter_mode';
 const String _kEnabledSearchSourcesKey = 'enabled_search_source_codes';
 // 汽水音乐 was added as a search source after release, so installs that already
@@ -300,6 +305,7 @@ class AppSettings {
     this.autoPlayOnStartup = false,
     this.skipStartupScreen = false,
     this.checkForUpdatesOnStartup = true,
+    this.ignoredAppUpdateVersion = '',
     required this.networkAdapterMode,
     required this.enabledSearchSources,
     this.defaultSearchSource = MusicSource.all,
@@ -395,6 +401,10 @@ class AppSettings {
   final bool autoPlayOnStartup;
   final bool skipStartupScreen;
   final bool checkForUpdatesOnStartup;
+
+  /// 更新弹窗里被「忽略此版本」的版本号（tag）。只压住自动提示：
+  /// 手动检查永远绕过，出现更新的版本时仍会重新提示。
+  final String ignoredAppUpdateVersion;
   final NetworkAdapterMode networkAdapterMode;
   final Set<MusicSource> enabledSearchSources;
   final MusicSource defaultSearchSource;
@@ -465,6 +475,7 @@ class AppSettings {
     bool? autoPlayOnStartup,
     bool? skipStartupScreen,
     bool? checkForUpdatesOnStartup,
+    String? ignoredAppUpdateVersion,
     NetworkAdapterMode? networkAdapterMode,
     Set<MusicSource>? enabledSearchSources,
     MusicSource? defaultSearchSource,
@@ -530,6 +541,8 @@ class AppSettings {
     skipStartupScreen: skipStartupScreen ?? this.skipStartupScreen,
     checkForUpdatesOnStartup:
         checkForUpdatesOnStartup ?? this.checkForUpdatesOnStartup,
+    ignoredAppUpdateVersion:
+        ignoredAppUpdateVersion ?? this.ignoredAppUpdateVersion,
     networkAdapterMode: networkAdapterMode ?? this.networkAdapterMode,
     enabledSearchSources: enabledSearchSources ?? this.enabledSearchSources,
     defaultSearchSource: defaultSearchSource ?? this.defaultSearchSource,
@@ -626,6 +639,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final defaultSearchSource = MusicSource.fromCode(
       _prefs.getString(_kDefaultSearchSourceKey) ?? 'all',
     );
+    final checkForUpdatesOnStartup = _migrateAppUpdateStartupCheck(_prefs);
     return AppSettings(
       downloadDir: downloadDir,
       downloadFileNameFormat: DownloadFileNameFormat.fromCode(
@@ -702,8 +716,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
           : kLyricFontSizeDefault,
       autoPlayOnStartup: _prefs.getBool(_kAutoPlayOnStartupKey) ?? false,
       skipStartupScreen: _prefs.getBool(_kSkipStartupScreenKey) ?? false,
-      checkForUpdatesOnStartup:
-          _prefs.getBool(_kCheckForUpdatesOnStartupKey) ?? true,
+      checkForUpdatesOnStartup: checkForUpdatesOnStartup,
+      ignoredAppUpdateVersion:
+          _prefs.getString(_kIgnoredAppUpdateVersionKey) ?? '',
       networkAdapterMode: NetworkAdapterPreference.current,
       enabledSearchSources: enabledSearchSources,
       defaultSearchSource: enabledSearchSources.contains(defaultSearchSource)
@@ -1276,6 +1291,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(checkForUpdatesOnStartup: value);
   }
 
+  Future<void> setIgnoredAppUpdateVersion(String value) async {
+    await _prefs.setString(_kIgnoredAppUpdateVersionKey, value);
+    state = state.copyWith(ignoredAppUpdateVersion: value);
+  }
+
   Map<String, dynamic> exportAppearanceForSync() => {
     'themeMode': _encodeThemeMode(state.themeMode),
     'themeSeedArgb': state.themeSeed.toARGB32(),
@@ -1726,6 +1746,20 @@ _OnlineQuality _migrateOnlinePlaybackQuality(SharedPreferences prefs) {
     wifi: OnlinePlaybackQuality.fromCode(wifi),
     cellular: OnlinePlaybackQuality.fromCode(cellular),
   );
+}
+
+/// 旧版更新弹窗的「忽略更新」会把启动检查全局关掉，且设置里没有重新打开的
+/// 入口，误点一次就再也收不到新版本提示。这里做一次复位：把被旧逻辑关掉的
+/// 启动检查恢复为开；之后「忽略」只针对单个版本（见 ignoredAppUpdateVersion）。
+bool _migrateAppUpdateStartupCheck(SharedPreferences prefs) {
+  if (prefs.getBool(_kAppUpdateStartupCheckResetKey) != true) {
+    unawaited(prefs.setBool(_kAppUpdateStartupCheckResetKey, true));
+    if (prefs.getBool(_kCheckForUpdatesOnStartupKey) == false) {
+      unawaited(prefs.setBool(_kCheckForUpdatesOnStartupKey, true));
+      return true;
+    }
+  }
+  return prefs.getBool(_kCheckForUpdatesOnStartupKey) ?? true;
 }
 
 /// A saved list only ever contains the sources that existed when the user last

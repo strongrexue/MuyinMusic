@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/music_api.dart';
 import '../music_sources/music_url_resolver.dart';
 import '../../features/player/player_controller.dart';
+import '../storage/settings_store.dart';
 import 'lan_stream_server.dart';
 import 'mina_models.dart';
 import 'panghu_speaker_adapter.dart';
@@ -18,6 +20,43 @@ import 'takeover/takeover_state.dart';
 import 'takeover/wake_word_filter.dart';
 import 'xiaoai_foreground_host.dart';
 import 'xiaomi_providers.dart';
+
+/// 待恢复音量的落盘键（按设备分键；有键 = 有一笔音量等着恢复）。
+String xiaoaiPendingVolumePrefsKey(String deviceId) =>
+    'xiaoai_speaker_pending_volume_v1:$deviceId';
+
+/// [TakeoverMuteStore] 的 SharedPreferences 实现（TrackFerry
+/// PendingVolume 语义：save 已有条目不覆盖、change 只改已有条目、
+/// 恢复成功后才清除）。
+class SharedPreferencesTakeoverMuteStore implements TakeoverMuteStore {
+  SharedPreferencesTakeoverMuteStore(this._prefs);
+
+  final SharedPreferences _prefs;
+
+  @override
+  Future<int?> readPendingVolume(String deviceId) async =>
+      _prefs.getInt(xiaoaiPendingVolumePrefsKey(deviceId));
+
+  @override
+  Future<void> savePendingVolume(String deviceId, int volume) async {
+    final key = xiaoaiPendingVolumePrefsKey(deviceId);
+    if (_prefs.containsKey(key)) return; // 已有条目保留，不覆盖
+    await _prefs.setInt(key, volume);
+  }
+
+  @override
+  Future<bool> changePendingVolume(String deviceId, int volume) async {
+    final key = xiaoaiPendingVolumePrefsKey(deviceId);
+    if (!_prefs.containsKey(key)) return false;
+    await _prefs.setInt(key, volume);
+    return true;
+  }
+
+  @override
+  Future<void> clearPendingVolume(String deviceId) async {
+    await _prefs.remove(xiaoaiPendingVolumePrefsKey(deviceId));
+  }
+}
 
 /// 胖虎音源适配器（topone 接缝实现）。
 final speakerSongResolverProvider = Provider<SpeakerSongResolver>((ref) {
@@ -47,6 +86,9 @@ final xiaoaiTakeoverControllerProvider =
         sessionValidator: client.validateToken,
         resolver: ref.watch(speakerSongResolverProvider),
         streamServer: ref.watch(speakerStreamServerProvider),
+        muteStore: SharedPreferencesTakeoverMuteStore(
+          ref.watch(sharedPreferencesProvider),
+        ),
         host: ref.watch(xiaoaiForegroundHostProvider),
         queueTailProvider: (song) =>
             buildSpeakerQueueTail(ref.read(playerControllerProvider), song),
@@ -64,11 +106,13 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     required LanStreamServer streamServer,
     required XiaoaiForegroundHost host,
     required SpeakerQueueTailProvider queueTailProvider,
+    TakeoverMuteStore? muteStore,
     Future<bool> Function()? sessionValidator,
     void Function(String message)? onLog,
   }) : _gateway = gateway,
        _resolver = resolver,
        _streamServer = streamServer,
+       _muteStore = muteStore,
        _host = host,
        _queueTailProvider = queueTailProvider,
        _sessionValidator = sessionValidator,
@@ -78,6 +122,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
   final SpeakerGateway _gateway;
   final SpeakerSongResolver _resolver;
   final LanStreamServer _streamServer;
+  final TakeoverMuteStore? _muteStore;
   final XiaoaiForegroundHost _host;
   final SpeakerQueueTailProvider _queueTailProvider;
   final Future<bool> Function()? _sessionValidator;
@@ -93,9 +138,37 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     _wakeWordFilter = filter;
   }
 
+  /// 监听启动自检（TrackFerry `RecoverVolumes` 的单次版）：上一轮
+  /// 接管若把音箱留在静音（App 被杀/恢复失败），落盘里留有待恢复
+  /// 音量——当前音量仍为 0 就设回去并清除；已被人调大（>0）则
+  /// 只清落盘；读不到状态就留着下次再试。
+  Future<void> recoverPendingVolumeOnStart(MinaDevice device) async {
+    final store = _muteStore;
+    if (store == null) return;
+    try {
+      final pending = await store.readPendingVolume(device.deviceId);
+      if (pending == null) return;
+      final status = await _gateway.getPlayerStatus(device.deviceId);
+      final volume = status?.volume;
+      if (volume == null) return;
+      if (volume > 0) {
+        await store.clearPendingVolume(device.deviceId);
+        return;
+      }
+      final ok = await _gateway.setVolume(device.deviceId, pending);
+      if (ok) {
+        await store.clearPendingVolume(device.deviceId);
+        _onLog?.call('takeover recovered muted volume $pending');
+      }
+    } catch (e) {
+      _onLog?.call('takeover volume recovery check error: $e');
+    }
+  }
+
   /// 对选定音箱开启接管：先探活登录态，再起监听与前台服务。
   Future<void> enable(MinaDevice device) async {
     await disable(keepRecord: true);
+    await recoverPendingVolumeOnStart(device);
 
     if (_sessionValidator != null) {
       bool valid;
@@ -128,6 +201,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
       resolver: _resolver,
       device: device,
       streamProxy: _streamServer,
+      muteStore: _muteStore,
       queueTailProvider: _queueTailProvider,
       onTakeoverRecord: (record) {
         if (mounted) {
@@ -173,10 +247,15 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     monitor.start();
   }
 
-  /// 关闭接管：停监听、停接力、撤前台服务。
+  /// 关闭接管：停监听、停接力、撤前台服务（先恢复可能持有的静音）。
   Future<void> disable({bool keepRecord = false}) async {
     _monitor?.stop();
     _monitor = null;
+    try {
+      await _engine?.restorePendingVolume();
+    } catch (_) {
+      // 恢复失败不影响关闭；落盘条目留待下次启动自检。
+    }
     _engine?.shutdown();
     _engine = null;
     try {

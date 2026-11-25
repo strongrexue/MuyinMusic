@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:muyin_music/core/app_info.dart';
 import 'package:muyin_music/core/services/app_update_service.dart';
+import 'package:muyin_music/core/storage/settings_store.dart';
 import 'package:muyin_music/core/ui/app_toast.dart';
 import 'package:muyin_music/core/ui/widgets/prism_environment.dart';
 import 'package:muyin_music/features/update/app_update_prompt.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:pub_semver/pub_semver.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -185,6 +187,179 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('ignore records only that version and keeps startup check on', (
+    tester,
+  ) async {
+    SharedPreferences? prefs;
+    final service = _FakeAppUpdateService(
+      release: _release(version: '1.1.0', pageUri: releaseUri),
+    );
+    AppUpdateCheckOutcome? outcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => outcome = value,
+      onPrefs: (value) => prefs = value,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+    expect(find.text('忽略此版本'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('app-update-ignore')));
+    await tester.pumpAndSettle();
+
+    expect(prefs!.getString('ignored_app_update_version'), 'v1.1.0');
+    expect(prefs!.getBool('check_for_updates_on_startup'), isNot(false));
+    expect(outcome, AppUpdateCheckOutcome.updateAvailable);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('automatic check skips an ignored version silently', (
+    tester,
+  ) async {
+    final service = _FakeAppUpdateService(
+      release: _release(version: '1.1.0', pageUri: releaseUri),
+    );
+    AppUpdateCheckOutcome? outcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => outcome = value,
+      showFeedback: false,
+      initialPrefs: const {'ignored_app_update_version': 'v1.1.0'},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('app-update-dialog')), findsNothing);
+    expect(outcome, AppUpdateCheckOutcome.ignoredVersion);
+    expect(service.callCount, 1);
+  });
+
+  testWidgets('automatic check still prompts for a version newer than the '
+      'ignored one', (tester) async {
+    final service = _FakeAppUpdateService(
+      release: _release(
+        version: '1.2.0',
+        pageUri:
+            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.2.0',
+      ),
+    );
+    AppUpdateCheckOutcome? outcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => outcome = value,
+      showFeedback: false,
+      initialPrefs: const {'ignored_app_update_version': 'v1.1.0'},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('app-update-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('app-update-later')));
+    await tester.pumpAndSettle();
+    expect(outcome, AppUpdateCheckOutcome.updateAvailable);
+  });
+
+  testWidgets('manual check bypasses the ignored version', (tester) async {
+    final service = _FakeAppUpdateService(
+      release: _release(version: '1.1.0', pageUri: releaseUri),
+    );
+    AppUpdateCheckOutcome? outcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => outcome = value,
+      initialPrefs: const {'ignored_app_update_version': 'v1.1.0'},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('app-update-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('app-update-later')));
+    await tester.pumpAndSettle();
+    expect(outcome, AppUpdateCheckOutcome.updateAvailable);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('later writes nothing and the next cold start prompts again', (
+    tester,
+  ) async {
+    SharedPreferences? prefs;
+    final service = _FakeAppUpdateService(
+      release: _release(version: '1.1.0', pageUri: releaseUri),
+    );
+    AppUpdateCheckOutcome? outcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => outcome = value,
+      showFeedback: false,
+      onPrefs: (value) => prefs = value,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('app-update-later')));
+    await tester.pumpAndSettle();
+
+    expect(outcome, AppUpdateCheckOutcome.updateAvailable);
+    // snooze 不落任何持久状态，误触可自愈。
+    expect(prefs!.getString('ignored_app_update_version'), isNull);
+    expect(prefs!.getBool('check_for_updates_on_startup'), isNot(false));
+
+    // 模拟下次冷启动：重建容器，持久状态里没有忽略记录，应再次提示。
+    AppUpdateCheckOutcome? secondOutcome;
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (value) => secondOutcome = value,
+      showFeedback: false,
+    );
+    await tester.tap(find.byKey(const ValueKey('check-update')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('app-update-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('app-update-later')));
+    await tester.pumpAndSettle();
+    expect(secondOutcome, AppUpdateCheckOutcome.updateAvailable);
+  });
+
+  testWidgets('legacy globally disabled startup check is healed once', (
+    tester,
+  ) async {
+    final service = _FakeAppUpdateService(
+      release: _release(version: '1.1.0', pageUri: releaseUri),
+    );
+    await _pumpHarness(
+      tester,
+      service: service,
+      launcher: (_) async => true,
+      onOutcome: (_) {},
+      initialPrefs: const {'check_for_updates_on_startup': false},
+    );
+
+    final context = tester.element(
+      find.byKey(const ValueKey('check-update')),
+    );
+    final container = ProviderScope.containerOf(context);
+    expect(container.read(settingsProvider).checkForUpdatesOnStartup, isTrue);
+  });
 }
 
 AppRelease _release({required String version, required String pageUri}) {
@@ -201,6 +376,9 @@ Future<void> _pumpHarness(
   required AppUpdateService service,
   required ExternalUriLauncher launcher,
   required ValueChanged<AppUpdateCheckOutcome> onOutcome,
+  bool showFeedback = true,
+  Map<String, Object> initialPrefs = const {},
+  ValueChanged<SharedPreferences>? onPrefs,
 }) async {
   PackageInfo.setMockInitialValues(
     appName: appDisplayName,
@@ -209,12 +387,16 @@ Future<void> _pumpHarness(
     buildNumber: '2',
     buildSignature: '',
   );
+  SharedPreferences.setMockInitialValues(initialPrefs);
+  final prefs = await SharedPreferences.getInstance();
+  onPrefs?.call(prefs);
 
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         appUpdateServiceProvider.overrideWithValue(service),
         externalUriLauncherProvider.overrideWithValue(launcher),
+        sharedPreferencesProvider.overrideWithValue(prefs),
       ],
       child: MaterialApp(
         localizationsDelegates: const [PrismChineseStrings.delegate],
@@ -231,7 +413,11 @@ Future<void> _pumpHarness(
                 key: const ValueKey('check-update'),
                 onPressed: () async {
                   onOutcome(
-                    await checkForAppUpdate(context, ref, showFeedback: true),
+                    await checkForAppUpdate(
+                      context,
+                      ref,
+                      showFeedback: showFeedback,
+                    ),
                   );
                 },
                 child: const Text('检查更新'),
