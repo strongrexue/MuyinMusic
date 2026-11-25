@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,9 +17,30 @@ import 'player_quality_sheet.dart';
 import 'player_sleep_timer_sheet.dart';
 import 'track_change_switcher.dart';
 
+/// Session-only "force landscape" switch for the player page. The top-bar
+/// button flips this; the player page is what calls
+/// `SystemChrome.setPreferredOrientations`, and it clears the switch when
+/// the page stops being the active route, so the lock never outlives the
+/// player.
+class LandscapeLockController extends StateNotifier<bool> {
+  LandscapeLockController() : super(false);
+
+  void toggle() => state = !state;
+
+  void clear() {
+    if (state) state = false;
+  }
+}
+
+final landscapeLockProvider =
+    StateNotifierProvider<LandscapeLockController, bool>(
+      (ref) => LandscapeLockController(),
+    );
+
 /// Top bar: track title/artist on the left, then the source · quality entry
-/// (opens the quality sheet), the KTV mode toggle, and a "more" menu holding
-/// the sleep timer, the background picker, and the equalizer entry.
+/// (opens the quality sheet), the force-landscape lock, and a "more" menu
+/// holding the KTV mode switch, the sleep timer, the background picker, and
+/// the equalizer entry.
 class TopChromeRow extends ConsumerWidget {
   const TopChromeRow({
     super.key,
@@ -76,6 +99,7 @@ class TopChromeRow extends ConsumerWidget {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
     );
+    final landscapeLocked = ref.watch(landscapeLockProvider);
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
     // The KTV background picker only exists on the landscape KTV page.
@@ -162,13 +186,12 @@ class TopChromeRow extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 4),
-            _KtvModeButton(
-              enabled: ktvModeEnabled,
+            _LandscapeLockButton(
+              locked: landscapeLocked,
               darkForeground: darkForeground,
               lightForeground: lightForeground,
-              onPressed: () => ref
-                  .read(settingsProvider.notifier)
-                  .setKtvModeEnabled(!ktvModeEnabled),
+              onPressed: () =>
+                  ref.read(landscapeLockProvider.notifier).toggle(),
             ),
             const SizedBox(width: 4),
             _MoreMenuButton(
@@ -255,17 +278,18 @@ class _QualityEntry extends ConsumerWidget {
   }
 }
 
-/// Toggles landscape KTV mode; filled with the theme's active container
-/// color while the mode is on (same treatment as the running sleep timer).
-class _KtvModeButton extends StatelessWidget {
-  const _KtvModeButton({
-    required this.enabled,
+/// Toggles the force-landscape lock; filled with the theme's active
+/// container color while the lock is on (same treatment as the running
+/// sleep timer).
+class _LandscapeLockButton extends StatelessWidget {
+  const _LandscapeLockButton({
+    required this.locked,
     required this.onPressed,
     this.darkForeground = false,
     this.lightForeground = false,
   });
 
-  final bool enabled;
+  final bool locked;
   final VoidCallback onPressed;
   final bool darkForeground;
   final bool lightForeground;
@@ -273,21 +297,94 @@ class _KtvModeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ChromeIconButton(
-      key: const ValueKey('player-ktv-mode-button'),
-      icon: Icons.screen_rotation_rounded,
-      tooltip: '横屏 KTV 模式',
+      key: const ValueKey('player-landscape-lock-button'),
+      tooltip: '强制横屏',
       onPressed: onPressed,
       darkForeground: darkForeground,
       lightForeground: lightForeground,
-      active: enabled,
+      active: locked,
+      iconBuilder: (color) => CustomPaint(
+        size: const Size.square(20),
+        painter: _LandscapeGlyphPainter(color),
+      ),
     );
   }
 }
 
-/// The overflow menu at the end of the top bar: the sleep timer, the
-/// background picker, and the equalizer, moved out of the row so the track
-/// title keeps its width. Picking an entry closes the menu and opens that
-/// entry's usual panel as a popup anchored to this same button.
+/// The force-landscape glyph, modelled on Kugou's: a portrait phone on the
+/// left (speaker dash near the top), a landscape frame sharing its bottom
+/// edge on the right, and an arc arrow in the top-right gap hooking down at
+/// the frame. Drawn in a 24×24 space to sit alongside the Material icons.
+class _LandscapeGlyphPainter extends CustomPainter {
+  const _LandscapeGlyphPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.9
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    // Portrait phone.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTRB(3.4, 2.6, 11.6, 21.4),
+        const Radius.circular(2.2),
+      ),
+      paint,
+    );
+    // Speaker dash.
+    canvas.drawLine(const Offset(6.1, 6.1), const Offset(8.9, 6.1), paint);
+    // Landscape frame, sharing the portrait's bottom edge.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTRB(11.6, 13.2, 21.2, 21.4),
+        const Radius.circular(2.2),
+      ),
+      paint,
+    );
+    // Arc arrow sweeping over the gap, tip hooking down at the frame.
+    const center = Offset(17.2, 10.6);
+    const radius = 5.6;
+    const start = -2.75;
+    const sweep = 2.0;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      start,
+      sweep,
+      false,
+      paint,
+    );
+    final end = start + sweep;
+    final tip = Offset(
+      center.dx + radius * math.cos(end),
+      center.dy + radius * math.sin(end),
+    );
+    // Direction of travel at the arc's end.
+    final tangent = Offset(-math.sin(end), math.cos(end));
+    for (final turn in [2.55, -2.55]) {
+      final dir = Offset(
+        tangent.dx * math.cos(turn) - tangent.dy * math.sin(turn),
+        tangent.dx * math.sin(turn) + tangent.dy * math.cos(turn),
+      );
+      canvas.drawLine(tip, tip + dir * 3.4, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LandscapeGlyphPainter oldDelegate) =>
+      color != oldDelegate.color;
+}
+
+/// The overflow menu at the end of the top bar: the KTV mode switch, the
+/// sleep timer, the background picker, and the equalizer, moved out of the
+/// row so the track title keeps its width. Picking an entry closes the menu
+/// and opens that entry's usual panel as a popup anchored to this same
+/// button; the KTV row is a switch and keeps the menu open.
 class _MoreMenuButton extends StatefulWidget {
   const _MoreMenuButton({
     required this.darkForeground,
@@ -376,11 +473,23 @@ class _MoreMenuItems extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final remaining = ref.watch(sleepTimerProvider);
+    final ktvModeEnabled = ref.watch(
+      settingsProvider.select((s) => s.ktvModeEnabled),
+    );
     final scheme = Theme.of(context).colorScheme;
     Widget leading(IconData icon) =>
         Icon(icon, size: 20, color: scheme.onSurface);
     return prism.PopupMenu(
       items: [
+        prism.PopupMenuItem(
+          label: '横屏 KTV',
+          leading: leading(Icons.mic_rounded),
+          checked: ktvModeEnabled,
+          keepsOpen: true,
+          onPressed: () => ref
+              .read(settingsProvider.notifier)
+              .setKtvModeEnabled(!ktvModeEnabled),
+        ),
         prism.PopupMenuItem(
           label: '定时关闭',
           subtitle: remaining == null
@@ -413,15 +522,20 @@ class _MoreMenuItems extends ConsumerWidget {
 class _ChromeIconButton extends StatelessWidget {
   const _ChromeIconButton({
     super.key,
-    required this.icon,
+    this.icon,
+    this.iconBuilder,
     required this.tooltip,
     required this.onPressed,
     this.darkForeground = false,
     this.lightForeground = false,
     this.active = false,
-  });
+  }) : assert(icon != null || iconBuilder != null);
 
-  final IconData icon;
+  final IconData? icon;
+
+  /// Builds the glyph for buttons whose icon is not a Material glyph;
+  /// receives the same foreground color [icon] would have been tinted with.
+  final Widget Function(Color color)? iconBuilder;
   final String tooltip;
   final VoidCallback onPressed;
   final bool darkForeground;
@@ -431,6 +545,11 @@ class _ChromeIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final iconColor = active
+        ? scheme.onPrimaryContainer
+        : lightForeground
+        ? Colors.white
+        : (darkForeground ? Colors.black87 : playerInk(context));
     // Prism's button, not Material's: a popup can only anchor to a
     // PressSurface or PressRegion, and only the prism button is one.
     return Tooltip(
@@ -444,15 +563,9 @@ class _ChromeIconButton extends StatelessWidget {
               ? scheme.primaryContainer
               : Colors.white.withValues(alpha: 0.28),
         ),
-        icon: Icon(
-          icon,
-          color: active
-              ? scheme.onPrimaryContainer
-              : lightForeground
-              ? Colors.white
-              : (darkForeground ? Colors.black87 : playerInk(context)),
-          size: 20,
-        ),
+        icon: iconBuilder != null
+            ? iconBuilder!(iconColor)
+            : Icon(icon, color: iconColor, size: 20),
       ),
     );
   }

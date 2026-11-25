@@ -323,6 +323,102 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('top bar landscape lock button replaces the KTV toggle', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'tx:landscape-lock',
+        kind: PlayerTrackKind.remote,
+        title: '横屏锁定测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PlayerPage)),
+    );
+
+    final lockButton = find.byKey(
+      const ValueKey('player-landscape-lock-button'),
+    );
+    expect(lockButton, findsOneWidget);
+    expect(find.byKey(const ValueKey('player-ktv-mode-button')), findsNothing);
+    expect(find.byTooltip('强制横屏'), findsOneWidget);
+    expect(container.read(landscapeLockProvider), isFalse);
+
+    await tester.tap(lockButton);
+    await _pumpUi(tester);
+    expect(container.read(landscapeLockProvider), isTrue);
+
+    await tester.tap(lockButton);
+    await _pumpUi(tester);
+    expect(container.read(landscapeLockProvider), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('landscape lock button is present in the landscape top bar', (
+    tester,
+  ) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(915, 412),
+      track: const PlayerTrack(
+        id: 'tx:landscape-lock-wide',
+        kind: PlayerTrackKind.remote,
+        title: '横屏顶栏测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('player-landscape-lock-button')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('player-ktv-mode-button')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('more menu KTV switch toggles the KTV setting', (tester) async {
+    await _pumpPlayer(
+      tester,
+      size: const Size(390, 844),
+      track: const PlayerTrack(
+        id: 'tx:ktv-menu-switch',
+        kind: PlayerTrackKind.remote,
+        title: 'KTV 菜单开关测试',
+        artist: '测试歌手',
+        album: '测试专辑',
+        sourceLabel: 'QQ',
+        qualityLabel: '320k',
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PlayerPage)),
+    );
+    expect(container.read(settingsProvider).ktvModeEnabled, isFalse);
+
+    await tester.tap(find.byKey(const ValueKey('player-more-button')));
+    await _pumpUi(tester);
+    final ktvRow = find.descendant(
+      of: find.byType(prism.PopupMenu),
+      matching: find.text('横屏 KTV'),
+    );
+    expect(ktvRow, findsOneWidget);
+
+    await tester.tap(ktvRow);
+    await _pumpUi(tester);
+    expect(container.read(settingsProvider).ktvModeEnabled, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('portrait more menu has no background entry and shows cover', (
     tester,
   ) async {

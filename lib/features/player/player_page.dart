@@ -48,6 +48,7 @@ class PlayerPage extends ConsumerStatefulWidget {
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _systemBarsHidden = false;
+  bool _orientationLockApplied = false;
 
   /// Continuous compact-pager position (0 = cover page, 1 = lyrics page),
   /// shared with the background and the top chrome: the integrated
@@ -67,10 +68,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
+  /// Applies or releases the force-landscape lock. Guarded by
+  /// [_orientationLockApplied] so the platform call only fires on
+  /// transitions, same as [_syncKtvSystemUi].
+  void _syncOrientationLock(bool locked) {
+    if (locked == _orientationLockApplied) return;
+    _orientationLockApplied = locked;
+    SystemChrome.setPreferredOrientations(
+      locked
+          ? const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]
+          : const <DeviceOrientation>[],
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant PlayerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active && !widget.active) {
+      // The lock belongs to this page: leaving releases the orientation
+      // right away and resets the switch, so it cannot claim to be locked
+      // (or re-lock on its own) while another route is on top.
+      _syncOrientationLock(false);
+      ref.read(landscapeLockProvider.notifier).clear();
+    }
+  }
+
   @override
   void dispose() {
     if (_systemBarsHidden) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+    if (_orientationLockApplied) {
+      SystemChrome.setPreferredOrientations(const <DeviceOrientation>[]);
     }
     _compactPageProgress.dispose();
     super.dispose();
@@ -94,6 +126,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     // Hide the system bars only while landscape KTV is actually the
     // active page; the page stays mounted (inactive) under other routes.
     _syncKtvSystemUi(ktvChromePinned && widget.active);
+    // The force-landscape lock likewise applies only while this page is
+    // the active route.
+    final landscapeLocked = ref.watch(landscapeLockProvider);
+    _syncOrientationLock(landscapeLocked && widget.active);
     // Landscape without KTV drops the three-band column: the body
     // takes the full height and the top chrome floats over it, so the
     // cover and lyrics read as one plane with the chrome on top.
