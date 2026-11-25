@@ -9,7 +9,7 @@ PBXSourcesBuildPhase 或 PBXResourcesBuildPhase），手改一两次还行，
 这个脚本负责四件事：
 
 1. 把 Runner 侧新增的 Swift 源文件加进 Compile Sources
-   （含已并入 Runner 目录的 CyShineActivityAttributes.swift）。
+   （含已并入 Runner 目录的 MuyinActivityAttributes.swift）。
 2. 把 ios/Runner/Icons/*.png 逐个加进 Copy Bundle Resources。
    ⚠️ 必须是**单个文件**而不是文件夹引用：文件夹引用会保持 Icons/ 子目录结构，
    而 iOS 解析 Info.plist 的 CFBundleIconFiles 是在 bundle 根目录找图的。
@@ -40,23 +40,23 @@ ICONS_DIR = os.path.join(ROOT, "ios", "Runner", "Icons")
 # (文件名, 相对 Runner group 的路径)
 # Runner group 的 path 是 "Runner"，所以同目录文件直接写文件名。
 RUNNER_SOURCES = [
-    ("CyShineNativePlugin.swift", "CyShineNativePlugin.swift"),
+    ("MuyinNativePlugin.swift", "MuyinNativePlugin.swift"),
     # 原生 → Dart 的日志桥：把原生失败（实时活动 / 备用图标…）回灌到
     # App 内的「日志」页，否则 Release 包上只能看到 NSLog（用户看不到）。
-    ("CyShineNativeLog.swift", "CyShineNativeLog.swift"),
-    ("CyShineLiveActivityBridge.swift", "CyShineLiveActivityBridge.swift"),
+    ("MuyinNativeLog.swift", "MuyinNativeLog.swift"),
+    ("MuyinLiveActivityBridge.swift", "MuyinLiveActivityBridge.swift"),
     # 独立的系统媒体播放卡片通道（MPNowPlayingInfoCenter）：与 Live Activity
     # 解耦、无 @available 限制，巨魔 / iOS 16.x 下也能画锁屏播放卡片。
-    ("CyShineNowPlayingChannel.swift", "CyShineNowPlayingChannel.swift"),
+    ("MuyinNowPlayingChannel.swift", "MuyinNowPlayingChannel.swift"),
     # Live Activity 的属性定义，已并入 Runner 目录，随主 App 一起编译。
-    ("CyShineActivityAttributes.swift", "CyShineActivityAttributes.swift"),
+    ("MuyinActivityAttributes.swift", "MuyinActivityAttributes.swift"),
 ]
 
 DEPLOYMENT_TARGET = "16.2"
 
 # 资产目录里的备用图标集名。必须与
 #   · tool/fetch_app_icons.py 的 ALTERNATES 第 4 列
-#   · ios/Runner/CyShineNativePlugin.swift 的 alternateCandidates 首项
+#   · ios/Runner/MuyinNativePlugin.swift 的 alternateCandidates 首项
 # 逐字一致，否则 iOS 找不到图标。
 ALTERNATE_APPICON_NAMES = [
     "AppIconMidnight",
@@ -176,7 +176,7 @@ def ensure_asset_catalog_settings(text: str) -> str:
       · INCLUDE_ALL_APPICON_ASSETS：actool 默认只编主图标，
         不打开这个开关备用图标集会被整个丢掉（Assets.car 里根本没有）。
       · ALTERNATE_APPICON_NAMES：名字必须与 AppIcon<Name>.appiconset 目录名
-        逐字一致，也要与 ios/Runner/CyShineNativePlugin.swift 的
+        逐字一致，也要与 ios/Runner/MuyinNativePlugin.swift 的
         alternateCandidates 一致。
     """
     settings = [

@@ -30,10 +30,10 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$ROOT/ios/CyShineMusicWidget"
-BUILD="$ROOT/build/CyShineMusicWidget"
+SRC="$ROOT/ios/MuyinMusicWidget"
+BUILD="$ROOT/build/MuyinMusicWidget"
 
-NAME="CyShineMusicWidget"
+NAME="MuyinMusicWidget"
 # 实时活动（ActivityKit）的最低版本，与 patch_xcodeproj.py 保持一致。
 # 16.2 而不是 16.1：Activity.request / update / end / ActivityContent 都是 16.2 起才有。
 MIN_IOS="16.2"
@@ -44,8 +44,8 @@ if ! command -v xcrun >/dev/null 2>&1; then
 fi
 
 echo "[1/4] 检查源码"
-for f in CyShineActivityAttributes.swift CyShineLiveActivityWidget.swift \
-         CyShineHomeWidget.swift CyShineWidgetBundle.swift Info.plist; do
+for f in MuyinActivityAttributes.swift MuyinLiveActivityWidget.swift \
+         MuyinHomeWidget.swift MuyinWidgetBundle.swift Info.plist; do
   [ -f "$SRC/$f" ] || { echo "[error] 缺少 $SRC/$f" >&2; exit 1; }
 done
 ls -1 "$SRC" | sed 's/^/      /'
@@ -67,10 +67,10 @@ xcrun --sdk iphoneos swiftc \
   -framework WidgetKit \
   -framework ActivityKit \
   -o "$APPEX/$NAME" \
-  "$SRC/CyShineActivityAttributes.swift" \
-  "$SRC/CyShineLiveActivityWidget.swift" \
-  "$SRC/CyShineHomeWidget.swift" \
-  "$SRC/CyShineWidgetBundle.swift"
+  "$SRC/MuyinActivityAttributes.swift" \
+  "$SRC/MuyinLiveActivityWidget.swift" \
+  "$SRC/MuyinHomeWidget.swift" \
+  "$SRC/MuyinWidgetBundle.swift"
 
 echo "[3/4] 组装 .appex"
 cp "$SRC/Info.plist" "$APPEX/Info.plist"

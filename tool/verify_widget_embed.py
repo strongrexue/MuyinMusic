@@ -15,9 +15,9 @@ APP_PATH = sys.argv[1]          # build/ios/iphoneos/Runner.app
 BUILD_NAME = sys.argv[2]        # 2.0.9
 BUILD_NUMBER = sys.argv[3]      # 24
 
-APPEX = os.path.join(APP_PATH, "PlugIns", "CyShineMusicWidget.appex")
-BUILT_APPEX = os.path.join("build", "ios", "iphoneos", "CyShineMusicWidget.appex")
-SRC_WIDGET_PLIST = os.path.join("ios", "CyShineMusicWidget", "Info.plist")
+APPEX = os.path.join(APP_PATH, "PlugIns", "MuyinMusicWidget.appex")
+BUILT_APPEX = os.path.join("build", "ios", "iphoneos", "MuyinMusicWidget.appex")
+SRC_WIDGET_PLIST = os.path.join("ios", "MuyinMusicWidget", "Info.plist")
 PBXPROJ = os.path.join("ios", "Runner.xcodeproj", "project.pbxproj")
 APP_PLIST = os.path.join(APP_PATH, "Info.plist")
 
@@ -44,7 +44,7 @@ if not os.path.isdir(APPEX) and os.path.isdir(BUILT_APPEX):
 
 if not os.path.isdir(APPEX):
     fail(f"{APPEX} 不存在，灵动岛扩展没打进去")
-exe = os.path.join(APPEX, "CyShineMusicWidget")
+exe = os.path.join(APPEX, "MuyinMusicWidget")
 if not os.path.isfile(exe):
     fail(f"{exe} 不存在，扩展可执行文件缺失")
 
