@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muyin_music/core/xiaomi/mina_constants.dart';
 import 'package:muyin_music/core/xiaomi/mina_models.dart';
@@ -47,10 +49,7 @@ MinaPlayerStatus foreignPlaying(int positionMs) => MinaPlayerStatus(
 );
 
 /// 驱动点歌流程跑完：假时钟逐格推进，直到 future 完成。
-Future<bool> driveIntent(
-  Future<bool> future,
-  FakeTakeoverClock clock,
-) async {
+Future<bool> driveIntent(Future<bool> future, FakeTakeoverClock clock) async {
   var done = false;
   bool? result;
   future.then((v) {
@@ -248,7 +247,7 @@ void main() {
       );
       expect(await driveIntent(future, clock), isTrue);
       expect(records.single.success, isFalse);
-      expect(records.single.detail, startsWith('推播未落地'));
+      expect(records.single.detail, '被原生抢播');
       expect(engine.hasActiveRelay, isFalse);
     });
 
@@ -300,6 +299,151 @@ void main() {
       expect(records.single.success, isFalse);
       expect(records.single.detail, '被原生抢回');
       expect(engine.hasActiveRelay, isFalse);
+    });
+  });
+
+  group('TakeoverEngine 正证据判定（经代理）', () {
+    TakeoverEngine buildProxyEngine(
+      FakeSpeakerGateway gateway,
+      FakeTakeoverClock clock,
+      FakeStreamProxy proxy,
+      List<TakeoverRecord> records,
+    ) {
+      return TakeoverEngine(
+        gateway: gateway,
+        clock: clock,
+        resolver: FakeSpeakerResolver(),
+        device: fakeDevice(),
+        streamProxy: proxy,
+        onTakeoverRecord: records.add,
+      );
+    }
+
+    test('在播但未取流（原生抢先起播、audio_id 为空）→ 记录「被原生抢播」', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      // 原生在播形态：position 5000 一路在播，但从没取我们的流。
+      gateway.fallbackStatus = const MinaPlayerStatus(
+        statusCode: 1,
+        volume: 30,
+        positionMs: 5000,
+        durationMs: 200000,
+      );
+      final proxy = FakeStreamProxy(
+        publishResult: 'http://192.168.1.9:18761/stream/abc.mp3',
+        fetched: false,
+      );
+      final records = <TakeoverRecord>[];
+      final engine = buildProxyEngine(gateway, clock, proxy, records);
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(future, clock), isTrue);
+      expect(records.single.success, isFalse);
+      expect(records.single.detail, '被原生抢播');
+      expect(records.single.fetched, isFalse);
+      expect(engine.hasActiveRelay, isFalse);
+    });
+
+    test('从未取流且不在播 → 记录「推送未被取流」', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.fallbackStatus = const MinaPlayerStatus(
+        statusCode: 0,
+        volume: 30,
+      );
+      final proxy = FakeStreamProxy(
+        publishResult: 'http://192.168.1.9:18761/stream/abc.mp3',
+        fetched: false,
+      );
+      final records = <TakeoverRecord>[];
+      final engine = buildProxyEngine(gateway, clock, proxy, records);
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(future, clock), isTrue);
+      expect(records.single.success, isFalse);
+      expect(records.single.detail, '推送未被取流');
+    });
+
+    test('fetched+在播且 position=-1 → 确认落地，记录带阶段耗时', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.fallbackStatus = const MinaPlayerStatus(
+        statusCode: 1,
+        volume: 30,
+        positionMs: -1,
+        durationMs: 200000,
+      );
+      final proxy = FakeStreamProxy(
+        publishResult: 'http://192.168.1.9:18761/stream/abc.mp3',
+        fetched: true,
+      );
+      final records = <TakeoverRecord>[];
+      final engine = buildProxyEngine(gateway, clock, proxy, records);
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(future, clock), isTrue);
+      expect(records.single.success, isTrue);
+      expect(
+        records.single.stageMs.keys,
+        containsAll(['mute', 'resolve', 'push', 'confirm']),
+      );
+    });
+  });
+
+  group('TakeoverEngine 新指令取代旧流程', () {
+    test('旧点歌卡在解析时被新点歌取代：旧流程不推播、不写记录', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.add(oursPlaying(5000)); // 新歌的验证采样
+      final gate = Completer<ResolvedSong?>();
+      final resolver = FakeSpeakerResolver()
+        ..handler = (request) async {
+          if (request.keyword == '慢歌') return gate.future;
+          return const ResolvedSong(
+            url: 'http://example.com/fast.mp3',
+            title: '快歌',
+            artist: '歌手乙',
+            durationMs: 200000,
+          );
+        };
+      final records = <TakeoverRecord>[];
+      final engine = TakeoverEngine(
+        gateway: gateway,
+        clock: clock,
+        resolver: resolver,
+        device: fakeDevice(),
+        onTakeoverRecord: records.add,
+      );
+
+      final futureA = engine.handleIntent(
+        const PlaySongIntent('播放慢歌', keyword: '慢歌', title: '慢歌'),
+      );
+      await pumpMicrotasks();
+      expect(gateway.callNames, ['pause', 'stop']); // A 已压制、卡在解析
+
+      final futureB = engine.handleIntent(
+        const PlaySongIntent('播放快歌', keyword: '快歌', title: '快歌'),
+      );
+      expect(await driveIntent(futureB, clock), isTrue);
+      expect(records, hasLength(1));
+      expect(records.single.title, '快歌');
+
+      gate.complete(
+        const ResolvedSong(
+          url: 'http://example.com/slow.mp3',
+          title: '慢歌',
+          artist: '歌手甲',
+        ),
+      );
+      expect(await driveIntent(futureA, clock), isTrue);
+      expect(records, hasLength(1)); // A 不写记录
+      expect(
+        gateway.calls.where((c) => c.name == 'playMusic'),
+        hasLength(1), // 只有 B 推过
+      );
     });
   });
 
@@ -412,6 +556,96 @@ void main() {
       expect(records.single.success, isFalse); // position 不推进，未落地
       expect(setVolumeDetails(gateway), ['0', '50']); // 恢复的是新目标
       expect(store.values, isEmpty);
+    });
+
+    test('静音下发失败重试：第 2 次成功照常静音并恢复', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.addAll([
+        const MinaPlayerStatus(statusCode: 2, volume: 30), // 静音读音量
+        oursPlaying(5000), // 验证落地
+      ]);
+      gateway.setVolumeResults.addAll([false, true]); // 置 0 首败次成
+      final store = FakeTakeoverMuteStore();
+      final records = <TakeoverRecord>[];
+      final engine = buildMutedEngine(gateway, clock, store, records);
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(future, clock), isTrue);
+      expect(setVolumeDetails(gateway), ['0', '0', '30']);
+      expect(records.single.success, isTrue);
+      expect(store.values, isEmpty);
+    });
+
+    test('静音下发三次全败：记日志、不置静音持有，音量指令走直发', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.addAll([
+        const MinaPlayerStatus(statusCode: 2, volume: 30), // 静音读音量
+        oursPlaying(5000), // 验证落地（直推证据链）
+      ]);
+      gateway.setVolumeResult = false; // 所有 setVolume 都失败
+      final store = FakeTakeoverMuteStore();
+      final records = <TakeoverRecord>[];
+      final logs = <String>[];
+      final engine = TakeoverEngine(
+        gateway: gateway,
+        clock: clock,
+        resolver: FakeSpeakerResolver(),
+        device: fakeDevice(),
+        muteStore: store,
+        onTakeoverRecord: records.add,
+        onLog: logs.add,
+      );
+      final future = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(future, clock), isTrue);
+      expect(
+        logs,
+        contains('takeover mute failed: setVolume(0) not acknowledged'),
+      );
+      // 没持有静音：绝对音量指令直接下发，不去改恢复目标。
+      final before = gateway.calls.length;
+      await engine.handleIntent(const SetVolumeIntent('音量调到50', 50));
+      final newSetVolumes = gateway.calls
+          .skip(before)
+          .where((c) => c.name == 'setVolume')
+          .toList();
+      expect(newSetVolumes, hasLength(1));
+      expect(newSetVolumes.single.detail, '50');
+    });
+
+    test('已知音量（上一首顺手记的）→ 静音不再先读状态', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.fallbackStatus = null;
+      gateway.statusQueue.addAll([
+        const MinaPlayerStatus(statusCode: 2, volume: 30), // 首静音读音量
+        oursPlaying(5000), // 首验证
+      ]);
+      final store = FakeTakeoverMuteStore();
+      final records = <TakeoverRecord>[];
+      final engine = buildMutedEngine(gateway, clock, store, records);
+      final first = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(first, clock), isTrue);
+      expect(records.single.success, isTrue);
+
+      gateway.calls.clear();
+      gateway.statusQueue.add(oursPlaying(5000)); // 次验证（唯一状态采样）
+      final second = engine.handleIntent(
+        const PlaySongIntent('播放周杰伦晴天', keyword: '周杰伦晴天', title: '周杰伦晴天'),
+      );
+      expect(await driveIntent(second, clock), isTrue);
+      expect(records, hasLength(2));
+      expect(records[1].success, isTrue);
+      // 静音没抢先读状态：首个 status 采样发生在推播之后（验证）。
+      final names = gateway.callNames;
+      expect(names.indexOf('status'), greaterThan(names.indexOf('playMusic')));
+      expect(setVolumeDetails(gateway), ['0', '30']);
     });
   });
 

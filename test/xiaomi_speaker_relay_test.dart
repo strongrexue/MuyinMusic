@@ -54,7 +54,7 @@ class FakeStreamProxy implements SpeakerStreamProxy {
   }
 
   @override
-  bool wasFetched(String pushUrl) => false;
+  bool wasFetched(String pushUrl) => true;
 }
 
 Future<void> elapse(FakeTakeoverClock clock, int seconds) async {
@@ -69,8 +69,7 @@ void main() {
     test('时长到点且设备进度已到尾 → 切下一首', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       // position 随墙钟推进（模拟真实播放）。
       gateway.statusFn = () => MinaPlayerStatus(
         statusCode: 1,
@@ -96,8 +95,7 @@ void main() {
     test('position 曾 >10s 又跌回 <3s → 判定播完切歌', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       gateway.statusQueue.addAll(const [
         MinaPlayerStatus(statusCode: 1, positionMs: 5000),
         MinaPlayerStatus(statusCode: 1, positionMs: 12000),
@@ -136,8 +134,7 @@ void main() {
           durationMs: 300000,
         ),
       );
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       final proxy = FakeStreamProxy();
       final relay = buildRelay(gateway, clock, resolver, streamProxy: proxy);
       await relay.startWith(songA, const [
@@ -148,10 +145,7 @@ void main() {
       expect(proxy.publishedUpstreams, ['http://example.com/b.mp3']);
       final pushes = gateway.calls.where((c) => c.name == 'playMusic').toList();
       expect(pushes, hasLength(1));
-      expect(
-        pushes.single.detail,
-        'http://192.168.1.9:18761/stream/relay.mp3',
-      );
+      expect(pushes.single.detail, 'http://192.168.1.9:18761/stream/relay.mp3');
       expect(relay.nowPlaying?.title, '麻雀');
       relay.stop();
     });
@@ -161,8 +155,7 @@ void main() {
     test('连续 2 次未播且 position 不推进 → 结束会话，不再推歌', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       RelayEndReason? endedReason;
       gateway.statusFn = () => const MinaPlayerStatus(
         statusCode: 2,
@@ -196,8 +189,7 @@ void main() {
     test('连续 2 次读到原生在播 → 按外部停止收尾', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       RelayEndReason? endedReason;
       gateway.statusFn = () => const MinaPlayerStatus(
         statusCode: 1,
@@ -230,8 +222,7 @@ void main() {
     test('外来采样的 position 不记账：不会被回零探测误判播完切歌', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      final resolver = FakeSpeakerResolver()
-        ..byKeyword['李荣浩 麻雀'] = songB;
+      final resolver = FakeSpeakerResolver()..byKeyword['李荣浩 麻雀'] = songB;
       var foreign = true;
       gateway.statusFn = () => foreign
           ? const MinaPlayerStatus(
@@ -296,10 +287,7 @@ void main() {
       expect(await relay.previous(), isTrue);
       expect(relay.nowPlaying?.title, '晴天');
       // 回第一首走的是 startWith 的缓存，没有重新解析。
-      expect(
-        resolver.requests.where((r) => r.keyword == '周杰伦 晴天'),
-        isEmpty,
-      );
+      expect(resolver.requests.where((r) => r.keyword == '周杰伦 晴天'), isEmpty);
 
       expect(await relay.next(), isTrue); // 麻雀
       expect(await relay.next(), isTrue); // 歌C

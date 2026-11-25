@@ -27,6 +27,7 @@ class TakeoverRecord {
     this.upstreamHostPath,
     this.viaProxy = false,
     this.fetched = false,
+    this.stageMs = const {},
   });
 
   /// 触发这次接管的语音原话。
@@ -58,6 +59,10 @@ class TakeoverRecord {
 
   /// 音箱是否已从代理取流。
   final bool fetched;
+
+  /// 阶段耗时（毫秒）：mute / resolve / push / confirm，
+  /// 供排查接管时序（内部字段，UI 不强制展示）。
+  final Map<String, int> stageMs;
 }
 
 /// 接管记录最多保留条数。
@@ -102,6 +107,7 @@ class XiaoaiTakeoverState {
     this.lastRecord,
     this.records = const [],
     this.errorMessage,
+    this.diagnosticLog = const [],
   });
 
   final TakeoverPhase phase;
@@ -116,6 +122,9 @@ class XiaoaiTakeoverState {
   final List<TakeoverRecord> records;
   final String? errorMessage;
 
+  /// 诊断日志（旧→新，带时间戳；落盘环形缓冲的快照）。
+  final List<String> diagnosticLog;
+
   XiaoaiTakeoverState copyWith({
     TakeoverPhase? phase,
     String? deviceName,
@@ -125,6 +134,7 @@ class XiaoaiTakeoverState {
     List<TakeoverRecord>? records,
     String? errorMessage,
     bool clearError = false,
+    List<String>? diagnosticLog,
   }) {
     return XiaoaiTakeoverState(
       phase: phase ?? this.phase,
@@ -133,6 +143,7 @@ class XiaoaiTakeoverState {
       lastRecord: lastRecord ?? this.lastRecord,
       records: records ?? this.records,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      diagnosticLog: diagnosticLog ?? this.diagnosticLog,
     );
   }
 }

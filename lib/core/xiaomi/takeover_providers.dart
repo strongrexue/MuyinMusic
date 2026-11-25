@@ -16,6 +16,7 @@ import 'takeover/speaker_intent.dart';
 import 'takeover/speaker_resolver.dart';
 import 'takeover/takeover_clock.dart';
 import 'takeover/takeover_engine.dart';
+import 'takeover/takeover_log.dart';
 import 'takeover/takeover_state.dart';
 import 'takeover/wake_word_filter.dart';
 import 'xiaoai_foreground_host.dart';
@@ -75,19 +76,25 @@ final speakerStreamServerProvider = Provider<LanStreamServer>((ref) {
   return LanStreamServer();
 });
 
+/// 诊断日志的落盘键（环形缓冲快照，字符串列表）。
+const String xiaoaiDiagnosticLogPrefsKey = 'xiaoai_takeover_diagnostic_log_v1';
+
 /// 接管状态（模块三 UI 消费）：enable/disable 由设置页驱动。
 final xiaoaiTakeoverControllerProvider =
-    StateNotifierProvider<XiaoaiTakeoverController, XiaoaiTakeoverState>((
-      ref,
-    ) {
+    StateNotifierProvider<XiaoaiTakeoverController, XiaoaiTakeoverState>((ref) {
       final client = ref.watch(minaClientProvider);
+      final prefs = ref.watch(sharedPreferencesProvider);
       return XiaoaiTakeoverController(
         gateway: MinaClientGateway(client),
         sessionValidator: client.validateToken,
         resolver: ref.watch(speakerSongResolverProvider),
         streamServer: ref.watch(speakerStreamServerProvider),
-        muteStore: SharedPreferencesTakeoverMuteStore(
-          ref.watch(sharedPreferencesProvider),
+        muteStore: SharedPreferencesTakeoverMuteStore(prefs),
+        diagnosticLog: TakeoverLogBuffer(
+          initial: prefs.getStringList(xiaoaiDiagnosticLogPrefsKey) ?? [],
+          onChanged: (entries) => unawaited(
+            prefs.setStringList(xiaoaiDiagnosticLogPrefsKey, entries),
+          ),
         ),
         host: ref.watch(xiaoaiForegroundHostProvider),
         queueTailProvider: (song) =>
@@ -107,26 +114,45 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     required XiaoaiForegroundHost host,
     required SpeakerQueueTailProvider queueTailProvider,
     TakeoverMuteStore? muteStore,
+    TakeoverLogBuffer? diagnosticLog,
     Future<bool> Function()? sessionValidator,
     void Function(String message)? onLog,
   }) : _gateway = gateway,
        _resolver = resolver,
        _streamServer = streamServer,
        _muteStore = muteStore,
+       _diagnosticLog = diagnosticLog,
        _host = host,
        _queueTailProvider = queueTailProvider,
        _sessionValidator = sessionValidator,
        _onLog = onLog,
-       super(const XiaoaiTakeoverState());
+       super(
+         XiaoaiTakeoverState(diagnosticLog: diagnosticLog?.entries ?? const []),
+       );
 
   final SpeakerGateway _gateway;
   final SpeakerSongResolver _resolver;
   final LanStreamServer _streamServer;
   final TakeoverMuteStore? _muteStore;
+  final TakeoverLogBuffer? _diagnosticLog;
   final XiaoaiForegroundHost _host;
   final SpeakerQueueTailProvider _queueTailProvider;
   final Future<bool> Function()? _sessionValidator;
   final void Function(String message)? _onLog;
+
+  /// 日志落点：写环形缓冲（落盘）+ 同步进状态供页面展示，
+  /// 再转发外部 onLog。此前控制器没人传 onLog，引擎/监听的
+  /// 日志全部丢弃，设备端零痕迹（1.3.27 审计定版）。
+  void _log(String message) {
+    final buffer = _diagnosticLog;
+    if (buffer != null) {
+      buffer.add(message);
+      if (mounted) {
+        state = state.copyWith(diagnosticLog: buffer.entries);
+      }
+    }
+    _onLog?.call(message);
+  }
 
   ConversationMonitor? _monitor;
   TakeoverEngine? _engine;
@@ -158,10 +184,10 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
       final ok = await _gateway.setVolume(device.deviceId, pending);
       if (ok) {
         await store.clearPendingVolume(device.deviceId);
-        _onLog?.call('takeover recovered muted volume $pending');
+        _log('takeover recovered muted volume $pending');
       }
     } catch (e) {
-      _onLog?.call('takeover volume recovery check error: $e');
+      _log('takeover volume recovery check error: $e');
     }
   }
 
@@ -191,7 +217,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
     try {
       await _streamServer.start();
     } catch (e) {
-      _onLog?.call('stream server start failed: $e');
+      _log('stream server start failed: $e');
     }
 
     const clock = SystemTakeoverClock();
@@ -217,7 +243,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
             ? state.copyWith(clearNowPlaying: true)
             : state.copyWith(nowPlaying: nowPlaying);
       },
-      onLog: _onLog,
+      onLog: _log,
     );
     final monitor = ConversationMonitor(
       fetcher: () => _gateway.fetchLatestAsk(
@@ -226,14 +252,21 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
         limit: 5,
       ),
       clock: clock,
-      onRecord: (record) async {
+      onRecord: (record) {
         final query = _wakeWordFilter.apply(record.query);
         if (query == null) return; // 未命中口令：放行原生，不接管
         final intent = parseSpeakerIntent(query);
         if (intent == null) return; // 不认识的指令交还原生
-        await engine.handleIntent(intent);
+        // 不 await：处理一条指令（含解析/守卫）不再阻塞轮询，
+        // 新指令由引擎代际令牌取代旧流程。
+        unawaited(
+          engine.handleIntent(intent).catchError((Object e) {
+            _log('takeover intent error: $e');
+            return false;
+          }),
+        );
       },
-      onLog: _onLog,
+      onLog: _log,
     );
     _engine = engine;
     _monitor = monitor;
@@ -242,6 +275,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
       deviceName: _displayName(device),
       lastRecord: state.lastRecord,
       records: state.records,
+      diagnosticLog: state.diagnosticLog,
     );
     unawaited(_host.start());
     monitor.start();
@@ -269,6 +303,7 @@ class XiaoaiTakeoverController extends StateNotifier<XiaoaiTakeoverState> {
         phase: TakeoverPhase.disabled,
         lastRecord: keepRecord ? state.lastRecord : null,
         records: keepRecord ? state.records : const [],
+        diagnosticLog: state.diagnosticLog,
       );
     }
   }

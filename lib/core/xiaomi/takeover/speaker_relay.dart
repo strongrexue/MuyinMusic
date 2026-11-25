@@ -239,14 +239,15 @@ class SpeakerRelay {
     }
     // 只认回读验证：回执不可信（3012 假失败 / 云端受理但设备没拉流
     // 的假成功都存在），两者矛盾时记日志。
-    final verified = await verifyPushLanded(
+    final outcome = await verifyPushLanded(
       _gateway,
       _clock,
       deviceId,
       fetchedSignal: fetchedSignal,
     );
+    final verified = outcome == PushVerifyOutcome.landed;
     if (ok != verified) {
-      _onLog?.call('relay push receipt=$ok but verify=$verified');
+      _onLog?.call('relay push receipt=$ok but verify=$outcome');
     }
     return verified;
   }

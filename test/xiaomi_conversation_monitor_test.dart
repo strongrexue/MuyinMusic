@@ -100,18 +100,29 @@ void main() {
         onRecord: (_) {},
       );
       await monitor.pollOnce();
-      expect(monitor.currentBackoff, const Duration(seconds: 4));
+      expect(monitor.currentBackoff, const Duration(seconds: 1));
       await monitor.pollOnce();
-      expect(monitor.currentBackoff, const Duration(seconds: 8));
+      expect(monitor.currentBackoff, const Duration(seconds: 2));
+      await monitor.pollOnce();
+      await monitor.pollOnce();
       await monitor.pollOnce();
       await monitor.pollOnce();
       await monitor.pollOnce();
       expect(monitor.currentBackoff, const Duration(seconds: 30));
     });
+
+    test('默认轮询间隔为 500ms（TrackFerry 实证值）', () {
+      final monitor = ConversationMonitor(
+        fetcher: () async => const ConversationFetchSuccess([]),
+        clock: FakeTakeoverClock(),
+        onRecord: (_) {},
+      );
+      expect(monitor.pollInterval, const Duration(milliseconds: 500));
+    });
   });
 
   group('ConversationMonitor 启停循环', () {
-    test('start 后立即轮询一轮，间隔 2s 再轮，stop 后不再轮询', () async {
+    test('start 后立即轮询一轮，间隔 500ms 再轮，stop 后不再轮询', () async {
       var fetchCount = 0;
       final clock = FakeTakeoverClock();
       final monitor = ConversationMonitor(
@@ -125,7 +136,7 @@ void main() {
       monitor.start();
       await pumpMicrotasks();
       expect(fetchCount, 1);
-      clock.advance(const Duration(seconds: 2));
+      clock.advance(const Duration(milliseconds: 500));
       await pumpMicrotasks();
       expect(fetchCount, 2);
       monitor.stop();

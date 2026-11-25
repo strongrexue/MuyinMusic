@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muyin_music/core/xiaomi/lan_stream_server.dart';
 import 'package:muyin_music/core/xiaomi/mina_models.dart';
+import 'package:muyin_music/core/xiaomi/takeover/takeover_log.dart';
 import 'package:muyin_music/core/xiaomi/takeover_providers.dart';
 import 'package:muyin_music/core/xiaomi/xiaoai_foreground_host.dart';
 
@@ -11,8 +12,9 @@ import 'xiaomi_takeover_test_utils.dart';
 XiaoaiTakeoverController buildController(
   FakeSpeakerGateway gateway,
   FakeTakeoverClock clock,
-  FakeTakeoverMuteStore store,
-) {
+  FakeTakeoverMuteStore store, {
+  TakeoverLogBuffer? diagnosticLog,
+}) {
   return XiaoaiTakeoverController(
     gateway: gateway,
     resolver: FakeSpeakerResolver(),
@@ -20,6 +22,7 @@ XiaoaiTakeoverController buildController(
     host: const XiaoaiForegroundHost(),
     queueTailProvider: (_) => const [],
     muteStore: store,
+    diagnosticLog: diagnosticLog,
   );
 }
 
@@ -28,9 +31,7 @@ void main() {
     test('有待恢复音量且当前音量为 0 → 设回去并清落盘', () async {
       final clock = FakeTakeoverClock();
       final gateway = FakeSpeakerGateway(clock);
-      gateway.statusQueue.add(
-        const MinaPlayerStatus(statusCode: 2, volume: 0),
-      );
+      gateway.statusQueue.add(const MinaPlayerStatus(statusCode: 2, volume: 0));
       final store = FakeTakeoverMuteStore()..values['device-1'] = 40;
       final controller = buildController(gateway, clock, store);
 
@@ -78,6 +79,27 @@ void main() {
       await controller.recoverPendingVolumeOnStart(fakeDevice());
 
       expect(gateway.calls, isEmpty);
+    });
+
+    test('控制器日志落缓冲并同步进状态（页面可见）', () async {
+      final clock = FakeTakeoverClock();
+      final gateway = FakeSpeakerGateway(clock);
+      gateway.statusQueue.add(const MinaPlayerStatus(statusCode: 2, volume: 0));
+      final store = FakeTakeoverMuteStore()..values['device-1'] = 40;
+      final buffer = TakeoverLogBuffer(
+        now: () => DateTime(2026, 11, 25, 16, 20, 5),
+      );
+      final controller = buildController(
+        gateway,
+        clock,
+        store,
+        diagnosticLog: buffer,
+      );
+
+      await controller.recoverPendingVolumeOnStart(fakeDevice());
+
+      expect(buffer.entries, ['16:20:05 takeover recovered muted volume 40']);
+      expect(controller.state.diagnosticLog, buffer.entries);
     });
   });
 }

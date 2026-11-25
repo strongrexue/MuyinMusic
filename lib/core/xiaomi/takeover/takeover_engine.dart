@@ -39,13 +39,16 @@ abstract interface class TakeoverMuteStore {
 /// 时序照 TrackFerry `internal/takeover` 原版（参数全部取其
 /// DefaultTiming 原值）：
 /// 1. 发现点歌指令即静音（原音量先落盘再置 0，罩住后面的解析期，
-///    对应 TrackFerry 在路由决定前就调用的 Quiet），同时第一轮
-///    halt（pause 与 stop 并发，个别型号对单独 stop 不理）；
+///    对应 TrackFerry 在路由决定前就调用的 Quiet），与第一轮
+///    halt（pause 与 stop 并发，个别型号对单独 stop 不理）并行
+///    发出（TrackFerry mute 与 stop1 同毫秒）；
 /// 2. 解析+探测在静音中进行；push 前补第二轮 halt，两轮之间至少
 ///    间隔 Settle 600ms（解析更快时补睡）；
-/// 3. 推播后回读验证（position 证据链 + audio_id 身份门）；
-/// 4. 落地后立即恢复音量，随后进入 Guard 8s 守卫：外来 audio_id
-///    在播就 halt + 重推（MaxReplays 2 次），抢不回如实记失败；
+/// 3. 推播后回读验证（正证据模型：取流+在播才算落地，
+///    见 verifyPushLanded）；
+/// 4. 落地后立即恢复音量，随后进入 Guard 8s 守卫：同一套正
+///    证据判定认出外来播放就 halt + 重推（MaxReplays 2 次），
+///    抢不回如实记失败；
 /// 5. 没找到歌不交还原生：保持静音 quietSettle 20s 再恢复音量
 ///    （等小爱自己的版本也没机会起播）。
 class TakeoverEngine {
@@ -166,9 +169,7 @@ class TakeoverEngine {
   void shutdown() {
     _relay?.stop();
     if (_mutedHeld) {
-      unawaited(
-        restorePendingVolume().catchError((Object _) {}),
-      );
+      unawaited(restorePendingVolume().catchError((Object _) {}));
     }
   }
 
@@ -180,34 +181,55 @@ class TakeoverEngine {
     if (volume != null && volume > 0) _lastKnownVolume = volume;
   }
 
+  /// 下发音量并验回执：失败重试至多 2 次（间隔 300ms）。
+  /// 此前 _mute 直接丢弃 setVolume 回执、失败也记「已静音」，
+  /// 静音没生效流程毫不知情（1.3.27 审计定版）。
+  Future<bool> _setVolumeVerified(int volume) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      bool ok;
+      try {
+        ok = await _gateway.setVolume(_deviceId, volume);
+      } catch (_) {
+        ok = false;
+      }
+      if (ok) return true;
+      if (attempt < 2) {
+        await _clock.sleep(const Duration(milliseconds: 300));
+      }
+    }
+    return false;
+  }
+
   /// 静音：恢复目标先落盘、再置 0。已有落盘条目时沿用它
-  /// （inherited：上一轮/上个进程留下的待恢复音量才是真实音量）。
-  /// 读不到当前音量时用上次已知音量；都没有则不静音（没把握
-  /// 恢复就不压，TrackFerry 同口径）。返回是否已持有静音。
+  /// （inherited：上一轮/上个进程留下的待恢复音量才是真实音量）；
+  /// 其次用内存已知音量——两者已知时不再为读音量多跑一趟状态
+  /// 查询（TrackFerry 同口径，省一个云端往返）。都未知才读状态；
+  /// 仍读不到则不静音（没把握恢复就不压，TrackFerry 同口径）。
+  /// 置 0 必须验回执：下发失败（重试后仍失败）记日志且不置
+  /// [_mutedHeld]，不装作已静音。返回是否已持有静音。
   Future<bool> _mute() async {
     final store = _muteStore;
     if (store == null) return false;
     final pending = await store.readPendingVolume(_deviceId);
-    if (pending != null) {
-      _muteTargetVolume = pending;
-      _mutedHeld = true;
-      await _gateway.setVolume(_deviceId, 0);
-      return true;
+    int? volume = pending ?? _lastKnownVolume;
+    if (volume == null) {
+      final status = await _gateway.getPlayerStatus(_deviceId);
+      _know(status);
+      final current = status?.volume;
+      if (current != null && current > 0) volume = current;
     }
-    final status = await _gateway.getPlayerStatus(_deviceId);
-    _know(status);
-    int? volume;
-    final current = status?.volume;
-    if (current != null && current > 0) volume = current;
-    volume ??= _lastKnownVolume;
     if (volume == null || volume <= 0) {
       _onLog?.call('takeover mute skipped: current volume unknown');
       return false;
     }
     // 先落盘后置 0：置 0 之后崩溃也有据可恢复。
-    await store.savePendingVolume(_deviceId, volume);
+    if (pending == null) await store.savePendingVolume(_deviceId, volume);
     _muteTargetVolume = volume;
-    await _gateway.setVolume(_deviceId, 0);
+    final ok = await _setVolumeVerified(0);
+    if (!ok) {
+      _onLog?.call('takeover mute failed: setVolume(0) not acknowledged');
+      return false;
+    }
     _mutedHeld = true;
     return true;
   }
@@ -255,20 +277,28 @@ class TakeoverEngine {
 
   Future<bool> _handlePlaySong(PlaySongIntent intent) async {
     final generation = ++_playSongGeneration;
-    await _mute();
+    // 代际令牌：新点歌到达后，旧流程在各检查点自行收尾（不写
+    // 记录、不恢复音量——静音持有权已移交新流程）。
+    bool stale() => generation != _playSongGeneration;
+
+    final startedMs = _clock.nowMs();
+    final stageMs = <String, int>{};
 
     var restored = false;
     Future<void> restoreOnce() async {
-      if (restored) return;
+      if (restored || stale()) return;
       restored = true;
       await restorePendingVolume();
     }
 
     var quietHold = false;
     try {
-      // 第一轮压制在发现时（解析之前），与静音一起罩住决策期。
+      // 静音与第一轮压制并行发出（TrackFerry mute 与 stop1
+      // 同毫秒），一起罩住后面的解析期。
       final halt1AtMs = _clock.nowMs();
-      await suppressNative();
+      await Future.wait([_mute(), suppressNative().then((_) => true)]);
+      stageMs['mute'] = _clock.nowMs() - startedMs;
+      if (stale()) return true;
 
       ResolvedSong? resolved;
       try {
@@ -283,6 +313,8 @@ class TakeoverEngine {
         _onLog?.call('takeover resolve error: $e');
         resolved = null;
       }
+      stageMs['resolve'] = _clock.nowMs() - startedMs - stageMs['mute']!;
+      if (stale()) return true;
 
       if (resolved == null || !isSpeakerPlayableUrl(resolved.url)) {
         _emitRecord(
@@ -293,15 +325,14 @@ class TakeoverEngine {
             atMs: _clock.nowMs(),
             success: false,
             detail: '未找到可播版本',
+            stageMs: stageMs,
           ),
         );
         // 没找到歌不交还原生出声：保持静音满 quietSettle 再恢复，
         // 等小爱自己的版本也没机会起播（TrackFerry Quiet run）。
         // 新点歌接手（代际变化）时这份延迟恢复自动作废。
         quietHold = true;
-        unawaited(
-          _restoreAfterQuietSettle(generation, restoreOnce),
-        );
+        unawaited(_restoreAfterQuietSettle(generation, restoreOnce));
         return true;
       }
 
@@ -312,8 +343,11 @@ class TakeoverEngine {
           Duration(milliseconds: _settle.inMilliseconds - elapsedMs),
         );
       }
+      if (stale()) return true;
       await suppressNative();
+      if (stale()) return true;
 
+      final pushStartedMs = _clock.nowMs();
       final push = await publishViaProxyOrDirect(
         _streamProxy,
         resolved.url,
@@ -323,13 +357,20 @@ class TakeoverEngine {
       if (push.viaProxy) {
         fetchedSignal = () => _streamProxy!.wasFetched(push.url);
       }
-      final pushed = await _pushAndVerify(
+      int? pushReceiptMs;
+      final outcome = await _pushAndVerify(
         push.url,
         fetchedSignal: fetchedSignal,
         onFetchedStale: restoreOnce,
+        cancelled: stale,
+        onPushed: () => pushReceiptMs = _clock.nowMs(),
       );
+      final confirmDoneMs = _clock.nowMs();
+      stageMs['push'] = (pushReceiptMs ?? confirmDoneMs) - pushStartedMs;
+      stageMs['confirm'] = confirmDoneMs - (pushReceiptMs ?? confirmDoneMs);
+      if (stale()) return true;
       final fetched = push.viaProxy && _streamProxy!.wasFetched(push.url);
-      if (!pushed) {
+      if (outcome != PushVerifyOutcome.landed) {
         _emitRecord(
           TakeoverRecord(
             query: intent.raw,
@@ -337,12 +378,17 @@ class TakeoverEngine {
             artist: resolved.artist,
             atMs: _clock.nowMs(),
             success: false,
-            detail: !push.viaProxy ? '推播未落地（代理不可用，已直推）' : '推播未落地',
+            detail: switch (outcome) {
+              PushVerifyOutcome.foreignPlaying => '被原生抢播',
+              PushVerifyOutcome.notFetched => '推送未被取流',
+              _ => !push.viaProxy ? '推播未落地（代理不可用，已直推）' : '推播未落地',
+            },
             sourceName: resolved.sourceName,
             qualityLabel: resolved.qualityLabel,
             upstreamHostPath: _hostPathOf(resolved.url),
             viaProxy: push.viaProxy,
             fetched: fetched,
+            stageMs: stageMs,
           ),
         );
         return true;
@@ -352,7 +398,12 @@ class TakeoverEngine {
       // 不等守卫结束），守卫在有声状态下继续。
       await restoreOnce();
 
-      final held = await _guardPushed(push.url, fetchedSignal: fetchedSignal);
+      final held = await _guardPushed(
+        push.url,
+        fetchedSignal: fetchedSignal,
+        cancelled: stale,
+      );
+      if (stale()) return true;
       if (!held) {
         _emitRecord(
           TakeoverRecord(
@@ -367,6 +418,7 @@ class TakeoverEngine {
             upstreamHostPath: _hostPathOf(resolved.url),
             viaProxy: push.viaProxy,
             fetched: fetched,
+            stageMs: stageMs,
           ),
         );
         return true;
@@ -384,6 +436,7 @@ class TakeoverEngine {
           upstreamHostPath: _hostPathOf(resolved.url),
           viaProxy: push.viaProxy,
           fetched: fetched,
+          stageMs: stageMs,
         ),
       );
 
@@ -412,14 +465,21 @@ class TakeoverEngine {
 
   /// 推后守卫（TrackFerry Guard 原值）：落地后 [_guardWindow] 内
   /// 轮询状态，未确认前 [_guardPollFast]、确认后 [_guardPoll]。
-  /// 外来 audio_id 在播 → halt + 重推同一 URL（最多
-  /// [_maxGuardReplays] 次），仍被抢回返回 false。
+  /// 身份判定与验证同一套正证据模型：在播的不是我们——外来
+  /// audio_id，或在播却没取我们的流——就 halt + 重推同一 URL
+  /// （最多 [_maxGuardReplays] 次），仍被抢回返回 false。
   /// 另有流丢失重推：代理信号一直没等到取流、设备又没在播，
   /// 距推播超过 Guard*3/8（3s）时重推一次（同一 replay 额度）。
+  /// [cancelled] 为真（被新指令取代）时提前退出，返回 true
+  /// 交调用方按代际丢弃。
   Future<bool> _guardPushed(
     String url, {
     bool Function()? fetchedSignal,
+    bool Function()? cancelled,
   }) async {
+    bool isForeignNow(MinaPlayerStatus status) =>
+        _isForeign(status) ||
+        (fetchedSignal != null && status.isPlaying && !fetchedSignal());
     var replays = 0;
     var confirmed = false;
     var pushedAtMs = _clock.nowMs();
@@ -427,9 +487,10 @@ class TakeoverEngine {
     final lostAfterMs = _guardWindow.inMilliseconds * 3 ~/ 8;
     while (_clock.nowMs() < deadlineMs) {
       await _clock.sleep(confirmed ? _guardPoll : _guardPollFast);
+      if (cancelled?.call() ?? false) return true;
       final status = await _gateway.getPlayerStatus(_deviceId);
       _know(status);
-      if (status != null && _isForeign(status)) {
+      if (status != null && isForeignNow(status)) {
         if (replays >= _maxGuardReplays) return false;
         replays++;
         await suppressNative();
@@ -439,10 +500,9 @@ class TakeoverEngine {
         continue;
       }
       if (!confirmed &&
-          fetchedSignal != null &&
-          fetchedSignal() &&
           status != null &&
-          status.isPlaying) {
+          status.isPlaying &&
+          (fetchedSignal == null || fetchedSignal())) {
         confirmed = true;
       }
       if (fetchedSignal != null &&
@@ -473,10 +533,12 @@ class TakeoverEngine {
     }
   }
 
-  Future<bool> _pushAndVerify(
+  Future<PushVerifyOutcome> _pushAndVerify(
     String url, {
     bool Function()? fetchedSignal,
     void Function()? onFetchedStale,
+    bool Function()? cancelled,
+    void Function()? onPushed,
   }) async {
     bool ok;
     if (_usePlayMusic) {
@@ -485,17 +547,20 @@ class TakeoverEngine {
       // play_url 无 REPLACE_ALL；压制第二轮已紧贴在推前，直接推。
       ok = await _gateway.playUrl(_deviceId, url);
     }
-    final verified = await verifyPushLanded(
+    onPushed?.call();
+    final outcome = await verifyPushLanded(
       _gateway,
       _clock,
       _deviceId,
       fetchedSignal: fetchedSignal,
       onFetchedStale: onFetchedStale,
+      cancelled: cancelled,
     );
-    if (ok != verified) {
-      _onLog?.call('takeover push receipt=$ok but verify=$verified');
+    final landed = outcome == PushVerifyOutcome.landed;
+    if (ok != landed) {
+      _onLog?.call('takeover push receipt=$ok but verify=$outcome');
     }
-    return verified;
+    return outcome;
   }
 
   /// 上游 URL 的 host+path（不含签名查询参数）；解析失败返回 null。

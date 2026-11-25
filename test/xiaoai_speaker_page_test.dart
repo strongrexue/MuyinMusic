@@ -303,6 +303,49 @@ void main() {
     expect(dy3 < dy2 && dy2 < dy1, isTrue);
   });
 
+  testWidgets('有诊断日志时显示「诊断日志」区，展开可见条目', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final settings = _makeSettingsController(
+      prefs,
+      loggedIn: true,
+      devices: const [_device],
+    );
+    await settings.handleLoginSuccess();
+    await settings.setTakeoverEnabled(true);
+
+    final takeover = _FakeTakeoverController();
+    takeover.showState(
+      const XiaoaiTakeoverState(
+        phase: TakeoverPhase.listening,
+        deviceName: '小爱音箱Pro',
+        diagnosticLog: [
+          '16:20:05 takeover mute failed: setVolume(0) not acknowledged',
+          '16:20:31 takeover push receipt=true but verify=foreignPlaying',
+        ],
+      ),
+    );
+    await _pumpPage(
+      tester,
+      settings: settings,
+      takeover: takeover,
+      prefs: prefs,
+    );
+
+    expect(find.text('诊断日志'), findsOneWidget);
+    await tester.tap(find.text('诊断日志'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('16:20:05 takeover mute failed: setVolume(0) not acknowledged'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        '16:20:31 takeover push receipt=true but verify=foreignPlaying',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('未选设备时拨开关先引导去选设备，不调用 enable', (tester) async {
     final prefs = await SharedPreferences.getInstance();
     final enableLog = <MinaDevice>[];
@@ -377,10 +420,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 总览里只有入口行：标题 + 状态副标题在，三态卡内容不在。
-    expect(
-      find.byKey(const ValueKey('xiaoai-settings-entry')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('xiaoai-settings-entry')), findsOneWidget);
     expect(find.text('小爱音箱'), findsOneWidget);
     expect(find.text('未开启'), findsOneWidget);
     expect(find.byKey(const ValueKey('xiaoai-takeover-switch')), findsNothing);

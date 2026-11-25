@@ -2,30 +2,52 @@ import '../mina_constants.dart';
 import 'speaker_gateway.dart';
 import 'takeover_clock.dart';
 
-/// 推播落地验证（miot `PUSH_VERIFY_*` 参数与 1.7.6 的证据链要求）。
+/// 推播落地验证的结局。
+enum PushVerifyOutcome {
+  /// 正证据确认落地：音箱取了我们的流且在播（或直推路径的
+  /// position 证据链成立）。
+  landed,
+
+  /// 在播的不是我们：audio_id 是外来的，或在播却始终没取我们的流
+  /// （原生小爱抢先起播的典型形态）。
+  foreignPlaying,
+
+  /// 推送从未被取流，设备也没在播我们的内容。
+  notFetched,
+
+  /// 证据不足以下结论（取了流但没在播、状态读不到、直推路径
+  /// position 证据链不成立等）。
+  unconfirmed,
+}
+
+/// 推播落地验证（正证据模型）。
 ///
 /// ubus 回执不可信：返回成功 ≠ 设备真在播（云端受理但设备没拉流），
 /// 返回失败 ≠ 没播（3012 超时但已生效）。下发后回读播放状态，
-/// 满足以下任一证据才算落地：
-/// - 两次采样 position 均 >0 且后一次大于前一次（真推进）；
-/// - 单次采样 position ≥ 3000ms 且在播（已播出数秒量级）；
-/// - 代理取流信号为真，且至少一份采样在播（取流+在播双证）；
-/// - position 恒不可得时，连续两次采样都是播放中（兜底）。
+/// 只认**正证据**：
 ///
-/// 首帧 position=0 不算落地：刚下发时设备常先报 status=1/position=0
-/// 却始终没拉到流，旧「position 落在起播窗口内即落地」规则会把这种
-/// 假播放误判为成功，故已删除。
-///
-/// 身份门（TrackFerry `foreign` 判定）：全部证据只认归属为我们或
-/// 未知的在播——采样在播且 audio_id 非空又不是 [kDefaultMusicAudioId]
-/// 时，那是原生小爱在播，立即判未落地。只看 position 会把原生的
-/// 播放记成我们的成功（1.3.26 真机实证）。
+/// - 经代理推播（[fetchedSignal] 非空）：落地 ⟺ 代理已被取流且
+///   采样在播。在播判定只看状态的播放标志，不依赖 position 数值
+///   （LX06 的 position 可为 -1/null，TrackFerry 确认同样只靠
+///   fetched+播放中）。position 证据链在此路径**不再成立**——
+///   原生在播时 position 照样推进，曾被误记为我们的落地
+///   （1.3.26/1.3.27 真机实证）。
+/// - 在播但没取流 = 外来播放在播：连续 2 次采样如此即判
+///   [PushVerifyOutcome.foreignPlaying]（给设备起播留一帧宽限）。
+/// - audio_id 非空且不是 [kDefaultMusicAudioId] 的在播同样是
+///   外来播放，立即判 foreign（TrackFerry `foreign` 判定）。
+/// - 直推回退（[fetchedSignal] 为空，无取流信号可凭）：沿用
+///   position 证据链（两次推进 / 单帧 ≥3000ms / position 恒
+///   不可得时连续两次在播），身份门同样生效。
 ///
 /// [onFetchedStale]：取流信号已为真、但迟迟没有在播确认时的一次性
 /// 回调（TrackFerry 的 UnmuteAfter：fetched 后 2.5s 仍未确认也先
 /// 恢复音量，不让用户干等静音）。触发时刻以采样帧近似（采样间隔
 /// 粒度），回调只触发一次，验证本身继续跑满。
-Future<bool> verifyPushLanded(
+///
+/// [cancelled]：外部废弃（新指令取代）时提前收尾，返回
+/// [PushVerifyOutcome.unconfirmed]，调用方按代际丢弃。
+Future<PushVerifyOutcome> verifyPushLanded(
   SpeakerGateway gateway,
   TakeoverClock clock,
   String deviceId, {
@@ -34,7 +56,11 @@ Future<bool> verifyPushLanded(
   bool Function()? fetchedSignal,
   Duration fetchedUnmuteAfter = const Duration(milliseconds: 2500),
   void Function()? onFetchedStale,
+  bool Function()? cancelled,
 }) async {
+  final fetchedMode = fetchedSignal != null;
+  var sawFetched = false;
+  var playingNotFetchedStreak = 0;
   int? lastPositionMs;
   var playingStreak = 0;
   var sawPosition = false;
@@ -42,8 +68,10 @@ Future<bool> verifyPushLanded(
   var fetchedStaleFired = false;
   for (var attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await clock.sleep(delay);
+    if (cancelled?.call() ?? false) return PushVerifyOutcome.unconfirmed;
     // 取流时刻以轮询近似：首次查到 fetched 的采样点记为取流时刻。
-    if (fetchedSignal != null && fetchedSignal()) {
+    if (fetchedMode && fetchedSignal()) {
+      sawFetched = true;
       fetchedAtMs ??= clock.nowMs();
       if (!fetchedStaleFired &&
           onFetchedStale != null &&
@@ -55,32 +83,53 @@ Future<bool> verifyPushLanded(
     final status = await gateway.getPlayerStatus(deviceId);
     if (status == null) {
       playingStreak = 0;
+      playingNotFetchedStreak = 0;
       continue;
     }
-    // 身份门：在播的是原生（外来 audio_id）→ 立即判未落地。
-    if (status.isForeignPlayback) return false;
+    // 身份门：在播的是原生（外来 audio_id）→ 立即判外来。
+    if (status.isForeignPlayback) return PushVerifyOutcome.foreignPlaying;
+
+    if (fetchedMode) {
+      final fetched = fetchedSignal();
+      if (fetched) sawFetched = true;
+      if (!status.isPlaying) {
+        playingNotFetchedStreak = 0;
+        continue;
+      }
+      // 正证据：取了我们的流且在播（position 是 -1/null 也算）。
+      if (fetched) return PushVerifyOutcome.landed;
+      // 在播却没取我们的流：播的是别人（多半是原生抢先起播）。
+      playingNotFetchedStreak++;
+      if (playingNotFetchedStreak >= 2) {
+        return PushVerifyOutcome.foreignPlaying;
+      }
+      continue;
+    }
+
+    // 直推回退：position 证据链。
     if (!status.isPlaying) {
       playingStreak = 0;
       lastPositionMs = status.positionMs ?? lastPositionMs;
       continue;
     }
     playingStreak++;
-    // 取流+在播双证：当前采样已在播且归属非外来，取流信号为真即落地。
-    if (fetchedSignal != null && fetchedSignal()) return true;
     final position = status.positionMs;
     if (position == null) {
       // position 恒不可得的设备才走连续在播兜底。
-      if (!sawPosition && playingStreak >= 2) return true;
+      if (!sawPosition && playingStreak >= 2) {
+        return PushVerifyOutcome.landed;
+      }
       continue;
     }
     sawPosition = true;
-    if (position >= 3000) return true;
+    if (position >= 3000) return PushVerifyOutcome.landed;
     if (lastPositionMs != null &&
         lastPositionMs > 0 &&
         position > lastPositionMs) {
-      return true;
+      return PushVerifyOutcome.landed;
     }
     lastPositionMs = position;
   }
-  return false;
+  if (fetchedMode && !sawFetched) return PushVerifyOutcome.notFetched;
+  return PushVerifyOutcome.unconfirmed;
 }

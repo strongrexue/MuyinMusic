@@ -107,6 +107,10 @@ class FakeSpeakerGateway implements SpeakerGateway {
 
   bool playMusicResult = true;
   bool playUrlResult = true;
+
+  /// setVolume 返回值脚本（按序消费，耗尽后用 [setVolumeResult]）。
+  final List<bool> setVolumeResults = [];
+  bool setVolumeResult = true;
   ConversationFetchResult askResult = const ConversationFetchSuccess([]);
 
   List<String> get callNames => [for (final c in calls) c.name];
@@ -154,7 +158,8 @@ class FakeSpeakerGateway implements SpeakerGateway {
   @override
   Future<bool> setVolume(String deviceId, int volume) async {
     _record('setVolume', '$volume');
-    return true;
+    if (setVolumeResults.isNotEmpty) return setVolumeResults.removeAt(0);
+    return setVolumeResult;
   }
 
   @override
@@ -186,9 +191,13 @@ class FakeSpeakerResolver implements SpeakerSongResolver {
   /// 按 keyword 区分结果（队列接力用）。
   final Map<String, ResolvedSong?> byKeyword = {};
 
+  /// 异步钩子（设置后优先于 result/byKeyword，可阻塞模拟慢解析）。
+  Future<ResolvedSong?> Function(SpeakerResolveRequest request)? handler;
+
   @override
   Future<ResolvedSong?> resolveTopOne(SpeakerResolveRequest request) async {
     requests.add(request);
+    if (handler != null) return handler!(request);
     if (byKeyword.containsKey(request.keyword)) {
       return byKeyword[request.keyword];
     }

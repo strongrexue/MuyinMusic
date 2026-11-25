@@ -122,10 +122,7 @@ class _XiaoaiSpeakerPageState extends ConsumerState<XiaoaiSpeakerPage> {
     final device = settings.selectedDevice;
 
     final (statusText, statusColor) = switch (takeover.phase) {
-      TakeoverPhase.error => (
-        takeover.errorMessage ?? '接管异常',
-        scheme.error,
-      ),
+      TakeoverPhase.error => (takeover.errorMessage ?? '接管异常', scheme.error),
       TakeoverPhase.listening => ('监听中', _statusGreen),
       TakeoverPhase.disabled =>
         settings.statusNote != null
@@ -134,11 +131,7 @@ class _XiaoaiSpeakerPageState extends ConsumerState<XiaoaiSpeakerPage> {
     };
 
     return [
-      _InfoRow(
-        label: '小米账号',
-        value: '已登录',
-        valueColor: _statusGreen,
-      ),
+      _InfoRow(label: '小米账号', value: '已登录', valueColor: _statusGreen),
       const Divider(height: 1),
       _InfoRow(
         label: '目标音箱',
@@ -218,6 +211,39 @@ class _XiaoaiSpeakerPageState extends ConsumerState<XiaoaiSpeakerPage> {
             ),
           ),
         ],
+      ],
+      if (takeover.diagnosticLog.isNotEmpty) ...[
+        const Divider(height: 1),
+        Material(
+          type: MaterialType.transparency,
+          child: ExpansionTile(
+            key: const ValueKey('xiaoai-diagnostic-log'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: Text('诊断日志', style: theme.textTheme.bodyLarge),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final line in takeover.diagnosticLog.reversed.take(20))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Text(
+                          line,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        ),
       ],
       const SizedBox(height: 8),
       Center(
@@ -312,10 +338,7 @@ class _WakeWordDialogState extends State<_WakeWordDialog> {
         controller: _controller,
         autofocus: true,
         textInputAction: TextInputAction.done,
-        decoration: const InputDecoration(
-          labelText: '口令词',
-          hintText: '例如：胖虎',
-        ),
+        decoration: const InputDecoration(labelText: '口令词', hintText: '例如：胖虎'),
         onSubmitted: (_) => _submit(),
       ),
     );

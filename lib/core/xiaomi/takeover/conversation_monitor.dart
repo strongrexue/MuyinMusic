@@ -41,7 +41,7 @@ class ConversationMonitor {
     required AskFetcher fetcher,
     required TakeoverClock clock,
     required ConversationRecordHandler onRecord,
-    this.pollInterval = const Duration(seconds: 2),
+    this.pollInterval = const Duration(milliseconds: 500),
     this.fetchLimit = 5,
     void Function(String message)? onLog,
   }) : _fetcher = fetcher,
@@ -54,7 +54,9 @@ class ConversationMonitor {
   final ConversationRecordHandler _onRecord;
   final void Function(String message)? _onLog;
 
-  /// 基础轮询间隔（蓝本默认 2s）。
+  /// 基础轮询间隔（TrackFerry 实证 500ms：其检测延迟
+  /// 369–586ms；2s 间隔曾让我们的检测+压制链路慢到原生抢先
+  /// 起播，1.3.27 真机实证）。
   final Duration pollInterval;
 
   /// 每轮拉取的记录条数（蓝本用 5）。
