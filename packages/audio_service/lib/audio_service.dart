@@ -951,6 +951,37 @@ class MediaControl {
       action == other.action;
 }
 
+/// Shares in-flight artwork downloads between media item events, keyed by
+/// art URL.
+///
+/// A track's metadata is re-sent whenever its duration resolves, its
+/// bluetooth lyric line changes, or the repeat/shuffle mode flips. Keying
+/// loads by URL keeps those re-sends waiting on the download already in
+/// progress instead of restarting it, and a completed load (successful or
+/// not) is forgotten, so a later re-send may retry after a failure.
+class SharedArtworkLoader {
+  final _inFlight = <String, Future<String?>>{};
+
+  /// Runs [load] for [key], or returns the load already in flight for it.
+  Future<String?> load(String key, Future<String?> Function() load) {
+    final existing = _inFlight[key];
+    if (existing != null) return existing;
+    final future = load();
+    _inFlight[key] = future;
+    future.then(
+      (_) => _forget(key, future),
+      onError: (_) => _forget(key, future),
+    );
+    return future;
+  }
+
+  void _forget(String key, Future<String?> future) {
+    if (identical(_inFlight[key], future)) {
+      _inFlight.remove(key);
+    }
+  }
+}
+
 /// Provides an API to manage the app's [AudioHandler]. An app must call [init]
 /// during initialisation to register the [AudioHandler] that will service all
 /// requests to play audio.
@@ -1026,74 +1057,88 @@ class AudioService {
     return handler;
   }
 
+  static final _sharedArtworkLoader = SharedArtworkLoader();
+
   static Future<void> _observeMediaItem() async {
-    Object? artFetchOperationId;
+    MediaItem? latestMediaItem;
     _handler.mediaItem.listen((mediaItem) async {
       if (mediaItem == null) {
         return;
       }
-      final operationId = Object();
-      artFetchOperationId = operationId;
+      latestMediaItem = mediaItem;
       final artUri = mediaItem.artUri;
       if (artUri == null || artUri.scheme == 'content') {
         _platform
             .setMediaItem(
                 SetMediaItemRequest(mediaItem: mediaItem._toMessage()))
             .catchError(_asyncError.add);
-      } else {
-        /// Sends media item to the platform.
-        /// We potentially need to fetch the art before that.
-        Future<void> sendToPlatform(String? filePath) async {
-          final extras = mediaItem.extras;
-          final platformMediaItem = mediaItem.copyWith(
-            extras: <String, dynamic>{
-              if (extras != null) ...extras,
-              'artCacheFile': filePath,
-            },
-          );
-          await _platform.setMediaItem(
-              SetMediaItemRequest(mediaItem: platformMediaItem._toMessage()));
-        }
-
-        if (artUri.scheme == 'file') {
-          sendToPlatform(artUri.toFilePath()).catchError(_asyncError.add);
-        } else {
-          // Try to load a cached file from memory.
-          final fileInfo =
-              await cacheManager.getFileFromMemory(artUri.toString());
-          final filePath = fileInfo?.file.path;
-          if (operationId != artFetchOperationId) {
-            return;
-          }
-
-          if (filePath != null) {
-            // If we successfully downloaded the art call to platform.
-            sendToPlatform(filePath).catchError(_asyncError.add);
-          } else {
-            // We haven't fetched the art yet, so show the metadata now, and again
-            // after we load the art.
-            try {
-              await _platform.setMediaItem(
-                  SetMediaItemRequest(mediaItem: mediaItem._toMessage()));
-            } catch (e) {
-              _asyncError.add(e);
-              return;
-            }
-            if (operationId != artFetchOperationId) {
-              return;
-            }
-            // Load the art.
-            final loadedFilePath = await _loadArtwork(mediaItem);
-            if (operationId != artFetchOperationId) {
-              return;
-            }
-            // If we successfully downloaded the art, call to platform.
-            if (loadedFilePath != null) {
-              sendToPlatform(loadedFilePath).catchError(_asyncError.add);
-            }
-          }
-        }
+        return;
       }
+
+      /// Sends [item] to the platform, with the resolved art file attached
+      /// when one is available.
+      Future<void> sendToPlatform(MediaItem item, String? filePath) async {
+        final extras = item.extras;
+        final platformMediaItem = item.copyWith(
+          extras: <String, dynamic>{
+            if (extras != null) ...extras,
+            'artCacheFile': filePath,
+          },
+        );
+        await _platform.setMediaItem(
+            SetMediaItemRequest(mediaItem: platformMediaItem._toMessage()));
+      }
+
+      if (artUri.scheme == 'file') {
+        sendToPlatform(mediaItem, artUri.toFilePath())
+            .catchError(_asyncError.add);
+        return;
+      }
+
+      // Network art: prefer a file that is already cached, so the first
+      // metadata published for a track can carry its artwork. Cars read
+      // the artwork once, at track change, and never ask again, so an
+      // art-less first publish can mean no cover for the whole track.
+      final url = artUri.toString();
+      final memoryInfo = await cacheManager.getFileFromMemory(url);
+      var filePath = memoryInfo?.file.path;
+      if (filePath == null) {
+        final diskInfo = await cacheManager.getFileFromCache(url);
+        filePath = diskInfo?.file.path;
+      }
+      if (!identical(latestMediaItem, mediaItem)) {
+        // A newer media item superseded this one while the caches were
+        // being checked; its own event runs this same flow.
+        return;
+      }
+      if (filePath != null) {
+        sendToPlatform(mediaItem, filePath).catchError(_asyncError.add);
+        return;
+      }
+
+      // We haven't fetched the art yet, so show the metadata now, and
+      // again after we load the art. The load is shared per URL, so
+      // re-sends of this track (duration, lyrics, playback mode) wait on
+      // the same download instead of invalidating it.
+      try {
+        await _platform.setMediaItem(
+            SetMediaItemRequest(mediaItem: mediaItem._toMessage()));
+      } catch (e) {
+        _asyncError.add(e);
+        return;
+      }
+      final loadedFilePath = await _sharedArtworkLoader.load(
+          url, () => _loadArtwork(mediaItem));
+      if (loadedFilePath == null) {
+        return;
+      }
+      // Attach the art to the freshest metadata for this track, which may
+      // be a re-send newer than the event that started the load.
+      final current = latestMediaItem;
+      if (current == null || current.artUri?.toString() != url) {
+        return;
+      }
+      sendToPlatform(current, loadedFilePath).catchError(_asyncError.add);
     });
   }
 
@@ -1240,6 +1285,16 @@ class AudioService {
   }
 
   static Future<String?> _loadArtwork(MediaItem mediaItem) async {
+    // One retry: a transient failure must not cost the track its artwork,
+    // and later media item re-sends check the cache again regardless.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final filePath = await _loadArtworkOnce(mediaItem);
+      if (filePath != null) return filePath;
+    }
+    return null;
+  }
+
+  static Future<String?> _loadArtworkOnce(MediaItem mediaItem) async {
     try {
       final artUri = mediaItem.artUri;
       if (artUri != null) {

@@ -802,6 +802,10 @@ public class AudioService extends MediaBrowserServiceCompat {
      *  - https://9to5google.com/2020/08/02/android-11-lockscreen-art/
      */
     synchronized void setMetadata(MediaMetadataCompat mediaMetadata) {
+        String mediaId = mediaMetadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        String previousId = this.mediaMetadata == null ? null
+                : this.mediaMetadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        boolean sameTrack = mediaId != null && mediaId.equals(previousId);
         String artCacheFilePath = mediaMetadata.getString("artCacheFile");
         if (artCacheFilePath != null) {
             // Load local files and network images, cached in files
@@ -814,16 +818,18 @@ public class AudioService extends MediaBrowserServiceCompat {
                 String loadThumbnailUri = mediaMetadata.getString("loadThumbnailUri");
                 artBitmap = loadArtBitmap(artUri, loadThumbnailUri);
                 mediaMetadata = putArtToMetadata(mediaMetadata);
+            } else if (sameTrack && artBitmap != null) {
+                // A re-send of the current track without its art file
+                // (duration or lyric updates) must not strip the artwork
+                // that was already published for this track.
+                mediaMetadata = putArtToMetadata(mediaMetadata);
             } else {
                 artBitmap = null;
             }
         }
-        String previousId = this.mediaMetadata == null ? null
-                : this.mediaMetadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
         this.mediaMetadata = mediaMetadata;
         mediaSession.setMetadata(mediaMetadata);
         vivoLyrics.onMetadataChanged();
-        String mediaId = mediaMetadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
         if (mediaId != null && !mediaId.equals(previousId)) {
             notifyChildrenChanged("vivomusicmix_current_list");
         }
