@@ -1,7 +1,7 @@
 name: panghu_music
 description: "娌愰煶 - Android music client with custom source support."
 publish_to: 'none'
-version: 1.5.1+59
+version: 1.5.2+60
 
 environment:
   sdk: ^3.11.4
