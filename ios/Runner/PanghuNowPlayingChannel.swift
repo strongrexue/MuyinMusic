@@ -15,6 +15,12 @@ final class PanghuNowPlayingChannel: NSObject {
   private static var commandTargets: [Any] = []
   private static var commandChannel: FlutterMethodChannel?
 
+  // 封面单一持有：artwork 字段只由本通道写（audio_service 插件已停写）。
+  // lastArtTrackId 记住封面归属的曲目，换歌未就绪时清图防串图；
+  // artImageCache 按本地路径缓存解码结果，避免重复读盘。
+  private static var lastArtTrackId: String?
+  private static var artImageCache: [String: UIImage] = [:]
+
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
     commandChannel = channel
@@ -26,6 +32,8 @@ final class PanghuNowPlayingChannel: NSObject {
         let center = MPNowPlayingInfoCenter.default()
         center.nowPlayingInfo = nil
         center.playbackState = .stopped
+        lastArtTrackId = nil
+        artImageCache.removeAll()
         result(true)
         return
       }
@@ -48,8 +56,8 @@ final class PanghuNowPlayingChannel: NSObject {
       }
 
       // 关键：在现有 nowPlayingInfo 上合并，而不是整字典覆盖。
-      // audio_service 也会写这个中心（artwork / duration / 播放速率等），
-      // 直接赋新字典会把它写的完整字段冲掉，导致锁屏/灵动岛卡片不出。
+      // audio_service 也会写这个中心（album / duration 等），
+      // 直接赋新字典会把它写的字段冲掉，导致锁屏/灵动岛卡片不出。
       // 现有字典可能为 nil（首次播放），此时初始化为空字典。
       let center = MPNowPlayingInfoCenter.default()
       var info = center.nowPlayingInfo ?? [String: Any]()
@@ -63,13 +71,9 @@ final class PanghuNowPlayingChannel: NSObject {
       let pos = (a["positionMs"] as? NSNumber)?.doubleValue ?? 0
       if dur > 0 { info[MPMediaItemPropertyPlaybackDuration] = dur / 1000 }
       info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = pos / 1000
-      // 封面：file:// 缓存优先，http(s) 网络兜底，裸路径也支持。
-      // audio_service 写的 artwork 常不可靠，这里按 Dart 传入的 cover 自己补一份。
-      if let cover = a["cover"] as? String, !cover.isEmpty,
-         let image = Self.artworkImage(cover: cover, args: a) {
-        info[MPMediaItemPropertyArtwork] =
-          MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-      }
+      // 封面只认 Dart 给的本地文件路径（artPath），原生侧不再下载网络图：
+      // 同步下载曾冻结通道线程、把每行歌词的推送都拖慢数秒。
+      Self.applyArtwork(into: &info, args: a)
       center.nowPlayingInfo = info
       // BASS 自研引擎输出不像 AVAudioPlayer 那样被系统天然认作媒体源，必须显式
       // 标记播放态锁屏卡才出现（探针 systemPlayerProbe 即靠这一句 + nowPlayingInfo
@@ -114,37 +118,37 @@ final class PanghuNowPlayingChannel: NSObject {
     dislike.isEnabled = true
   }
 
-  /// 按 cover 取封面图，支持 file:// / http(s) / 裸路径。
-  /// 网络下载带 12s 超时 + semaphore，避免卡住主线程上的媒体信息写入。
-  private static func artworkImage(cover: String, args: [String: Any]) -> UIImage? {
-    let headers = (args["headers"] as? [String: Any])?
-      .reduce(into: [String: String]()) { acc, e in acc[e.key] = String(describing: e.value) } ?? [:]
-
-    let data: Data?
-    if cover.hasPrefix("file://"), let url = URL(string: cover) {
-      data = try? Data(contentsOf: url)
-    } else if let url = URL(string: cover), url.scheme?.hasPrefix("http") == true {
-      data = downloadSynchronously(url: url, headers: headers)
-    } else {
-      data = try? Data(contentsOf: URL(fileURLWithPath: cover))
+  /// 封面写入：artTrackId 标识封面归属的曲目。
+  /// - 换歌：有本地图就换上；还没就绪（artPath 空）先清掉封面字段，
+  ///   绝不留上一首的图串到新歌上，等图就绪后 Dart 会单独补推。
+  /// - 同一首：带了 artPath 就补上/更新（图迟到就绪走这里）；
+  ///   没带 artPath 的纯歌词/进度更新不动现有封面。
+  /// - 载荷没有 artTrackId（老版本 Dart）：整体不动封面。
+  private static func applyArtwork(into info: inout [String: Any], args: [String: Any]) {
+    guard let artTrackId = args["artTrackId"] as? String else { return }
+    let artPath = (args["artPath"] as? String) ?? ""
+    if artTrackId != lastArtTrackId {
+      if !artPath.isEmpty, let image = cachedImage(path: artPath) {
+        info[MPMediaItemPropertyArtwork] =
+          MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+      } else {
+        info.removeValue(forKey: MPMediaItemPropertyArtwork)
+      }
+      lastArtTrackId = artTrackId
+    } else if !artPath.isEmpty, let image = cachedImage(path: artPath) {
+      info[MPMediaItemPropertyArtwork] =
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
-    guard let data else { return nil }
-    return UIImage(data: data)
   }
 
-  private static func downloadSynchronously(url: URL, headers: [String: String]) -> Data? {
-    // 这个方法在主线程的方法通道回调里调用，semaphore 等待会冻结 UI。
-    // 用短超时 + 专用 session，取不到就放弃（音频继续播，封面交给 audio_service）。
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 2
-    for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-    let semaphore = DispatchSemaphore(value: 0)
-    var output: Data?
-    URLSession.shared.dataTask(with: request) { data, _, _ in
-      output = data
-      semaphore.signal()
-    }.resume()
-    _ = semaphore.wait(timeout: .now() + 2.5)
-    return output
+  /// 只从本地文件读图，按路径缓存解码结果；读不到返回 nil。
+  /// 通道线程上不做任何网络请求和等待。
+  private static func cachedImage(path: String) -> UIImage? {
+    if let cached = artImageCache[path] { return cached }
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+          let image = UIImage(data: data) else { return nil }
+    if artImageCache.count > 8 { artImageCache.removeAll() }
+    artImageCache[path] = image
+    return image
   }
 }

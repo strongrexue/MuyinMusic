@@ -9,6 +9,7 @@ import '../../core/services/app_logger.dart';
 import '../../core/storage/settings_store.dart';
 import '../../core/ui/cover_image_source.dart';
 import 'lyric_frame.dart';
+import 'now_playing_push_gate.dart';
 import 'player_audio_handler.dart';
 import 'player_controller.dart';
 import '../songs/liked_songs_store.dart';
@@ -85,7 +86,7 @@ class LiveActivityService {
 
   /// 喜欢状态变化后主动重推一次系统卡，让五角星实心/空心立即同步。
   void refreshNowPlaying() {
-    unawaited(_pushNowPlaying());
+    unawaited(_enqueueNowPlaying());
   }
 
   bool _dynamicIslandEnabled = true;
@@ -101,11 +102,12 @@ class LiveActivityService {
     _ref
         .read(playerAudioHandlerProvider)
         .setIosNowPlayingSuppressed(!enabled);
-    _lastNowPlayingKey = null;
+    _npGate.reset();
     if (enabled) {
-      await _pushNowPlaying();
+      await _enqueueNowPlaying();
       return;
     }
+    _syncHeartbeat(false);
     try {
       await _nowPlayingChannel.invokeMethod<bool>('clear');
     } on MissingPluginException {
@@ -201,7 +203,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
         if (entry == null) return false;
         final nowLiked = _ref.read(likedSongsProvider.notifier).toggle(entry);
         await AppLogger.write('live-activity', '系统卡切换喜欢: $nowLiked');
-        // toggle 会改变 likedSongsProvider，上面的 listen 会触发 _pushNowPlaying 刷新。
+        // toggle 会改变 likedSongsProvider，上面的 listen 会触发系统卡重推刷新。
         return nowLiked;
     }
     throw MissingPluginException('未知的实时活动方法: ${call.method}');
@@ -230,7 +232,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
 
   /// 曲目变化（可能是换歌，也可能是首次播放）。
   void publish(PlayerState state) {
-    unawaited(_pushNowPlaying());
+    unawaited(_enqueueNowPlaying());
     if (!_available) {
       // 可能只是「实时活动开关后来才打开」，重试一次而不是永远放弃。
       unawaited(_ensureAvailable());
@@ -247,7 +249,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   }
 
   void _onPlaybackState(PlaybackState state) {
-    unawaited(_pushNowPlaying());
+    unawaited(_enqueueNowPlaying());
     if (!_available) {
       unawaited(_ensureAvailable());
       return;
@@ -384,39 +386,184 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     }
   }
 
+  // MARK: - 系统卡推送（串行队列 + 去重门 + 心跳兜底）
+
+  final NowPlayingPushGate _npGate = NowPlayingPushGate();
+  Future<void> _npQueue = Future<void>.value();
+  Timer? _npHeartbeat;
+  String? _artFetchKey;
+
+  /// 所有系统卡推送都过这条串行队列：慢推送（封面文件解析等）不会被
+  /// 后发的推送反超落地，去重判定与 invoke 的顺序也因此严格一致。
+  Future<void> _enqueueNowPlaying({bool force = false}) {
+    final run = _npQueue.then((_) => _pushNowPlayingInternal(force: force));
+    _npQueue = run.catchError((Object error) async {
+      await AppLogger.write('live-activity', '写播放卡片失败: $error');
+    });
+    return run;
+  }
+
   /// 无条件写系统媒体播放卡片（灵动岛/锁屏）。
   /// 与 Live Activity 可用性完全解耦：即使 ActivityKit 不可用（巨魔/低版本 iOS），
   /// 只要写了 nowPlayingInfo，系统就会画出标准播放卡片。
-  Future<void> _pushNowPlaying() async {
-    // 「启用灵动岛」关闭时停发系统卡（灵动岛与锁屏是同一张卡）。
-    if (!_dynamicIslandEnabled) return;
-    final payload = _payload();
-    if (payload == null) return;
-    // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，
-    // 否则连续歌词行会因 key 不变被吞（胖虎同款坑）。liked 也纳入，
-    // 保证五角星点亮/取消能即时重推系统卡。
-    final npKey = [
-      payload['trackId'],
-      payload['artist'],
-      payload['playing'],
-      payload['liked'],
-    ].join('|');
-    if (npKey == _lastNowPlayingKey) return;
-    _lastNowPlayingKey = npKey;
-    final cover = await _coverPayload();
+  Future<void> _pushNowPlayingInternal({bool force = false}) async {
     try {
-      await _nowPlayingChannel.invokeMethod<bool>('publish', {
-        ...payload,
-        ...cover,
-      });
-    } on MissingPluginException {
-      // 老版本原生没有该通道，忽略。
+      // 「启用灵动岛」关闭时停发系统卡（灵动岛与锁屏是同一张卡）。
+      if (!_dynamicIslandEnabled) {
+        _syncHeartbeat(false);
+        return;
+      }
+      final payload = _payload();
+      if (payload == null) {
+        _syncHeartbeat(false);
+        return;
+      }
+      final trackId = payload['trackId'] as String;
+      final playing = payload['playing'] == true;
+      final positionMs = payload['positionMs'] as int;
+      final art = await _nowPlayingArtPayload(payload);
+      // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，
+      // 否则连续歌词行会因 key 不变被吞（胖虎同款坑）。liked 也纳入，
+      // 保证五角星点亮/取消能即时重推系统卡；封面身份纳入，
+      // 保证封面就绪/更换后能补推。key 只在 invoke 成功后落盘。
+      final npKey = NowPlayingPushGate.keyFor(
+        trackId: trackId,
+        artist: payload['artist'] as String,
+        playing: playing,
+        liked: payload['liked'] == true,
+        coverIdentity: art.identity,
+      );
+      if (!_npGate.decide(
+        key: npKey,
+        trackId: trackId,
+        positionMs: positionMs,
+        playing: playing,
+        force: force,
+      )) {
+        _syncHeartbeat(
+          NowPlayingPushGate.heartbeatWanted(
+            enabled: true,
+            hasTrack: true,
+            playing: playing,
+          ),
+        );
+        return;
+      }
+      try {
+        await _nowPlayingChannel.invokeMethod<bool>('publish', {
+          ...payload,
+          'artPath': art.artPath,
+          'artTrackId': trackId,
+        });
+        _npGate.commit(
+          key: npKey,
+          trackId: trackId,
+          positionMs: positionMs,
+          playing: playing,
+        );
+      } on MissingPluginException {
+        // 老版本原生没有该通道，忽略。
+      }
+      _syncHeartbeat(
+        NowPlayingPushGate.heartbeatWanted(
+          enabled: true,
+          hasTrack: true,
+          playing: playing,
+        ),
+      );
     } catch (error) {
       await AppLogger.write('live-activity', '写播放卡片失败: $error');
     }
   }
 
-  String? _lastNowPlayingKey;
+  /// 播放中每 2 秒兜底重推一次：后台节流漏掉的歌词/进度更新能在下一次
+  /// 心跳自愈（载荷按当前墙钟重新外推位置）。暂停/停止/关开关即停。
+  void _syncHeartbeat(bool wanted) {
+    if (wanted) {
+      _npHeartbeat ??= Timer.periodic(const Duration(seconds: 2), (_) {
+        unawaited(_enqueueNowPlaying(force: true));
+      });
+    } else {
+      _npHeartbeat?.cancel();
+      _npHeartbeat = null;
+    }
+  }
+
+  /// 系统卡封面载荷：只给本地文件路径，原生侧不再同步下载网络封面
+  /// （同步下载曾冻结通道线程，把每行歌词的推送都拖慢数秒）。
+  ///
+  /// 嵌入封面走 handler 的 cacheArtwork（media_art/ 下的摘要文件）；
+  /// 网络封面与 audio_service 共用同一个缓存管理器——它给会话解析的
+  /// 正是同一份缓存文件：命中直接用；未命中时后台触发同一份下载
+  /// （不阻塞本次推送），文件就绪后戳一次重推（封面身份已进 key）。
+  Future<({String artPath, String identity})> _nowPlayingArtPayload(
+    Map<String, dynamic> payload,
+  ) async {
+    final trackId = payload['trackId'] as String;
+    var artPath = '';
+    var coverUrl = '';
+    try {
+      final handler = _ref.read(playerAudioHandlerProvider);
+      final track = _ref.read(playerControllerProvider).track;
+      final embedded = await handler.cacheArtwork(track?.coverBytes);
+      if (embedded != null) {
+        artPath = embedded.toFilePath();
+      } else {
+        final mediaItem = handler.mediaItem.value;
+        final artUri = mediaItem?.artUri;
+        if (artUri != null) {
+          coverUrl = artUri.toString();
+          if (artUri.scheme == 'file') {
+            artPath = artUri.toFilePath();
+          } else if (artUri.scheme == 'http' || artUri.scheme == 'https') {
+            final cached =
+                await AudioService.cacheManager.getFileFromCache(coverUrl);
+            if (cached != null) {
+              artPath = cached.file.path;
+            } else {
+              _fetchArtInBackground(trackId, coverUrl, mediaItem?.artHeaders);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      await AppLogger.write('live-activity', '封面文件解析失败: $error');
+    }
+    return (
+      artPath: artPath,
+      identity: NowPlayingPushGate.coverIdentity(
+        artPath: artPath,
+        coverUrl: coverUrl,
+      ),
+    );
+  }
+
+  /// 后台把网络封面下进 audio_service 的共享缓存（与它给会话取的是同一份）。
+  void _fetchArtInBackground(
+    String trackId,
+    String url,
+    Map<String, String>? headers,
+  ) {
+    final fetchKey = '$trackId|$url';
+    if (_artFetchKey == fetchKey) return;
+    _artFetchKey = fetchKey;
+    unawaited(() async {
+      try {
+        if (headers != null) {
+          await AudioService.cacheManager.getSingleFile(url, headers: headers);
+        } else {
+          await AudioService.cacheManager.getSingleFile(url);
+        }
+      } catch (_) {
+        // 下载失败不重试本次，等下一次推送/心跳再触发。
+        if (_artFetchKey == fetchKey) _artFetchKey = null;
+        return;
+      }
+      if (_artFetchKey == fetchKey) _artFetchKey = null;
+      unawaited(_enqueueNowPlaying());
+    }());
+  }
+
   bool _activeStarted = false;
 
   Future<Map<String, dynamic>> _coverPayload() async {
@@ -450,6 +597,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
 
   void dispose() {
     _end();
+    _syncHeartbeat(false);
     unawaited(_playbackSubscription?.cancel());
     _playbackSubscription = null;
     unawaited(_durationSubscription?.cancel());

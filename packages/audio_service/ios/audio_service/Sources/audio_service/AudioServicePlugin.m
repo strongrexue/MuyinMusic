@@ -26,7 +26,6 @@ static NSNumber *repeatMode = nil;
 static NSNumber *shuffleMode = nil;
 static NSNumber *fastForwardInterval = nil;
 static NSNumber *rewindInterval = nil;
-static MPMediaItemArtwork* artwork = nil;
 static NSMutableDictionary *nowPlayingInfo = nil;
 
 @implementation AudioServicePlugin {
@@ -194,31 +193,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     } else if ([@"setMediaItem" isEqualToString:call.method]) {
         NSDictionary *args = (NSDictionary *)call.arguments;
         mediaItem = args[@"mediaItem"];
-        NSString* artUri = mediaItem[@"artUri"];
-        artwork = nil;
-        if (![artUri isEqual: [NSNull null]]) {
-            NSString* artCacheFilePath = (NSString *)[NSNull null];
-            NSDictionary* extras = mediaItem[@"extras"];
-            if (![extras isEqual: [NSNull null]]) {
-                artCacheFilePath = extras[@"artCacheFile"];
-            }
-            if (![artCacheFilePath isEqual: [NSNull null]]) {
-#if TARGET_OS_IPHONE
-                UIImage* artImage = [UIImage imageWithContentsOfFile:artCacheFilePath];
-#else
-                NSImage* artImage = [[NSImage alloc] initWithContentsOfFile:artCacheFilePath];
-#endif
-                if (artImage != nil) {
-#if TARGET_OS_IPHONE
-                    artwork = [[MPMediaItemArtwork alloc] initWithImage: artImage];
-#else
-                    artwork = [[MPMediaItemArtwork alloc] initWithBoundsSize:artImage.size requestHandler:^NSImage* _Nonnull(CGSize aSize) {
-                        return artImage;
-                    }];
-#endif
-                }
-            }
-        }
+        // 封面改由 PanghuNowPlayingChannel 单一写入，这里不再解码 artwork。
         [self updateNowPlayingInfo];
         result(@{});
     } else if ([@"setPlaybackInfo" isEqualToString:call.method]) {
@@ -269,6 +244,12 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (void) updateNowPlayingInfo {
+    // 抑制态下 handler 会喂入一个空白条目（title 为空）：此时什么都不写，
+    // 避免凭 duration/mediaType 等残余字段把已被清掉的系统卡重新顶出来。
+    id itemTitle = mediaItem ? mediaItem[@"title"] : nil;
+    if (![itemTitle isKindOfClass:[NSString class]] || [itemTitle length] == 0) {
+        return;
+    }
     BOOL updated = NO;
     if (mediaItem) {
         // title/artist 由 PanghuNowPlayingChannel 通道写入（title=歌名，artist=歌词行）
@@ -277,17 +258,14 @@ static NSMutableDictionary *nowPlayingInfo = nil;
         NSNumber *duration = mediaItem[@"duration"];
         if (duration == (id)[NSNull null]) duration = @(0);
         updated |= [self updateNowPlayingField:MPMediaItemPropertyPlaybackDuration value:([NSNumber numberWithDouble: ([duration doubleValue] / 1000)])];
-        if (@available(iOS 3.0, macOS 10.13.2, *)) {
-            updated |= [self updateNowPlayingField:MPMediaItemPropertyArtwork value:artwork];
-        }
     }
 
     if (@available(iOS 10.0, macOS 10.12.2, *)) {
         updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyMediaType value:@(MPNowPlayingInfoMediaTypeAudio)];
     }
-    updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyPlaybackRate value:(playing ? speed : [NSNumber numberWithDouble: 0.0])];
-    updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyDefaultPlaybackRate value:(playing ? speed : [NSNumber numberWithDouble: 0.0])];
-    updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyElapsedPlaybackTime value:[NSNumber numberWithDouble:([position doubleValue] / 1000)]];
+    // elapsed / playbackRate / defaultPlaybackRate / artwork 已改由
+    // PanghuNowPlayingChannel 单一持有：本插件的 position 锚点只在状态事件时
+    // 更新、长期陈旧，继续写会把系统卡的进度条反复盖回起始位置。
     MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
 #if TARGET_OS_OSX
     if (@available(iOS 13.0, macOS 10.12.2, *)) {
@@ -300,7 +278,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     if (updated) {
         //NSLog(@"### updating nowPlayingInfo");
         // 合并写入：保留 PanghuNowPlayingChannel 已写的 title/artist，
-        // 只覆盖本通道维护的 album/duration/artwork/rate/position 等字段
+        // 只覆盖本通道维护的 album/duration/mediaType/isLive 字段
         NSMutableDictionary *merged = [NSMutableDictionary dictionary];
         NSDictionary *current = center.nowPlayingInfo;
         if (current) {
