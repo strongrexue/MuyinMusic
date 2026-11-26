@@ -103,6 +103,7 @@ class LiveActivityService {
         .read(playerAudioHandlerProvider)
         .setIosNowPlayingSuppressed(!enabled);
     _npGate.reset();
+    _tickGate.reset();
     if (enabled) {
       await _enqueueNowPlaying();
       return;
@@ -231,8 +232,25 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   // MARK: - 状态推送
 
   /// 曲目变化（可能是换歌，也可能是首次播放）。
+  ///
+  /// 位置 tick 每 40ms 都会调进来：只有歌词行、播放态（播/停/seek/换歌）、
+  /// 喜欢变化才进系统卡队列，纯位置推进由 2 秒心跳兜底——否则队列常年
+  /// 排着 25 个/秒的无操作项，真正的歌词行推送被堵在后面。
   void publish(PlayerState state) {
-    unawaited(_enqueueNowPlaying());
+    final payload = _payload();
+    if (payload == null) {
+      // 无曲目：仍进一次队列，让内部停掉心跳（内部在 payload 为空时
+      // 直接返回，不碰封面解析）。
+      unawaited(_enqueueNowPlaying());
+    } else if (_tickGate.shouldEnqueue(
+      trackId: payload['trackId'] as String,
+      artist: payload['artist'] as String,
+      playing: payload['playing'] == true,
+      liked: payload['liked'] == true,
+      positionMs: payload['positionMs'] as int,
+    )) {
+      unawaited(_enqueueNowPlaying());
+    }
     if (!_available) {
       // 可能只是「实时活动开关后来才打开」，重试一次而不是永远放弃。
       unawaited(_ensureAvailable());
@@ -389,6 +407,8 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   // MARK: - 系统卡推送（串行队列 + 去重门 + 心跳兜底）
 
   final NowPlayingPushGate _npGate = NowPlayingPushGate();
+  final NowPlayingTickGate _tickGate = NowPlayingTickGate();
+  final NowPlayingArtMemo _artMemo = NowPlayingArtMemo();
   Future<void> _npQueue = Future<void>.value();
   Timer? _npHeartbeat;
   String? _artFetchKey;
@@ -421,20 +441,20 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
       final trackId = payload['trackId'] as String;
       final playing = payload['playing'] == true;
       final positionMs = payload['positionMs'] as int;
-      final art = await _nowPlayingArtPayload(payload);
-      // 系统卡签名去重：artist 位即当前歌词行，必须纳入 key，
-      // 否则连续歌词行会因 key 不变被吞（胖虎同款坑）。liked 也纳入，
-      // 保证五角星点亮/取消能即时重推系统卡；封面身份纳入，
-      // 保证封面就绪/更换后能补推。key 只在 invoke 成功后落盘。
-      final npKey = NowPlayingPushGate.keyFor(
+      // 去重先行：用内存 memo 里的封面身份算 key，不碰 SQLite；
+      // 没命中的推送直接丢，只有放行的才解析封面。
+      final artUri =
+          _ref.read(playerAudioHandlerProvider).mediaItem.value?.artUri;
+      final coverUrl = artUri?.toString() ?? '';
+      final provisionalKey = NowPlayingPushGate.keyFor(
         trackId: trackId,
         artist: payload['artist'] as String,
         playing: playing,
         liked: payload['liked'] == true,
-        coverIdentity: art.identity,
+        coverIdentity: _memoizedCoverIdentity(trackId, coverUrl, artUri),
       );
       if (!_npGate.decide(
-        key: npKey,
+        key: provisionalKey,
         trackId: trackId,
         positionMs: positionMs,
         playing: playing,
@@ -449,6 +469,16 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
         );
         return;
       }
+      final art = await _nowPlayingArtPayload(payload);
+      // 用解析后的真实封面身份重新算 key 落盘：封面刚就绪时身份从 URL
+      // 变成本地路径，下一次同行推送按新 key 去重，不会重复发同一张卡。
+      final resolvedKey = NowPlayingPushGate.keyFor(
+        trackId: trackId,
+        artist: payload['artist'] as String,
+        playing: playing,
+        liked: payload['liked'] == true,
+        coverIdentity: art.identity,
+      );
       try {
         await _nowPlayingChannel.invokeMethod<bool>('publish', {
           ...payload,
@@ -456,7 +486,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
           'artTrackId': trackId,
         });
         _npGate.commit(
-          key: npKey,
+          key: resolvedKey,
           trackId: trackId,
           positionMs: positionMs,
           playing: playing,
@@ -489,6 +519,16 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     }
   }
 
+  /// 去重 key 用的封面身份（纯内存，不碰磁盘）：
+  /// 本地文件封面直接用路径；网络封面用 memo 里已解析的路径，
+  /// 未解析时用 URL 占位——文件下好后 memo 回填、身份变路径，key 随之变化补推。
+  String _memoizedCoverIdentity(String trackId, String coverUrl, Uri? artUri) {
+    if (artUri != null && artUri.scheme == 'file') {
+      return artUri.toFilePath();
+    }
+    return _artMemo.lookup(trackId, coverUrl) ?? coverUrl;
+  }
+
   /// 系统卡封面载荷：只给本地文件路径，原生侧不再同步下载网络封面
   /// （同步下载曾冻结通道线程，把每行歌词的推送都拖慢数秒）。
   ///
@@ -496,6 +536,7 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   /// 网络封面与 audio_service 共用同一个缓存管理器——它给会话解析的
   /// 正是同一份缓存文件：命中直接用；未命中时后台触发同一份下载
   /// （不阻塞本次推送），文件就绪后戳一次重推（封面身份已进 key）。
+  /// memo 命中时直接返回，不查 SQLite。
   Future<({String artPath, String identity})> _nowPlayingArtPayload(
     Map<String, dynamic> payload,
   ) async {
@@ -505,26 +546,32 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     try {
       final handler = _ref.read(playerAudioHandlerProvider);
       final track = _ref.read(playerControllerProvider).track;
+      final mediaItem = handler.mediaItem.value;
+      final artUri = mediaItem?.artUri;
+      if (artUri != null) coverUrl = artUri.toString();
+      final memoPath = _artMemo.lookup(trackId, coverUrl);
+      if (memoPath != null) {
+        return (artPath: memoPath, identity: memoPath);
+      }
       final embedded = await handler.cacheArtwork(track?.coverBytes);
       if (embedded != null) {
         artPath = embedded.toFilePath();
-      } else {
-        final mediaItem = handler.mediaItem.value;
-        final artUri = mediaItem?.artUri;
-        if (artUri != null) {
-          coverUrl = artUri.toString();
-          if (artUri.scheme == 'file') {
-            artPath = artUri.toFilePath();
-          } else if (artUri.scheme == 'http' || artUri.scheme == 'https') {
-            final cached =
-                await AudioService.cacheManager.getFileFromCache(coverUrl);
-            if (cached != null) {
-              artPath = cached.file.path;
-            } else {
-              _fetchArtInBackground(trackId, coverUrl, mediaItem?.artHeaders);
-            }
+      } else if (artUri != null) {
+        if (artUri.scheme == 'file') {
+          artPath = artUri.toFilePath();
+        } else if (artUri.scheme == 'http' || artUri.scheme == 'https') {
+          final cached =
+              await AudioService.cacheManager.getFileFromCache(coverUrl);
+          if (cached != null) {
+            artPath = cached.file.path;
+          } else {
+            _fetchArtInBackground(trackId, coverUrl, mediaItem?.artHeaders);
           }
         }
+      }
+      // 解析到本地路径后回填 memo：下一次去重直接用内存身份。
+      if (artPath.isNotEmpty) {
+        _artMemo.store(trackId, coverUrl, artPath);
       }
     } catch (error) {
       await AppLogger.write('live-activity', '封面文件解析失败: $error');
@@ -549,11 +596,15 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
     _artFetchKey = fetchKey;
     unawaited(() async {
       try {
+        final File file;
         if (headers != null) {
-          await AudioService.cacheManager.getSingleFile(url, headers: headers);
+          file =
+              await AudioService.cacheManager.getSingleFile(url, headers: headers);
         } else {
-          await AudioService.cacheManager.getSingleFile(url);
+          file = await AudioService.cacheManager.getSingleFile(url);
         }
+        // 下载完成即回填 memo：随后那次重推的去重 key 直接用路径身份放行。
+        _artMemo.store(trackId, url, file.path);
       } catch (_) {
         // 下载失败不重试本次，等下一次推送/心跳再触发。
         if (_artFetchKey == fetchKey) _artFetchKey = null;

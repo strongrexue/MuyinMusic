@@ -232,4 +232,173 @@ void main() {
       );
     });
   });
+
+  group('NowPlayingTickGate', () {
+    bool tick(
+      NowPlayingTickGate gate, {
+      String trackId = 't1',
+      String artist = '歌词第一行',
+      bool playing = true,
+      bool liked = false,
+      required int positionMs,
+      required DateTime now,
+    }) {
+      return gate.shouldEnqueue(
+        trackId: trackId,
+        artist: artist,
+        playing: playing,
+        liked: liked,
+        positionMs: positionMs,
+        now: now,
+      );
+    }
+
+    test('first tick enqueues; pure position ticks do not', () {
+      final gate = NowPlayingTickGate();
+      expect(
+        tick(gate, positionMs: 10000, now: t0),
+        isTrue,
+      );
+      // 40ms 后位置正常推进、歌词行没变：不进队。
+      expect(
+        tick(gate, positionMs: 10040, now: t0.add(const Duration(milliseconds: 40))),
+        isFalse,
+      );
+      expect(
+        tick(gate, positionMs: 10080, now: t0.add(const Duration(milliseconds: 80))),
+        isFalse,
+      );
+      // 3 秒后位置按墙钟推进、行没变：仍不进队（由心跳兜底）。
+      expect(
+        tick(gate, positionMs: 13080, now: t0.add(const Duration(seconds: 3))),
+        isFalse,
+      );
+    });
+
+    test('lyric line, playing, liked and track changes enqueue', () {
+      final gate = NowPlayingTickGate();
+      expect(tick(gate, positionMs: 10000, now: t0), isTrue);
+      expect(
+        tick(
+          gate,
+          artist: '歌词第二行',
+          positionMs: 12000,
+          now: t0.add(const Duration(seconds: 2)),
+        ),
+        isTrue,
+      );
+      expect(
+        tick(
+          gate,
+          artist: '歌词第二行',
+          playing: false,
+          positionMs: 12000,
+          now: t0.add(const Duration(seconds: 2, milliseconds: 40)),
+        ),
+        isTrue,
+      );
+      expect(
+        tick(
+          gate,
+          artist: '歌词第二行',
+          playing: false,
+          liked: true,
+          positionMs: 12000,
+          now: t0.add(const Duration(seconds: 2, milliseconds: 80)),
+        ),
+        isTrue,
+      );
+      expect(
+        tick(
+          gate,
+          trackId: 't2',
+          artist: '新歌第一行',
+          playing: true,
+          liked: false,
+          positionMs: 0,
+          now: t0.add(const Duration(seconds: 3)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('seek jumps enqueue; in-threshold drift does not', () {
+      final gate = NowPlayingTickGate();
+      expect(tick(gate, positionMs: 60000, now: t0), isTrue);
+      expect(
+        tick(gate, positionMs: 63000, now: t0.add(const Duration(seconds: 3))),
+        isFalse,
+      );
+      // 前跳 30 秒：进队。
+      expect(
+        tick(gate, positionMs: 93000, now: t0.add(const Duration(seconds: 3))),
+        isTrue,
+      );
+      // 锚点已刷新到 93000；后跳回 30000：进队。
+      expect(
+        tick(gate, positionMs: 30000, now: t0.add(const Duration(seconds: 3))),
+        isTrue,
+      );
+      // 暂停时位置不动不进队；暂停中 seek 进队。
+      final paused = NowPlayingTickGate();
+      expect(
+        tick(paused, playing: false, positionMs: 10000, now: t0),
+        isTrue,
+      );
+      expect(
+        tick(
+          paused,
+          playing: false,
+          positionMs: 10000,
+          now: t0.add(const Duration(seconds: 30)),
+        ),
+        isFalse,
+      );
+      expect(
+        tick(
+          paused,
+          playing: false,
+          positionMs: 40000,
+          now: t0.add(const Duration(seconds: 30)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('reset re-allows enqueue on the next tick', () {
+      final gate = NowPlayingTickGate();
+      expect(tick(gate, positionMs: 10000, now: t0), isTrue);
+      expect(
+        tick(gate, positionMs: 10040, now: t0.add(const Duration(milliseconds: 40))),
+        isFalse,
+      );
+      gate.reset();
+      expect(
+        tick(gate, positionMs: 10040, now: t0.add(const Duration(milliseconds: 40))),
+        isTrue,
+      );
+    });
+  });
+
+  group('NowPlayingArtMemo', () {
+    test('miss before store; hit only for same track and url', () {
+      final memo = NowPlayingArtMemo();
+      expect(memo.lookup('t1', 'https://example.com/cover.jpg'), isNull);
+      memo.store('t1', 'https://example.com/cover.jpg', '/tmp/a.jpg');
+      expect(
+        memo.lookup('t1', 'https://example.com/cover.jpg'),
+        '/tmp/a.jpg',
+      );
+      expect(memo.lookup('t2', 'https://example.com/cover.jpg'), isNull);
+      expect(memo.lookup('t1', 'https://example.com/other.jpg'), isNull);
+    });
+
+    test('store replaces the previous track entry', () {
+      final memo = NowPlayingArtMemo();
+      memo.store('t1', 'https://example.com/a.jpg', '/tmp/a.jpg');
+      memo.store('t2', 'https://example.com/b.jpg', '/tmp/b.jpg');
+      expect(memo.lookup('t1', 'https://example.com/a.jpg'), isNull);
+      expect(memo.lookup('t2', 'https://example.com/b.jpg'), '/tmp/b.jpg');
+    });
+  });
 }
