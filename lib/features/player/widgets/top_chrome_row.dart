@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import '../../../core/storage/settings_store.dart';
+import '../../cast/cast_session.dart';
+import '../../cast/widgets/cast_device_sheet.dart';
+import '../../cast/widgets/cast_status_strip.dart';
 import '../../equalizer/widgets/equalizer_popup.dart';
 import '../../shell/player_pull_scope.dart';
 import '../player_controller.dart';
@@ -110,10 +113,14 @@ class TopChromeRow extends ConsumerWidget {
         showKtvBackgroundButton &&
         ref.watch(settingsProvider.select((s) => s.ktvBackgroundStyle)) ==
             KtvBackgroundStyle.builtin;
-    return PlayerPullHandle(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(28, 8, 12, 4),
-        child: Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PlayerPullHandle(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 8, 12, 4),
+            child: Row(
           children: [
             Expanded(
               child: ClipRect(
@@ -200,9 +207,12 @@ class TopChromeRow extends ConsumerWidget {
               showKtvBackground: showKtvBackgroundButton,
               onOpenEqualizer: onOpenEqualizer,
             ),
-          ],
+            ],
+          ),
         ),
-      ),
+        ),
+        const CastStatusStrip(),
+      ],
     );
   }
 }
@@ -416,6 +426,18 @@ class _MoreMenuButtonState extends State<_MoreMenuButton> {
     return origin & box.size;
   }
 
+  /// Opens the DLNA device picker as a modal bottom sheet on the root
+  /// navigator (the player subtree is not itself a route).
+  void _openCastSheet() {
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      builder: (_) => const CastDeviceSheet(),
+    );
+  }
+
   /// Opens [builder]'s panel as an anchored popup out of this button, the
   /// same route and placement the panel's own top-bar button used before.
   void _openPanel(WidgetBuilder builder) {
@@ -450,6 +472,7 @@ class _MoreMenuButtonState extends State<_MoreMenuButton> {
         onOpenEqualizer: () => _openPanel(
           (_) => PlayerEqualizerPopup(onOpenPage: widget.onOpenEqualizer),
         ),
+        onOpenCast: _openCastSheet,
       ),
     );
   }
@@ -463,12 +486,14 @@ class _MoreMenuItems extends ConsumerWidget {
     required this.onOpenSleepTimer,
     required this.onOpenBackground,
     required this.onOpenEqualizer,
+    required this.onOpenCast,
   });
 
   final bool showKtvBackground;
   final VoidCallback onOpenSleepTimer;
   final VoidCallback onOpenBackground;
   final VoidCallback onOpenEqualizer;
+  final VoidCallback onOpenCast;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -476,6 +501,15 @@ class _MoreMenuItems extends ConsumerWidget {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
     );
+    final cast = ref.watch(castControllerProvider);
+    // prism's menu rows have no trailing-text slot; the connection state
+    // rides in the subtitle under the label instead.
+    final castStateText = switch (cast.phase) {
+      CastPhase.connecting => '正在连接 ${cast.device?.friendlyName ?? ''}',
+      CastPhase.casting => cast.device?.friendlyName ?? '已连接',
+      CastPhase.failed => '连接失败',
+      CastPhase.idle => '未连接',
+    };
     final scheme = Theme.of(context).colorScheme;
     Widget leading(IconData icon) =>
         Icon(icon, size: 20, color: scheme.onSurface);
@@ -513,6 +547,13 @@ class _MoreMenuItems extends ConsumerWidget {
           leading: leading(Icons.graphic_eq_rounded),
           executeImmediately: true,
           onPressed: onOpenEqualizer,
+        ),
+        prism.PopupMenuItem(
+          label: '投播到设备',
+          subtitle: castStateText,
+          leading: leading(Icons.cast_rounded),
+          executeImmediately: true,
+          onPressed: onOpenCast,
         ),
       ],
     );

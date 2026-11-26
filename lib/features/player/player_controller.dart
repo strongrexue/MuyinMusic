@@ -118,6 +118,24 @@ bool isAudioOutputFailure(Object error) {
   return _audioOutputFailurePattern.hasMatch(error.toString());
 }
 
+/// Transport interception installed by the DLNA cast session while a cast
+/// is active. While installed, transport calls forward to the renderer
+/// instead of the on-device player, and resolved track loads are handed
+/// over rather than loaded into the local player.
+abstract interface class PlayerCastHooks {
+  Future<void> onToggle();
+  Future<void> onPause();
+  Future<void> onSeek(Duration position);
+  Future<void> onNext();
+  Future<void> onPrevious();
+  Future<void> onQueueItem(int index);
+
+  /// A track finished resolving; the cast session starts it on the
+  /// renderer. [PlayerTrack.localPath] is set for on-device files,
+  /// [PlayerTrack.remoteUrl] for remote streams.
+  Future<void> onTrackLoaded(PlayerTrack track, {required bool autoPlay});
+}
+
 class PlayerController extends StateNotifier<PlayerState>
     with WidgetsBindingObserver {
   PlayerController(this._ref)
@@ -493,6 +511,109 @@ class PlayerController extends StateNotifier<PlayerState>
 
   MusicInfo? get currentMusic => _currentMusic;
 
+  PlayerCastHooks? _castHooks;
+  bool _trackLoadedToCast = false;
+
+  /// The cast session's transport hooks, non-null while casting.
+  PlayerCastHooks? get castHooks => _castHooks;
+
+  void setCastHooks(PlayerCastHooks? hooks) => _castHooks = hooks;
+
+  bool get castActive => _castHooks != null;
+
+  /// Feeds renderer-reported playback into the shared player state so the
+  /// UI, lyrics and the now-playing card follow the renderer while casting.
+  void syncCastPlayback({
+    required Duration position,
+    required Duration duration,
+    required bool playing,
+  }) {
+    if (!mounted || _castHooks == null) return;
+    state = state.copyWith(
+      position: position,
+      duration: duration > Duration.zero ? duration : state.duration,
+      playing: playing,
+      processingState: playing
+          ? PlayerProcessingState.ready
+          : state.processingState,
+    );
+    _syncBluetoothMetadata();
+  }
+
+  /// Pauses on-device playback because a cast session is taking over.
+  Future<void> pauseLocalForCast() async {
+    await _audioHandler.pause();
+    if (mounted) state = state.copyWith(playing: false);
+  }
+
+  /// Queue advance for the cast session: identical to [playNext] minus the
+  /// cast forwarding (the resulting load is handed to the hooks).
+  Future<void> castPlayNext() {
+    if (state.loading || _transportSuppressionToken != null) {
+      return Future<void>.value();
+    }
+    _resetFailureBudget();
+    final nextIndex = _nextQueueIndex();
+    if (nextIndex == null) {
+      return state.track == null
+          ? Future<void>.value()
+          : _restartCurrentTrack();
+    }
+    return _playQueueIndex(nextIndex);
+  }
+
+  /// Queue retreat for the cast session; see [castPlayNext].
+  Future<void> castPlayPrevious() {
+    if (state.loading || _transportSuppressionToken != null) {
+      return Future<void>.value();
+    }
+    _resetFailureBudget();
+    final previousIndex = _previousQueueIndex;
+    if (previousIndex == null) {
+      return state.track == null
+          ? Future<void>.value()
+          : _restartCurrentTrack();
+    }
+    return _playQueueIndex(previousIndex);
+  }
+
+  /// Queue jump for the cast session; see [castPlayNext].
+  Future<void> castPlayQueueItem(int index) {
+    if (state.loading || _transportSuppressionToken != null) {
+      return Future<void>.value();
+    }
+    _resetFailureBudget();
+    return _playQueueIndex(index, resetPlayOrder: true);
+  }
+
+  /// After a cast session ends: when the presented track was played on the
+  /// renderer rather than loaded locally, load it locally (paused, at the
+  /// cast position) so a later play press plays the right track.
+  Future<void> restoreLocalAfterCast() async {
+    if (!_trackLoadedToCast) return;
+    _trackLoadedToCast = false;
+    final track = state.track;
+    if (track == null) return;
+    final position = state.position;
+    if (track.isLocal) {
+      await _playLocal(
+        track,
+        fallbackMusic: _currentMusic,
+        autoPlay: false,
+        initialPosition: position,
+        showErrors: false,
+      );
+    } else if (_currentMusic != null) {
+      await _playRemoteMusic(
+        _currentMusic!,
+        autoPlay: false,
+        initialPosition: position,
+        showErrors: false,
+        keepTrackOnFailure: true,
+      );
+    }
+  }
+
   /// Saved library playlist that started this queue, independent of browsing.
   String? get queuePlaylistId => _queuePlaylistId;
 
@@ -662,11 +783,20 @@ class PlayerController extends StateNotifier<PlayerState>
               if (!identical(_requestToken, token)) {
                 throw const MusicSourceFallbackCancelledException();
               }
-              await _audioHandler.load(
-                item: initialItem,
-                sourceUri: Uri.parse(resolved.url),
-                queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
-              );
+              final castHooks = _castHooks;
+              if (castHooks != null) {
+                _trackLoadedToCast = true;
+                await castHooks.onTrackLoaded(
+                  initialTrack,
+                  autoPlay: autoPlay,
+                );
+              } else {
+                await _audioHandler.load(
+                  item: initialItem,
+                  sourceUri: Uri.parse(resolved.url),
+                  queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
+                );
+              }
               return resolved;
             },
           );
@@ -719,7 +849,10 @@ class PlayerController extends StateNotifier<PlayerState>
       _syncQueueAvailability();
       _persistFullSession();
       if (!identical(_requestToken, token)) return false;
-      if (autoPlay && pauseGeneration == _sleepTimerPauseGeneration) {
+      if (autoPlay &&
+          pauseGeneration == _sleepTimerPauseGeneration &&
+          _castHooks == null &&
+          !_trackLoadedToCast) {
         await _audioHandler.play();
         if (!identical(_requestToken, token)) return false;
       }
@@ -1317,6 +1450,8 @@ class PlayerController extends StateNotifier<PlayerState>
     if (state.loading || _transportSuppressionToken != null) {
       return Future<void>.value();
     }
+    final castHooks = _castHooks;
+    if (castHooks != null) return castHooks.onPrevious();
     _resetFailureBudget();
     final previousIndex = _previousQueueIndex;
     if (previousIndex == null) {
@@ -1331,6 +1466,8 @@ class PlayerController extends StateNotifier<PlayerState>
     if (state.loading || _transportSuppressionToken != null) {
       return Future<void>.value();
     }
+    final castHooks = _castHooks;
+    if (castHooks != null) return castHooks.onNext();
     _resetFailureBudget();
     final nextIndex = _nextQueueIndex();
     if (nextIndex == null) {
@@ -1345,6 +1482,8 @@ class PlayerController extends StateNotifier<PlayerState>
     if (state.loading || _transportSuppressionToken != null) {
       return Future<void>.value();
     }
+    final castHooks = _castHooks;
+    if (castHooks != null) return castHooks.onQueueItem(index);
     _resetFailureBudget();
     return _playQueueIndex(index, resetPlayOrder: true);
   }
@@ -1490,14 +1629,20 @@ class PlayerController extends StateNotifier<PlayerState>
       // playback is already under way.
       final tagsFuture = _readEmbeddedTagsForLocal(path);
 
-      await _audioHandler.load(
-        item: _buildMediaItem(
-          track,
-          artUri: _networkArtworkUri(track.coverUrl),
-        ),
-        sourceUri: localAudioSourceUri(path),
-        queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
-      );
+      final castHooks = _castHooks;
+      if (castHooks != null) {
+        _trackLoadedToCast = true;
+        await castHooks.onTrackLoaded(track, autoPlay: autoPlay);
+      } else {
+        await _audioHandler.load(
+          item: _buildMediaItem(
+            track,
+            artUri: _networkArtworkUri(track.coverUrl),
+          ),
+          sourceUri: localAudioSourceUri(path),
+          queueIndex: _hasCurrentQueueTrack ? _queueIndex : null,
+        );
+      }
       if (!identical(_requestToken, token)) return false;
       await _seekAfterRestore(initialPosition, token);
       if (!identical(_requestToken, token)) return false;
@@ -1520,7 +1665,10 @@ class PlayerController extends StateNotifier<PlayerState>
       _syncQueueAvailability();
       _persistFullSession();
       if (!identical(_requestToken, token)) return false;
-      if (autoPlay && pauseGeneration == _sleepTimerPauseGeneration) {
+      if (autoPlay &&
+          pauseGeneration == _sleepTimerPauseGeneration &&
+          _castHooks == null &&
+          !_trackLoadedToCast) {
         await _audioHandler.play();
         if (!identical(_requestToken, token)) return false;
       }
@@ -1605,6 +1753,14 @@ class PlayerController extends StateNotifier<PlayerState>
     _cancelNetworkResume();
     _completionHandledForTrackId = state.track?.id;
     _resetStallRecovery(position: state.position);
+    final castHooks = _castHooks;
+    if (castHooks != null) {
+      await castHooks.onPause();
+      if (!mounted) return;
+      state = state.copyWith(playing: false);
+      _persistPositionCheckpoint();
+      return;
+    }
     await _audioHandler.pause();
     if (!mounted) return;
     state = state.copyWith(playing: false);
@@ -1615,6 +1771,11 @@ class PlayerController extends StateNotifier<PlayerState>
     if (state.loading ||
         state.track == null ||
         _transportSuppressionToken != null) {
+      return;
+    }
+    final castHooks = _castHooks;
+    if (castHooks != null) {
+      await castHooks.onToggle();
       return;
     }
     _resetStallRecovery(position: state.position);
@@ -1645,6 +1806,11 @@ class PlayerController extends StateNotifier<PlayerState>
     if (state.loading ||
         state.track == null ||
         _transportSuppressionToken != null) {
+      return;
+    }
+    final castHooks = _castHooks;
+    if (castHooks != null) {
+      await castHooks.onSeek(position);
       return;
     }
     final trackId = state.track!.id;
@@ -1734,6 +1900,11 @@ class PlayerController extends StateNotifier<PlayerState>
   }
 
   Future<void> _restartCurrentTrack() async {
+    final castHooks = _castHooks;
+    if (castHooks != null) {
+      await castHooks.onSeek(Duration.zero);
+      return;
+    }
     if (_audioHandler.hasPendingSourceRetry) {
       await _audioHandler.play();
       return;

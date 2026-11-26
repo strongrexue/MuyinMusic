@@ -634,6 +634,48 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     _broadcastState(_player.snapshot);
   }
 
+  /// While DLNA casting, the renderer — not the local engine — owns
+  /// playback. The cast session feeds its polled position/state here so
+  /// the system media card keeps tracking the track that is actually
+  /// audible. Transport actions on the card still route through the
+  /// bound callbacks (and from there to the renderer).
+  void publishCastPlaybackState({
+    required bool playing,
+    required Duration position,
+    required Duration duration,
+  }) {
+    final item = _currentMediaItem;
+    if (item == null || _iosNowPlayingSuppressed) return;
+    if (duration > Duration.zero && item.duration != duration) {
+      _publishMediaItem(item.copyWith(duration: duration));
+    }
+    playbackState.add(
+      PlaybackState(
+        controls: [
+          MediaControl.skipToPrevious,
+          if (playing) MediaControl.pause else MediaControl.play,
+          MediaControl.skipToNext,
+        ],
+        androidCompactActionIndices: const [0, 1, 2],
+        systemActions: const {
+          MediaAction.seek,
+          MediaAction.seekForward,
+          MediaAction.seekBackward,
+          MediaAction.setRepeatMode,
+          MediaAction.setShuffleMode,
+        },
+        processingState: AudioProcessingState.ready,
+        playing: playing,
+        updatePosition: position,
+        bufferedPosition: position,
+        speed: playing ? 1.0 : 0.0,
+        queueIndex: _queueIndex,
+        repeatMode: _repeatMode,
+        shuffleMode: _shuffleMode,
+      ),
+    );
+  }
+
   Future<Uri?> cacheArtwork(Uint8List? bytes) async {
     if (bytes == null || bytes.isEmpty) return null;
     final cached = _artworkFiles[bytes];

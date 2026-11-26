@@ -1,11 +1,13 @@
 package com.panghu.panghumusic
 
 import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.hardware.display.DisplayManager
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Debug
@@ -49,6 +51,25 @@ class MainActivity : AudioServiceActivity() {
     private var pendingAudioUri: Uri? = null
     private var displayListener: DisplayManager.DisplayListener? = null
     private var screenCorners: ScreenCornersBridge? = null
+    private var dlnaMulticastLock: WifiManager.MulticastLock? = null
+
+    /// SSDP discovery needs a WifiManager multicast lock, or Wi-Fi power
+    /// saving drops the M-SEARCH responses before Dart sees them. Held only
+    /// while a device search is running.
+    private fun acquireDlnaMulticastLock() {
+        if (dlnaMulticastLock?.isHeld == true) return
+        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifi.createMulticastLock("panghu_dlna")
+        lock.setReferenceCounted(false)
+        lock.acquire()
+        dlnaMulticastLock = lock
+    }
+
+    private fun releaseDlnaMulticastLock() {
+        val lock = dlnaMulticastLock ?: return
+        dlnaMulticastLock = null
+        if (lock.isHeld) lock.release()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,6 +123,20 @@ class MainActivity : AudioServiceActivity() {
         if (!flutterEngine.plugins.has(ArtworkColorsPlugin::class.java)) {
             flutterEngine.plugins.add(ArtworkColorsPlugin())
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "panghu_music/dlna")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "acquireMulticastLock" -> {
+                        acquireDlnaMulticastLock()
+                        result.success(null)
+                    }
+                    "releaseMulticastLock" -> {
+                        releaseDlnaMulticastLock()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         if (!flutterEngine.plugins.has(SafStoragePlugin::class.java)) {
             flutterEngine.plugins.add(SafStoragePlugin())
         }

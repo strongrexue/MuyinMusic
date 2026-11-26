@@ -99,7 +99,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>用于访问局域网内的 WebDAV 同步服务。</string>
+	<string>用于访问局域网内的 WebDAV 同步服务和投播设备。</string>
 
 	<key>UIApplicationSceneManifest</key>
 	<dict>

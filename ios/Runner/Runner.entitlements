@@ -6,5 +6,8 @@
 	     绝不硬编码 team id —— 侧签工具重签时会用自身前缀替换。 -->
 	<key>application-identifier</key>
 	<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<!-- SSDP 组播发现需要此 entitlement；侧签时需由签名工具（ldid）一并嵌入。 -->
+	<key>com.apple.developer.networking.multicast</key>
+	<true/>
 </dict>
 </plist>
