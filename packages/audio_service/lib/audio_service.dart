@@ -1031,6 +1031,36 @@ bool isLyricOnlyResend(MediaItem previous, MediaItem current) {
       previous.album == current.album;
 }
 
+/// What a lyric-only re-send should do with artwork. When the track's art
+/// was already resolved ([memoPath] non-null), publish text-only: the
+/// platform keeps the bitmap it already has for the current track, so the
+/// bitmap is not re-parcelled on every line. Otherwise fall through to
+/// the cache checks so the art can still be resolved and attached.
+enum LyricResendArtwork {
+  /// Publish the re-send without an art file; the platform keeps the
+  /// bitmap it already has for the current track.
+  publishTextOnly,
+
+  /// Resolve the artwork first (cache checks, then download if needed).
+  resolveArtwork,
+}
+
+/// Decides what a lyric-only re-send should do with artwork, given the
+/// previously published item and the resolved art file for this track
+/// ([memoPath], null when the art was never resolved).
+LyricResendArtwork lyricResendArtwork(
+  MediaItem? previousPublished,
+  MediaItem current,
+  String? memoPath,
+) {
+  if (previousPublished != null &&
+      isLyricOnlyResend(previousPublished, current) &&
+      memoPath != null) {
+    return LyricResendArtwork.publishTextOnly;
+  }
+  return LyricResendArtwork.resolveArtwork;
+}
+
 /// Provides an API to manage the app's [AudioHandler]. An app must call [init]
 /// during initialisation to register the [AudioHandler] that will service all
 /// requests to play audio.
@@ -1185,18 +1215,23 @@ class AudioService {
       }
 
       // Lyric fast path: a re-send whose only change is the lyric line
-      // publishes immediately with the art file resolved when the track
-      // first published, without touching the cache manager at all.
-      if (previousPublished != null &&
-          isLyricOnlyResend(previousPublished, mediaItem)) {
-        final memoPath = _artworkMemo.lookup(mediaItem.id, url);
-        if (memoPath != null) {
-          enqueueSend(mediaItem, () => sendToPlatform(mediaItem, memoPath));
-          return;
-        }
-        // Memo miss (art never resolved for this track): fall through to
-        // the cache checks below.
+      // publishes immediately, without touching the cache manager at all.
+      // When the art was already resolved for this track, publish
+      // text-only: the platform side keeps the bitmap it already has for
+      // the current track (AudioService.setMetadata re-attaches the
+      // existing artBitmap for same-track re-sends without an art file),
+      // so the bitmap is not re-parcelled to the car on every line.
+      if (lyricResendArtwork(
+            previousPublished,
+            mediaItem,
+            _artworkMemo.lookup(mediaItem.id, url),
+          ) ==
+          LyricResendArtwork.publishTextOnly) {
+        enqueueSend(mediaItem, () => sendRaw(mediaItem));
+        return;
       }
+      // Memo miss (art never resolved for this track): fall through to
+      // the cache checks below.
 
       // A download for this track's art is already in flight (started by
       // an earlier event); publish the new line right away. The in-flight
@@ -1231,23 +1266,29 @@ class AudioService {
 
       // We haven't fetched the art yet, so show the metadata now, and
       // again after we load the art. The load is shared per URL, so
-      // re-sends of this track (duration, lyrics, playback mode) wait on
-      // the same download instead of invalidating it. The download waits
-      // off the decision chain, so later lyric lines still flow.
+      // re-sends of this track (duration, lyrics, playback mode) share
+      // the same download instead of invalidating it. The download is
+      // fire-and-forget: awaiting it here would park the decision chain
+      // and stall later lyric lines behind it.
       enqueueSend(mediaItem, () => sendRaw(mediaItem));
-      final loadedFilePath = await _sharedArtworkLoader.load(
-          url, () => _loadArtwork(mediaItem));
-      if (loadedFilePath == null) {
-        return;
-      }
-      _artworkMemo.store(mediaItem.id, url, loadedFilePath);
-      // Attach the art to the freshest metadata for this track, which may
-      // be a re-send newer than the event that started the load.
-      final current = latestMediaItem;
-      if (current == null || current.artUri?.toString() != url) {
-        return;
-      }
-      enqueueSend(current, () => sendToPlatform(current, loadedFilePath));
+      _sharedArtworkLoader.load(url, () => _loadArtwork(mediaItem)).then(
+        (loadedFilePath) {
+          if (loadedFilePath == null) {
+            return;
+          }
+          _artworkMemo.store(mediaItem.id, url, loadedFilePath);
+          // Attach the art to the freshest metadata for this track, which
+          // may be a re-send newer than the event that started the load.
+          final current = latestMediaItem;
+          if (current == null || current.artUri?.toString() != url) {
+            return;
+          }
+          enqueueSend(current, () => sendToPlatform(current, loadedFilePath));
+        },
+        onError: (Object e) {
+          _asyncError.add(e);
+        },
+      );
     }
 
     _handler.mediaItem.listen((mediaItem) {

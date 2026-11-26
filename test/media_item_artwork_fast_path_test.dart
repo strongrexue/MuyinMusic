@@ -66,6 +66,42 @@ void main() {
     });
   });
 
+  group('lyricResendArtwork', () {
+    test('lyric-only re-send with resolved art publishes text-only', () {
+      final previous = item(id: 'track-1', artist: '悬琴箫');
+      final current = item(id: 'track-1', artist: '风雅温柔声色告');
+      expect(
+        lyricResendArtwork(previous, current, '/cache/a.jpg'),
+        LyricResendArtwork.publishTextOnly,
+      );
+    });
+
+    test('lyric-only re-send with unresolved art falls through', () {
+      final previous = item(id: 'track-1', artist: '悬琴箫');
+      final current = item(id: 'track-1', artist: '风雅温柔声色告');
+      expect(
+        lyricResendArtwork(previous, current, null),
+        LyricResendArtwork.resolveArtwork,
+      );
+    });
+
+    test('track change with resolved art still falls through', () {
+      final previous = item(id: 'track-1');
+      final current = item(id: 'track-2');
+      expect(
+        lyricResendArtwork(previous, current, '/cache/a.jpg'),
+        LyricResendArtwork.resolveArtwork,
+      );
+    });
+
+    test('no previous publish falls through', () {
+      expect(
+        lyricResendArtwork(null, item(id: 'track-1'), '/cache/a.jpg'),
+        LyricResendArtwork.resolveArtwork,
+      );
+    });
+  });
+
   group('ArtworkFileMemo', () {
     test('stores and looks up a resolved file by track id and art URL', () {
       final memo = ArtworkFileMemo();
