@@ -2211,7 +2211,13 @@ class PlayerController extends StateNotifier<PlayerState>
     var lineIndex = -1;
     String? activeLine;
     if (canPublishLine) {
-      lineIndex = state.lyrics.activeIndex(state.position);
+      // Bluetooth only: the car display lags the singing by roughly the
+      // downstream delay, so select the line at position + lead. The
+      // in-app lyrics and the lock-screen card use the unshifted position.
+      final leadPosition =
+          state.position +
+          Duration(milliseconds: settings.bluetoothLyricLeadMs);
+      lineIndex = state.lyrics.activeIndex(leadPosition);
       if (lineIndex >= 0 && lineIndex < state.lyrics.lines.length) {
         activeLine = state.lyrics.lines[lineIndex].text;
       }

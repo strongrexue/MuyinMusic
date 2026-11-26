@@ -87,6 +87,7 @@ const String _kPlayerVolumeKey = 'player_volume';
 const String _kOutputGainDbKey = 'output_gain_db';
 const String _kBluetoothLyricEnabledKey = 'bluetooth_lyric_enabled';
 const String _kBluetoothFullLyricEnabledKey = 'bluetooth_full_lyric_enabled';
+const String _kBluetoothLyricLeadMsKey = 'bluetooth_lyric_lead_ms';
 const String _kBluetoothLyricNoticeSeenKey = 'bluetooth_lyric_notice_seen';
 const String _kDebugModeKey = 'debug_mode';
 const String _kLegacyBaseUrlKey = 'base_url';
@@ -114,6 +115,15 @@ double normalizeOutputGainDb(double value) {
   if (!value.isFinite) return 0;
   return value.clamp(kOutputGainMinDb, kOutputGainMaxDb);
 }
+
+const int kBluetoothLyricLeadMinMs = 0;
+const int kBluetoothLyricLeadMaxMs = 1000;
+const int kBluetoothLyricLeadDefaultMs = 500;
+
+/// 蓝牙歌词提前量（毫秒）：车载蓝牙显示的歌词行滞后于歌声时，把蓝牙元数据
+/// 里的歌词行提前这么多毫秒发出；0 等于不提前。
+int normalizeBluetoothLyricLeadMs(int value) =>
+    value.clamp(kBluetoothLyricLeadMinMs, kBluetoothLyricLeadMaxMs);
 
 /// 横屏 KTV 播放页的背景样式：内置动态图，或用户导入的自定义图片。
 /// 上一版的 gradient / cover 两档已经下线，存量值一律按 builtin 读。
@@ -332,6 +342,7 @@ class AppSettings {
     required this.allowMixWithOthers,
     this.playerVolume = 1.0,
     this.outputGainDb = 0.0,
+    this.bluetoothLyricLeadMs = kBluetoothLyricLeadDefaultMs,
     required this.bluetoothLyricEnabled,
     required this.bluetoothFullLyricEnabled,
     required this.bluetoothLyricNoticeSeen,
@@ -455,6 +466,12 @@ class AppSettings {
   /// lifted without touching the 0..1 user volume; 0 is a straight pass.
   final double outputGainDb;
 
+  /// Bluetooth lyric lead in milliseconds (0..[kBluetoothLyricLeadMaxMs]).
+  /// Only shifts the lyric line published to the Bluetooth media session
+  /// (the car display lags the singing); the in-app lyrics and the
+  /// lock-screen card line are unaffected.
+  final int bluetoothLyricLeadMs;
+
   final bool bluetoothLyricEnabled;
   final bool bluetoothFullLyricEnabled;
   final bool bluetoothLyricNoticeSeen;
@@ -508,6 +525,7 @@ class AppSettings {
     bool? allowMixWithOthers,
     double? playerVolume,
     double? outputGainDb,
+    int? bluetoothLyricLeadMs,
     bool? bluetoothLyricEnabled,
     bool? bluetoothFullLyricEnabled,
     bool? bluetoothLyricNoticeSeen,
@@ -580,6 +598,7 @@ class AppSettings {
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
     playerVolume: playerVolume ?? this.playerVolume,
     outputGainDb: outputGainDb ?? this.outputGainDb,
+    bluetoothLyricLeadMs: bluetoothLyricLeadMs ?? this.bluetoothLyricLeadMs,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
     bluetoothFullLyricEnabled:
         bluetoothFullLyricEnabled ?? this.bluetoothFullLyricEnabled,
@@ -767,6 +786,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
       ),
       outputGainDb: normalizeOutputGainDb(
         _prefs.getDouble(_kOutputGainDbKey) ?? 0,
+      ),
+      bluetoothLyricLeadMs: normalizeBluetoothLyricLeadMs(
+        _prefs.getInt(_kBluetoothLyricLeadMsKey) ??
+            kBluetoothLyricLeadDefaultMs,
       ),
       bluetoothLyricEnabled:
           _prefs.getBool(_kBluetoothLyricEnabledKey) ?? false,
@@ -1671,6 +1694,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final gainDb = normalizeOutputGainDb(value);
     await _prefs.setDouble(_kOutputGainDbKey, gainDb);
     state = state.copyWith(outputGainDb: gainDb);
+  }
+
+  Future<void> setBluetoothLyricLeadMs(int value) async {
+    final leadMs = normalizeBluetoothLyricLeadMs(value);
+    await _prefs.setInt(_kBluetoothLyricLeadMsKey, leadMs);
+    state = state.copyWith(bluetoothLyricLeadMs: leadMs);
   }
 
   Future<void> setBluetoothLyricEnabled(bool value) async {

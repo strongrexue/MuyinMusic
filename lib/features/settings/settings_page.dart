@@ -361,6 +361,36 @@ class SettingsPage extends ConsumerWidget {
                                       value,
                                     ),
                               ),
+                              Padding(
+                                key: const ValueKey(
+                                  'bluetooth-lyric-lead-setting',
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                child: EqualizerValueSlider(
+                                  label: '蓝牙歌词提前量',
+                                  valueLabel:
+                                      '${settings.bluetoothLyricLeadMs} ms',
+                                  value: settings.bluetoothLyricLeadMs
+                                      .toDouble(),
+                                  min: kBluetoothLyricLeadMinMs.toDouble(),
+                                  max: kBluetoothLyricLeadMaxMs.toDouble(),
+                                  onChanged: (value) => ref
+                                      .read(settingsProvider.notifier)
+                                      .setBluetoothLyricLeadMs(value.round()),
+                                  onReset:
+                                      settings.bluetoothLyricLeadMs !=
+                                          kBluetoothLyricLeadDefaultMs
+                                      ? () => ref
+                                            .read(settingsProvider.notifier)
+                                            .setBluetoothLyricLeadMs(
+                                              kBluetoothLyricLeadDefaultMs,
+                                            )
+                                      : null,
+                                ),
+                              ),
                             ],
                           ),
                         if (section == SettingsSection.permissions) ...[

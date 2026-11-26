@@ -51,6 +51,7 @@ void main() {
       expect(settings.grooveShiftEnabled, isFalse);
       expect(settings.bluetoothLyricEnabled, isFalse);
       expect(settings.bluetoothFullLyricEnabled, isFalse);
+      expect(settings.bluetoothLyricLeadMs, 500);
       expect(settings.bluetoothLyricNoticeSeen, isFalse);
       expect(settings.localMusicDir, settings.downloadDir);
       expect(settings.useBuiltInSourceFilePicker, isFalse);
@@ -84,6 +85,45 @@ void main() {
     expect(normalizeOutputGainDb(double.infinity), 0);
     expect(normalizeOutputGainDb(6), 6);
     expect(normalizeOutputGainDb(12), 12);
+  });
+
+  test(
+    'bluetooth lyric lead defaults to 500 ms, persists, and clamps to 0..1000',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      final container = _settingsContainer(prefs);
+      addTearDown(container.dispose);
+
+      expect(container.read(settingsProvider).bluetoothLyricLeadMs, 500);
+
+      await container
+          .read(settingsProvider.notifier)
+          .setBluetoothLyricLeadMs(250);
+      expect(container.read(settingsProvider).bluetoothLyricLeadMs, 250);
+      expect(prefs.getInt('bluetooth_lyric_lead_ms'), 250);
+
+      await container
+          .read(settingsProvider.notifier)
+          .setBluetoothLyricLeadMs(1500);
+      expect(container.read(settingsProvider).bluetoothLyricLeadMs, 1000);
+
+      await container
+          .read(settingsProvider.notifier)
+          .setBluetoothLyricLeadMs(-50);
+      expect(container.read(settingsProvider).bluetoothLyricLeadMs, 0);
+
+      final restored = _settingsContainer(prefs);
+      addTearDown(restored.dispose);
+      expect(restored.read(settingsProvider).bluetoothLyricLeadMs, 0);
+    },
+  );
+
+  test('normalizeBluetoothLyricLeadMs clamps to 0..1000', () {
+    expect(normalizeBluetoothLyricLeadMs(-1), 0);
+    expect(normalizeBluetoothLyricLeadMs(0), 0);
+    expect(normalizeBluetoothLyricLeadMs(500), 500);
+    expect(normalizeBluetoothLyricLeadMs(1000), 1000);
+    expect(normalizeBluetoothLyricLeadMs(1001), 1000);
   });
 
   test(
