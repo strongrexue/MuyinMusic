@@ -5,7 +5,7 @@
 class StatsDbConstants {
   const StatsDbConstants._();
 
-  static const String dbName = 'muyin_listening_stats.db';
+  static const String dbName = 'panghu_listening_stats.db';
   static const int dbVersion = 1;
 
   /// 歌曲元数据（id/title/artist/album/coverUrl），供排行榜展示歌曲名。

@@ -7,9 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/features/player/widgets/player_control_color.dart';
-import 'package:muyin_music/features/player/widgets/player_palette.dart';
-import 'package:muyin_music/theme/app_motion.dart';
+import 'package:panghu_music/features/player/widgets/player_control_color.dart';
+import 'package:panghu_music/features/player/widgets/player_palette.dart';
+import 'package:panghu_music/theme/app_motion.dart';
 
 final _artworkProvider = StateProvider<ImageProvider<Object>?>((ref) => null);
 

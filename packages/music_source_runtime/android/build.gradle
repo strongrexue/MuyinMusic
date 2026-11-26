@@ -2,11 +2,11 @@ plugins {
     id 'com.android.library'
 }
 
-group = 'com.muyin.music_source_runtime'
+group = 'com.panghu.music_source_runtime'
 version = '0.1.0'
 
 android {
-    namespace = 'com.muyin.music_source_runtime'
+    namespace = 'com.panghu.music_source_runtime'
     compileSdk = 35
 
     compileOptions {

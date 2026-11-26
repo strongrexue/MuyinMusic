@@ -6,11 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/storage/glass_preview_provider.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/settings/widgets/glass_settings_dialog.dart';
-import 'package:muyin_music/theme/app_theme.dart';
-import 'package:muyin_music/theme/glass_settings.dart';
+import 'package:panghu_music/core/storage/glass_preview_provider.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/settings/widgets/glass_settings_dialog.dart';
+import 'package:panghu_music/theme/app_theme.dart';
+import 'package:panghu_music/theme/glass_settings.dart';
 
 import 'helpers/prism_test_environment.dart';
 

@@ -5,13 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/player/player_audio_handler.dart';
-import 'package:muyin_music/features/player/player_controller.dart';
-import 'package:muyin_music/features/player/widgets/player_control_color.dart';
-import 'package:muyin_music/features/player/widgets/player_palette.dart';
-import 'package:muyin_music/features/player/widgets/player_slider_thumb_shape.dart';
-import 'package:muyin_music/features/player/widgets/transport_bar.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/player/player_audio_handler.dart';
+import 'package:panghu_music/features/player/player_controller.dart';
+import 'package:panghu_music/features/player/widgets/player_control_color.dart';
+import 'package:panghu_music/features/player/widgets/player_palette.dart';
+import 'package:panghu_music/features/player/widgets/player_slider_thumb_shape.dart';
+import 'package:panghu_music/features/player/widgets/transport_bar.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));

@@ -7,7 +7,7 @@ class VivoQueueBrowser {
   const VivoQueueBrowser._();
 
   static const pageSize = 50;
-  static const emptyItemId = 'muyin:vivo:empty-queue';
+  static const emptyItemId = 'panghu:vivo:empty-queue';
 
   static List<MediaItem> snapshot({
     required List<MediaItem> queue,

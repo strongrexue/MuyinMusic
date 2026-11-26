@@ -1,4 +1,4 @@
-// MuyinMusic iOS —— HTTP Range 随机访问数据源。
+// PanghuMusic iOS —— HTTP Range 随机访问数据源。
 //
 // 与 Android 端 ProgressiveHttpSource.kt 语义等价：把网络音频当稀疏文件缓存，
 // 用 BASS_StreamCreateFileUser + STREAMFILE_NOBUFFER 的四个 C 回调直接落位，
@@ -301,7 +301,7 @@ final class ProgressiveHttpSource: NSObject {
     cond.lock()
     if worker == nil {
       let thread = Thread { [weak self] in self?.downloadLoop() }
-      thread.name = "Muyin-HTTP"
+      thread.name = "Panghu-HTTP"
       thread.stackSize = 512 * 1024
       worker = thread
       thread.start()
@@ -768,7 +768,7 @@ final class ProgressiveHttpSource: NSObject {
       cond.unlock()
       if startTail {
         let thread = Thread { [weak self] in self?.fetchTail() }
-        thread.name = "Muyin-HTTP-tail"
+        thread.name = "Panghu-HTTP-tail"
         thread.stackSize = 256 * 1024
         thread.start()
       }

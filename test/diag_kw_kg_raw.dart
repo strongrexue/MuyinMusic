@@ -5,7 +5,7 @@
 
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/sdk/internal/sdk_http.dart';
+import 'package:panghu_music/core/sdk/internal/sdk_http.dart';
 
 void main() {
   test('KW search raw fields', () async {

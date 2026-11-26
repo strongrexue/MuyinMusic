@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:muyin_music/core/services/log_policy.dart';
+import 'package:panghu_music/core/services/log_policy.dart';
 
 void main() {
   test('compacts long and multi-line output and hides URL credentials', () {

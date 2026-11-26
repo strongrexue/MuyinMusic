@@ -1,9 +1,9 @@
-// MuyinMusic iOS —— 自定义音源运行时。
+// PanghuMusic iOS —— 自定义音源运行时。
 //
 // 与 Android 的 packages/music_source_runtime 保持完全相同的契约：
 //
-//   MethodChannel  muyin_music/music_source_runtime
-//   MethodChannel  muyin_music/music_source_update_runtime
+//   MethodChannel  panghu_music/music_source_runtime
+//   MethodChannel  panghu_music/music_source_update_runtime
 //     load      {id,name,description,author,homepage,version,sourceKey,script} -> {sources:{...}}
 //     resolve   {source,quality,musicInfo} -> {url,fileName?}
 //     dispose   -> void
@@ -34,8 +34,8 @@ import JavaScriptCore
 
 public final class MusicSourceRuntimePlugin: NSObject, FlutterPlugin {
 
-  static let runtimeChannelName = "muyin_music/music_source_runtime"
-  static let updateChannelName = "muyin_music/music_source_update_runtime"
+  static let runtimeChannelName = "panghu_music/music_source_runtime"
+  static let updateChannelName = "panghu_music/music_source_update_runtime"
 
   private var sessions: [SourceScriptSession] = []
 
@@ -65,8 +65,8 @@ final class SourceScriptSession: NSObject {
 
   private let channel: FlutterMethodChannel
   /// 所有 JS 访问都串行化在这条队列上；JSCore 的 JSContext 不是线程安全的。
-  private let jsQueue = DispatchQueue(label: "com.muyin.music.source.js")
-  private let timerQueue = DispatchQueue(label: "com.muyin.music.source.timer")
+  private let jsQueue = DispatchQueue(label: "com.panghu.music.source.js")
+  private let timerQueue = DispatchQueue(label: "com.panghu.music.source.timer")
 
   private var context: JSContext?
   private var metadata: [String: String] = [:]

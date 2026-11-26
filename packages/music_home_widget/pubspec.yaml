@@ -1,5 +1,5 @@
 name: music_home_widget
-description: Android home-screen music card for MuyinMusic.
+description: Android home-screen music card for PanghuMusic.
 version: 0.1.0
 publish_to: none
 
@@ -16,7 +16,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.muyin.music_home_widget
+        package: com.panghu.music_home_widget
         pluginClass: MusicHomeWidgetPlugin
       ios:
         pluginClass: MusicHomeWidgetPlugin

@@ -1,12 +1,12 @@
 import 'dart:io';
 import 'dart:async';
 
-import 'package:muyin_music/core/app_info.dart';
-import 'package:muyin_music/core/services/app_update_service.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/core/ui/app_toast.dart';
-import 'package:muyin_music/core/ui/widgets/prism_environment.dart';
-import 'package:muyin_music/features/update/app_update_prompt.dart';
+import 'package:panghu_music/core/app_info.dart';
+import 'package:panghu_music/core/services/app_update_service.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/core/ui/app_toast.dart';
+import 'package:panghu_music/core/ui/widgets/prism_environment.dart';
+import 'package:panghu_music/features/update/app_update_prompt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -32,7 +32,7 @@ void main() {
   });
 
   const releaseUri =
-      'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.1.0';
+      'https://github.com/strongrexue/PanghuMusic/releases/tag/v1.1.0';
 
   testWidgets('newer release shows dialog and later does not open GitHub', (
     tester,
@@ -101,7 +101,7 @@ void main() {
       release: _release(
         version: '1.0.1',
         pageUri:
-            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.0.1',
+            'https://github.com/strongrexue/PanghuMusic/releases/tag/v1.0.1',
       ),
     );
     final launchedUris = <Uri>[];
@@ -248,7 +248,7 @@ void main() {
       release: _release(
         version: '1.2.0',
         pageUri:
-            'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.2.0',
+            'https://github.com/strongrexue/PanghuMusic/releases/tag/v1.2.0',
       ),
     );
     AppUpdateCheckOutcome? outcome;
@@ -382,7 +382,7 @@ Future<void> _pumpHarness(
 }) async {
   PackageInfo.setMockInitialValues(
     appName: appDisplayName,
-    packageName: 'com.muyin.muyinmusic',
+    packageName: 'com.panghu.panghumusic',
     version: '1.0.1',
     buildNumber: '2',
     buildSignature: '',

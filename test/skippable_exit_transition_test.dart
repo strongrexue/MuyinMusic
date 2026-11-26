@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/skippable_exit_transition.dart';
+import 'package:panghu_music/core/ui/skippable_exit_transition.dart';
 
 void main() {
   Future<AnimationController> pumpTransition(

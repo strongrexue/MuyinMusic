@@ -1,12 +1,12 @@
 import 'dart:io';
 
-import 'package:muyin_music/core/music_sources/music_source_controller.dart';
-import 'package:muyin_music/core/music_sources/music_source_store.dart';
-import 'package:muyin_music/core/services/storage_browser_service.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/music_sources/music_source_page.dart';
-import 'package:muyin_music/features/settings/widgets/storage_folder_picker_sheet.dart';
-import 'package:muyin_music/features/shell/shell_toolbar_visibility.dart';
+import 'package:panghu_music/core/music_sources/music_source_controller.dart';
+import 'package:panghu_music/core/music_sources/music_source_store.dart';
+import 'package:panghu_music/core/services/storage_browser_service.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/music_sources/music_source_page.dart';
+import 'package:panghu_music/features/settings/widgets/storage_folder_picker_sheet.dart';
+import 'package:panghu_music/features/shell/shell_toolbar_visibility.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,7 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'helpers/prism_test_environment.dart';
 
 const _browserChannel = MethodChannel('test/source_file_browser');
-const _runtimeChannel = MethodChannel('muyin_music/music_source_runtime');
+const _runtimeChannel = MethodChannel('panghu_music/music_source_runtime');
 final _systemPickerChannel = MethodChannel(
   'miguelruivo.flutter.plugins.filepicker',
   Platform.isAndroid || Platform.isIOS

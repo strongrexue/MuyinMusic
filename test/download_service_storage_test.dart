@@ -8,17 +8,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/api_client.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/music_url.dart';
-import 'package:muyin_music/core/music_sources/music_source_models.dart';
-import 'package:muyin_music/core/music_sources/music_url_resolver.dart';
-import 'package:muyin_music/core/services/app_logger.dart';
-import 'package:muyin_music/core/services/download_service.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/downloads/download_history_store.dart';
-import 'package:muyin_music/features/downloads/download_progress.dart';
+import 'package:panghu_music/core/api/api_client.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/music_url.dart';
+import 'package:panghu_music/core/music_sources/music_source_models.dart';
+import 'package:panghu_music/core/music_sources/music_url_resolver.dart';
+import 'package:panghu_music/core/services/app_logger.dart';
+import 'package:panghu_music/core/services/download_service.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/downloads/download_history_store.dart';
+import 'package:panghu_music/features/downloads/download_progress.dart';
 
 const _withoutMetadata = EmbedRequest(
   embedCover: false,
@@ -269,7 +269,7 @@ Future<
 >
 _fixture({bool sameFileName = false, HttpClientAdapter? adapter}) async {
   final root = await Directory.systemTemp.createTemp(
-    'muyin-download-storage-',
+    'panghu-download-storage-',
   );
   final downloads = await Directory(p.join(root.path, 'music')).create();
   final documents = await Directory(p.join(root.path, 'documents')).create();

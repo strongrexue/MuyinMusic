@@ -10,15 +10,15 @@
 #   bash tool/ldid_sign_ipa.sh <输入.ipa> [输出.ipa] [app-id] [group-id]
 # 默认：
 #   输出 = <输入>-ldid.ipa
-#   app-id  = com.muyin.muyinmusic（必须等于真实 bundle id，不能带 group. 前缀）
-#   group-id = group.com.muyin.muyinmusic
+#   app-id  = com.panghu.panghumusic（必须等于真实 bundle id，不能带 group. 前缀）
+#   group-id = group.com.panghu.panghumusic
 # 依赖（macOS）：brew install ldid；系统自带 unzip / zip / PlistBuddy。
 set -euo pipefail
 
 IPA_IN="${1:-}"
 IPA_OUT="${2:-${IPA_IN%.ipa}-ldid.ipa}"
-APP_ID="${3:-com.muyin.muyinmusic}"
-GROUP_ID="${4:-group.com.muyin.muyinmusic}"
+APP_ID="${3:-com.panghu.panghumusic}"
+GROUP_ID="${4:-group.com.panghu.panghumusic}"
 
 if [ -z "$IPA_IN" ] || [ ! -f "$IPA_IN" ]; then
   echo "用法: bash ldid_sign_ipa.sh <输入.ipa> [输出.ipa] [app-id] [group-id]" >&2

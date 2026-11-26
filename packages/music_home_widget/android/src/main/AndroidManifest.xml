@@ -1,11 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <service
-            android:name="com.muyin.music_home_widget.MusicWidgetStateService"
+            android:name="com.panghu.music_home_widget.MusicWidgetStateService"
             android:exported="false"
             android:process=":music_widget_state" />
         <receiver
-            android:name="com.muyin.music_home_widget.MusicWidgetProvider"
+            android:name="com.panghu.music_home_widget.MusicWidgetProvider"
             android:exported="false"
             android:label="@string/music_widget_name">
             <intent-filter>

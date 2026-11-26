@@ -604,7 +604,7 @@ final defaultMusicDirProvider = Provider<String>((ref) {
   return kDefaultDownloadDir;
 });
 
-/// 平台默认下载目录。iOS 默认为 Documents/MuyinMusic，与
+/// 平台默认下载目录。iOS 默认为 Documents/PanghuMusic，与
 /// download_service.dart 的兜底一致；iOS 在 main.dart override。
 final defaultDownloadDirProvider = Provider<String>((ref) {
   return kDefaultDownloadDir;
@@ -1869,13 +1869,13 @@ _IosDirectories _migrateIosDirectories(
     unawaited(prefs.setBool(_kIosDirMigratedKey, true));
   }
 
-  // 下载根与扫描根同源：iOS 上让下载目录始终是扫描根下的 MuyinMusic，
+  // 下载根与扫描根同源：iOS 上让下载目录始终是扫描根下的 PanghuMusic，
   // 保证落点归属判断恒成立（对齐 Cymusic「固定自有目录」的做法）。
   if (Platform.isIOS) {
     final scanRoot = scanDirs?.isEmpty == true
         ? defaultScanDir
         : (scanDirs?.first ?? defaultScanDir);
-    final derived = p.join(scanRoot, 'MuyinMusic');
+    final derived = p.join(scanRoot, 'PanghuMusic');
     if (downloadDir == null ||
         isAndroidPath(downloadDir) ||
         stale(downloadDir)) {

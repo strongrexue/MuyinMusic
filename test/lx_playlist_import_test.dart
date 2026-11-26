@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/features/playlists/lx_playlist_import.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/features/playlists/lx_playlist_import.dart';
 
 void main() {
   test('recognizes LX playlist file extensions case-insensitively', () {

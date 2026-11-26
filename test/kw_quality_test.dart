@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/sdk/internal/kw_quality.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/sdk/internal/kw_quality.dart';
 
 void main() {
   test('parses all seven Kuwo N_MINFO qualities and their direct sizes', () {

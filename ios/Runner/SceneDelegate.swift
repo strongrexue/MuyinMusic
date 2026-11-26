@@ -11,10 +11,10 @@ class SceneDelegate: FlutterSceneDelegate {
     for context in URLContexts {
       let url = context.url
       if url.isFileURL {
-        MuyinIncomingAudio.shared.accept(url: url)
-      } else if url.scheme?.lowercased() == muyinURLScheme
+        PanghuIncomingAudio.shared.accept(url: url)
+      } else if url.scheme?.lowercased() == panghuURLScheme
         || url.scheme?.lowercased() == legacyURLScheme {
-        _ = MuyinIncomingAudio.handleAppURL(url)
+        _ = PanghuIncomingAudio.handleAppURL(url)
       }
     }
     super.scene(scene, openURLContexts: URLContexts)

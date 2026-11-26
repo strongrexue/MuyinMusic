@@ -33,18 +33,18 @@ import 'theme/app_motion.dart';
 import 'theme/app_theme.dart';
 import 'core/storage/glass_preview_provider.dart';
 
-class MuyinMusicApp extends ConsumerStatefulWidget {
-  const MuyinMusicApp({super.key});
+class PanghuMusicApp extends ConsumerStatefulWidget {
+  const PanghuMusicApp({super.key});
 
   @override
-  ConsumerState<MuyinMusicApp> createState() => _MuyinMusicAppState();
+  ConsumerState<PanghuMusicApp> createState() => _PanghuMusicAppState();
 }
 
-class _MuyinMusicAppState extends ConsumerState<MuyinMusicApp>
+class _PanghuMusicAppState extends ConsumerState<PanghuMusicApp>
     with WidgetsBindingObserver {
   String? _lastLoggedScheme;
   static const _audioIntentChannel = MethodChannel(
-    'muyin_music/audio_intent',
+    'panghu_music/audio_intent',
   );
   bool _externalAudioReady = false;
   bool _handlingExternalAudio = false;

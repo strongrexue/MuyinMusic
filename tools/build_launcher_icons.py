@@ -1,4 +1,4 @@
-"""Builds the shipped launcher icon set for 沐音 from the matted logo art.
+"""Builds the shipped launcher icon set for 胖虎 from the matted logo art.
 
 Outputs, per icon variant:
   drawable-<dpi>/ic_launcher[_code]_foreground.png   adaptive foreground (108dp canvas)
@@ -17,7 +17,7 @@ import os
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = r"D:\projects\MuyinMusic\logo.png"
+SRC = r"D:\projects\PanghuMusic\logo.png"
 RES = os.path.join(ROOT, "android", "app", "src", "main", "res")
 PREVIEWS = os.path.join(ROOT, "assets", "app_icons")
 WORK = 1024

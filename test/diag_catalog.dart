@@ -2,10 +2,10 @@
 // Manual network diagnostic: flutter test test/diag_catalog.dart -r expanded
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/search_category.dart';
-import 'package:muyin_music/core/sdk/catalog_sdk.dart';
-import 'package:muyin_music/core/sdk/playlist_sdk.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/search_category.dart';
+import 'package:panghu_music/core/sdk/catalog_sdk.dart';
+import 'package:panghu_music/core/sdk/playlist_sdk.dart';
 
 void main() {
   test('tx artist paging live search', () async {

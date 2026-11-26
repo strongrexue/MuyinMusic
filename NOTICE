@@ -1,4 +1,4 @@
-MuyinMusic (沐音) — Third-Party Notices
+PanghuMusic (胖虎) — Third-Party Notices
 ========================================
 
 This file records the provenance and licensing of the software distributed in
@@ -8,7 +8,7 @@ advice.
 
 1. Origin
 ---------
-MuyinMusic (沐音) is a second-development (二开) fork of:
+PanghuMusic (胖虎) is a second-development (二开) fork of:
 
     CyShineMusic (栖弦)
     https://github.com/KevinllBin/CyShineMusic
@@ -17,7 +17,7 @@ MuyinMusic (沐音) is a second-development (二开) fork of:
 
 The baseline is upstream release v1.1.2 (git tag v1.1.2, commit 24a87ce).
 
-MuyinMusic modifications: Copyright (c) 2026 strongrexue and contributors.
+PanghuMusic modifications: Copyright (c) 2026 strongrexue and contributors.
 
 The root LICENSE file is kept byte-for-byte identical to upstream's MIT
 license, including the original copyright notice and permission notice, as
@@ -29,17 +29,17 @@ Software").
 2. Changes made in this fork (relative to upstream v1.1.2)
 -----------------------------------------------------------
 - Re-branded the user-visible application identity:
-    applicationId : com.cyshine.music[.dev] -> com.muyin.muyinmusic[.dev]
-    app label     : 栖弦 / 栖弦dev          -> 沐音 / 沐音dev
+    applicationId : com.cyshine.music[.dev] -> com.panghu.panghumusic[.dev]
+    app label     : 栖弦 / 栖弦dev          -> 胖虎 / 胖虎dev
     display name, startup screen, shell header, home-widget strings,
     vivo empty-queue hint, and other visible text.
 - Re-branded internal identifiers from cyshine / CyShineMusic to
-  muyin / MuyinMusic: log file names, download/cache/probe prefixes, FLAC
+  panghu / PanghuMusic: log file names, download/cache/probe prefixes, FLAC
   temp files, equalizer preset id and .speq file name, vivo metadata keys,
   the audio-playback notification channel id, the default music download
   directory, and the WebDAV sync directory.
 - Re-pointed the in-app online update checker to this repository's GitHub
-  Releases (https://github.com/strongrexue/MuyinMusic/releases/latest)
+  Releases (https://github.com/strongrexue/PanghuMusic/releases/latest)
   instead of upstream, and updated the update-dialog wording.
 - Added the license texts that upstream vendored without bundling (see
   section 3), plus this NOTICE and CHANGELOG.md.
@@ -105,7 +105,7 @@ receives an APK of this app must also be able to obtain the complete
 
 We satisfy this by publishing the complete source of this repository at:
 
-    https://github.com/strongrexue/MuyinMusic
+    https://github.com/strongrexue/PanghuMusic
 
 Every GitHub Release that distributes an APK is built from a tagged commit in
 this same public repository, so recipients have the complete Corresponding

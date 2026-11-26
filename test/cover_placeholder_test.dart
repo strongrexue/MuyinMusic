@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/cover_placeholder.dart';
+import 'package:panghu_music/core/ui/cover_placeholder.dart';
 
 void main() {
   testWidgets('cover loading uses a text-free animated skeleton', (

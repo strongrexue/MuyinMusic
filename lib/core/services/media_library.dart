@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 class MediaLibrary {
-  static const _channel = MethodChannel('muyin_music/media_library');
+  static const _channel = MethodChannel('panghu_music/media_library');
   static Future<int>? _sdk;
 
   static Future<int> get sdk => _sdk ??= Platform.isAndroid

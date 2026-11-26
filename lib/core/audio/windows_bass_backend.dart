@@ -144,7 +144,7 @@ class WindowsBassBackend implements BassBackend {
     final exe = File(Platform.resolvedExecutable);
     final local = p.join(exe.parent.path, 'bass.dll');
     if (File(local).existsSync()) return local;
-    const fallback = r'D:\projects\_muyin_windows\build\bass_spike\unzipped\x64\bass.dll';
+    const fallback = r'D:\projects\_panghu_windows\build\bass_spike\unzipped\x64\bass.dll';
     if (File(fallback).existsSync()) return fallback;
     throw StateError('bass.dll not found next to ${exe.path}');
   }

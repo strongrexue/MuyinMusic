@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 
 import 'app_logger.dart';
 
-/// 原生 → Dart 的日志桥（通道 `muyin_music/native_log`）。
+/// 原生 → Dart 的日志桥（通道 `panghu_music/native_log`）。
 ///
 /// 原生侧的失败（实时活动、备用图标、音源运行时……）默认只写 `NSLog`，
 /// Release 包上不会出现在 App 内的「日志」页，真机排查等于盲区。
@@ -13,7 +13,7 @@ class NativeLogBridge {
   const NativeLogBridge._();
 
   static const MethodChannel _channel = MethodChannel(
-    'muyin_music/native_log',
+    'panghu_music/native_log',
   );
 
   /// 在 `main()` 里尽早调用。

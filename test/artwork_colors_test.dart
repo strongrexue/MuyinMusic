@@ -6,9 +6,9 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/artwork_colors.dart';
+import 'package:panghu_music/core/ui/artwork_colors.dart';
 
-const _channel = MethodChannel('muyin_music/artwork_colors');
+const _channel = MethodChannel('panghu_music/artwork_colors');
 const _reply = <String, Object?>{
   'baseArgb': -16711936,
   'paletteBaseArgb': -16711936,

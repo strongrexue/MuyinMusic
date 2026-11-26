@@ -25,9 +25,9 @@ class IosMediaDiagnosticsCard extends ConsumerStatefulWidget {
 
 class _IosMediaDiagnosticsCardState
     extends ConsumerState<IosMediaDiagnosticsCard> {
-  static const _taskChannel = MethodChannel('muyin_music/app_task');
+  static const _taskChannel = MethodChannel('panghu_music/app_task');
   static const _nowPlayingChannel =
-      MethodChannel('muyin_music/now_playing');
+      MethodChannel('panghu_music/now_playing');
 
   String _result = '尚未读取。先点「① 读取当前状态」。';
   bool _busy = false;

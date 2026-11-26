@@ -3,16 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/dio_factory.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/search/widgets/source_filter_chips.dart';
-import 'package:muyin_music/features/settings/settings_page.dart';
-import 'package:muyin_music/features/settings/settings_section.dart';
-import 'package:muyin_music/features/settings/widgets/settings_action.dart';
-import 'package:muyin_music/features/settings/widgets/settings_style.dart';
-import 'package:muyin_music/theme/app_theme.dart';
+import 'package:panghu_music/core/api/dio_factory.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/search/widgets/source_filter_chips.dart';
+import 'package:panghu_music/features/settings/settings_page.dart';
+import 'package:panghu_music/features/settings/settings_section.dart';
+import 'package:panghu_music/features/settings/widgets/settings_action.dart';
+import 'package:panghu_music/features/settings/widgets/settings_style.dart';
+import 'package:panghu_music/theme/app_theme.dart';
 import 'package:prism_ui/prism_ui.dart' as prism;
 
 import 'helpers/prism_test_environment.dart';

@@ -31,7 +31,7 @@ typedef PlayerShuffleModeCallback =
 typedef PlayerVivoLoopModeCallback = Future<void> Function(int mode);
 
 const playerAudioServiceConfig = AudioServiceConfig(
-  androidNotificationChannelId: 'com.muyin.muyinmusic.channel.audio_playback',
+  androidNotificationChannelId: 'com.panghu.panghumusic.channel.audio_playback',
   androidNotificationChannelName: '音乐播放',
   androidNotificationChannelDescription: '显示正在播放的歌曲和媒体控制',
   androidNotificationIcon: 'drawable/ic_stat_app',

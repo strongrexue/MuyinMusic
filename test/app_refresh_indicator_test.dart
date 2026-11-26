@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/app_refresh_indicator.dart';
+import 'package:panghu_music/core/ui/app_refresh_indicator.dart';
 
 void main() {
   testWidgets('a short pull only reveals part of the indicator', (

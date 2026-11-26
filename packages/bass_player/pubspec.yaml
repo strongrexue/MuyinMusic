@@ -1,5 +1,5 @@
 name: bass_player
-description: Native BASS playback engine for MuyinMusic.
+description: Native BASS playback engine for PanghuMusic.
 version: 0.1.0
 publish_to: none
 
@@ -15,7 +15,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.muyin.bass_player
+        package: com.panghu.bass_player
         pluginClass: BassPlayerPlugin
       ios:
         pluginClass: BassPlayerPlugin

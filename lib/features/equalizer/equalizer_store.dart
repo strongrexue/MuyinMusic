@@ -276,13 +276,13 @@ class EqualizerSettings {
     final preset = EqualizerPreset(
       // Custom settings carry no preset id; give each export a unique one
       // so that importing several exports does not replace one with the next.
-      id: presetId ?? 'muyin.custom.${DateTime.now().millisecondsSinceEpoch}',
+      id: presetId ?? 'panghu.custom.${DateTime.now().millisecondsSinceEpoch}',
       label:
           equalizerPresets
               .where((candidate) => candidate.id == presetId)
               .firstOrNull
               ?.label ??
-          'MuyinMusic',
+          'PanghuMusic',
       inputGainDb: inputGainDb,
       outputGainDb: outputGainDb,
       bands: bands,

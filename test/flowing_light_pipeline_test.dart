@@ -5,8 +5,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/features/player/flowing_light_pipeline.dart';
-import 'package:muyin_music/features/player/flowing_light_spec.dart';
+import 'package:panghu_music/features/player/flowing_light_pipeline.dart';
+import 'package:panghu_music/features/player/flowing_light_spec.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

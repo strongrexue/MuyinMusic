@@ -1,4 +1,4 @@
-// MuyinMusic iOS —— 音源脚本加密工具。
+// PanghuMusic iOS —— 音源脚本加密工具。
 //
 // 与 Android 的 MusicSourceCrypto.java 逐函数对齐，输入输出格式完全一致：
 //   md5              hex 小写

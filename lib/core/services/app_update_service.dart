@@ -7,7 +7,7 @@ import '../api/dio_factory.dart';
 import '../storage/settings_store.dart';
 
 const _githubApiBaseUrl = 'https://api.github.com';
-const _releasesPath = '/repos/strongrexue/MuyinMusic/releases';
+const _releasesPath = '/repos/strongrexue/PanghuMusic/releases';
 
 class AppRelease {
   const AppRelease({
@@ -111,7 +111,7 @@ Dio _createGithubDio({NetworkAdapterMode? adapterMode}) {
       headers: const {
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'MuyinMusic-Android',
+        'User-Agent': 'PanghuMusic-Android',
       },
     ),
     adapterMode: adapterMode,
@@ -122,5 +122,5 @@ bool _isGithubReleaseUri(Uri? uri) {
   if (uri == null || uri.scheme != 'https' || uri.host != 'github.com') {
     return false;
   }
-  return uri.path.startsWith('/strongrexue/MuyinMusic/releases/');
+  return uri.path.startsWith('/strongrexue/PanghuMusic/releases/');
 }

@@ -15,7 +15,7 @@ class TaggerPlatformBackend {
 
   final FlutterAudioTagger _tagger = FlutterAudioTagger();
   static const MethodChannel _nativeTagger = MethodChannel(
-    'muyin_music/native_tagger',
+    'panghu_music/native_tagger',
   );
 
   Future<EmbeddedAudioTags?> read(

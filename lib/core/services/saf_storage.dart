@@ -11,7 +11,7 @@ import 'windows_folder_picker.dart';
 
 /// The stored location is either a legacy filesystem path or an opaque SAF URI.
 class SafStorage {
-  static const _channel = MethodChannel('muyin_music/saf_storage');
+  static const _channel = MethodChannel('panghu_music/saf_storage');
   static final Map<String, String> _labels = {};
   static const _labelPrefix = 'saf_directory_label:';
 
@@ -32,7 +32,7 @@ class SafStorage {
   }) async {
     if (Platform.isWindows) {
       // Windows：file_picker 纯 Dart 实现，弹原生目录选择框。
-      // 默认下载目录由 main.dart 用正斜杠拼成 C:\...\Documents/MuyinMusic，
+      // 默认下载目录由 main.dart 用正斜杠拼成 C:\...\Documents/PanghuMusic，
       // file_picker 的 SHCreateItemFromParsingName 原样解析混合斜杠会返回
       // E_INVALIDARG 并抛 WindowsException（并非 PlatformException，上层
       // catch 不到），弹框根本不会打开。传入前把正斜杠统一成反斜杠，
@@ -102,7 +102,7 @@ class SafStorage {
       await directory.list(followLinks: false).take(1).drain<void>();
       return;
     }
-    final probe = await directory.createTemp('.muyin-probe-');
+    final probe = await directory.createTemp('.panghu-probe-');
     try {
       await File('${probe.path}/write-test').writeAsString('ok');
     } finally {

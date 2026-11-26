@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/sdk/internal/wy_quality.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/sdk/internal/wy_quality.dart';
 
 void main() {
   test(

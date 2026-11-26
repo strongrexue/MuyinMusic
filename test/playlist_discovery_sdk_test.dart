@@ -3,17 +3,17 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/playlist_category.dart';
-import 'package:muyin_music/core/models/playlist_info.dart';
-import 'package:muyin_music/core/sdk/internal/crypto_util.dart';
-import 'package:muyin_music/core/sdk/leaderboard_catalog.dart';
-import 'package:muyin_music/core/sdk/leaderboard_sdk.dart';
-import 'package:muyin_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
-import 'package:muyin_music/core/sdk/playlist_adapters/kw_playlist_adapter.dart';
-import 'package:muyin_music/core/sdk/playlist_adapters/mg_playlist_adapter.dart';
-import 'package:muyin_music/core/sdk/playlist_catalog_sdk.dart';
-import 'package:muyin_music/core/ui/cover_image_source.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/playlist_category.dart';
+import 'package:panghu_music/core/models/playlist_info.dart';
+import 'package:panghu_music/core/sdk/internal/crypto_util.dart';
+import 'package:panghu_music/core/sdk/leaderboard_catalog.dart';
+import 'package:panghu_music/core/sdk/leaderboard_sdk.dart';
+import 'package:panghu_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
+import 'package:panghu_music/core/sdk/playlist_adapters/kw_playlist_adapter.dart';
+import 'package:panghu_music/core/sdk/playlist_adapters/mg_playlist_adapter.dart';
+import 'package:panghu_music/core/sdk/playlist_catalog_sdk.dart';
+import 'package:panghu_music/core/ui/cover_image_source.dart';
 
 void main() {
   group('PlaylistCatalogSdk.featured', () {

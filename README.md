@@ -1,11 +1,11 @@
 <div align="center">
-  <img src="./logo.png" width="112" alt="沐音 Logo">
-  <h1>沐音 · MuyinMusic</h1>
-  <p>沐音 - 面向 Android 的自定义源音乐播放器</p>
+  <img src="./logo.png" width="112" alt="胖虎 Logo">
+  <h1>胖虎 · PanghuMusic</h1>
+  <p>胖虎 - 面向 Android 的自定义源音乐播放器</p>
   <p>
-    <a href="https://github.com/strongrexue/MuyinMusic"><strong>项目主页 / 源码</strong></a>
+    <a href="https://github.com/strongrexue/PanghuMusic"><strong>项目主页 / 源码</strong></a>
     ·
-    <a href="https://github.com/strongrexue/MuyinMusic/releases">下载与更新</a>
+    <a href="https://github.com/strongrexue/PanghuMusic/releases">下载与更新</a>
   </p>
   <p>
     <a href="./LICENSE">MIT License（主体）</a>
@@ -15,16 +15,16 @@
 </div>
 
 <div align="center">
-  <img src="./screenshots/showcase-player.png" width="760" alt="沐音播放器展示，蓝色与绿色封面取色界面">
+  <img src="./screenshots/showcase-player.png" width="760" alt="胖虎播放器展示，蓝色与绿色封面取色界面">
   <br>
-  <img src="./screenshots/showcase-lyrics.png" width="760" alt="沐音逐字歌词展示，蓝色与粉色歌词界面">
+  <img src="./screenshots/showcase-lyrics.png" width="760" alt="胖虎逐字歌词展示，蓝色与粉色歌词界面">
 </div>
 
 ## 项目简介
 
-沐音（MuyinMusic）是一个使用 Flutter 构建的 Android 音乐客户端，提供自定义源管理、音乐检索、下载管理、本地歌曲库和播放器能力。项目重点放在移动端体验、本地媒体整理、歌词展示和 Material 3 界面。
+胖虎（PanghuMusic）是一个使用 Flutter 构建的 Android 音乐客户端，提供自定义源管理、音乐检索、下载管理、本地歌曲库和播放器能力。项目重点放在移动端体验、本地媒体整理、歌词展示和 Material 3 界面。
 
-本项目是 [CyShineMusic（栖弦）](https://github.com/KevinllBin/CyShineMusic) v1.1.2 的二开分支，用于自用及小范围朋友分享。源码公开发布于 [strongrexue/MuyinMusic](https://github.com/strongrexue/MuyinMusic)。
+本项目是 [CyShineMusic（栖弦）](https://github.com/KevinllBin/CyShineMusic) v1.1.2 的二开分支，用于自用及小范围朋友分享。源码公开发布于 [strongrexue/PanghuMusic](https://github.com/strongrexue/PanghuMusic)。
 
 **项目不内置或分发任何音乐内容。用户需要自行配置可用的自定义源，并自行确认相关内容来源的合法性。**
 
@@ -92,8 +92,8 @@ flutter build apk --target-platform=android-arm64
 ```
 
 构建渠道由当前 Git 分支自动决定：`main` 生成包名
-`com.muyin.muyinmusic`、应用名"沐音"的正式版，`dev` 生成包名
-`com.muyin.muyinmusic.dev`、应用名"沐音dev"的开发版，两者可同时安装。Release
+`com.panghu.panghumusic`、应用名"胖虎"的正式版，`dev` 生成包名
+`com.panghu.panghumusic.dev`、应用名"胖虎dev"的开发版，两者可同时安装。Release
 构建分别使用固定签名；签名文件配置见 `android/signing/README.md`。签名密钥由
 维护者本地保管，不随源码入库。
 

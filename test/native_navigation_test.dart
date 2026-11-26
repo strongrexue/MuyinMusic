@@ -9,18 +9,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/player/player_audio_handler.dart';
-import 'package:muyin_music/features/player/player_controller.dart';
-import 'package:muyin_music/features/player/player_page.dart';
-import 'package:muyin_music/features/settings/settings_page.dart';
-import 'package:muyin_music/features/shell/app_shell.dart';
-import 'package:muyin_music/features/shell/player_transition.dart';
-import 'package:muyin_music/features/shell/widgets/dual_capsule_bottom_navigation.dart';
-import 'package:muyin_music/features/shell/widgets/mini_player_bar.dart';
-import 'package:muyin_music/features/songs/songs_toolbar_state.dart';
-import 'package:muyin_music/router.dart';
-import 'package:muyin_music/theme/app_theme.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/player/player_audio_handler.dart';
+import 'package:panghu_music/features/player/player_controller.dart';
+import 'package:panghu_music/features/player/player_page.dart';
+import 'package:panghu_music/features/settings/settings_page.dart';
+import 'package:panghu_music/features/shell/app_shell.dart';
+import 'package:panghu_music/features/shell/player_transition.dart';
+import 'package:panghu_music/features/shell/widgets/dual_capsule_bottom_navigation.dart';
+import 'package:panghu_music/features/shell/widgets/mini_player_bar.dart';
+import 'package:panghu_music/features/songs/songs_toolbar_state.dart';
+import 'package:panghu_music/router.dart';
+import 'package:panghu_music/theme/app_theme.dart';
 
 import 'helpers/prism_test_environment.dart';
 

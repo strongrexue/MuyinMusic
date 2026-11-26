@@ -1,5 +1,5 @@
 name: music_source_runtime
-description: Native QuickJS runtime bridge for MuyinMusic sources.
+description: Native QuickJS runtime bridge for PanghuMusic sources.
 version: 0.1.0
 publish_to: none
 
@@ -15,7 +15,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.muyin.music_source_runtime
+        package: com.panghu.music_source_runtime
         pluginClass: MusicSourceRuntimePlugin
       ios:
         pluginClass: MusicSourceRuntimePlugin

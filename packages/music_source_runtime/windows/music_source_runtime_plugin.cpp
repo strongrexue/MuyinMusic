@@ -7,7 +7,7 @@
 
 #include "music_source_bridge.h"
 
-namespace muyin {
+namespace panghu {
 
 class MusicSourceRuntimePlugin : public flutter::Plugin {
  public:
@@ -17,10 +17,10 @@ class MusicSourceRuntimePlugin : public flutter::Plugin {
     // Main runtime and the update-check runtime are two independent bridges,
     // each with its own JS runtime, mirroring the Android/iOS plugins.
     plugin->main_bridge_ = std::make_unique<MusicSourceBridge>(
-        registrar->messenger(), "muyin_music/music_source_runtime",
+        registrar->messenger(), "panghu_music/music_source_runtime",
         nullptr);
     plugin->update_bridge_ = std::make_unique<MusicSourceBridge>(
-        registrar->messenger(), "muyin_music/music_source_update_runtime",
+        registrar->messenger(), "panghu_music/music_source_update_runtime",
         nullptr);
 
     registrar->AddPlugin(std::move(plugin));
@@ -35,11 +35,11 @@ class MusicSourceRuntimePlugin : public flutter::Plugin {
   std::unique_ptr<MusicSourceBridge> update_bridge_;
 };
 
-}  // namespace muyin
+}  // namespace panghu
 
 void MusicSourceRuntimePluginRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
-  muyin::MusicSourceRuntimePlugin::RegisterWithRegistrar(
+  panghu::MusicSourceRuntimePlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
 }

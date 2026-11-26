@@ -3,11 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/downloads/download_history_store.dart';
-import 'package:muyin_music/features/songs/liked_songs_store.dart';
-import 'package:muyin_music/features/songs/widgets/song_row.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/downloads/download_history_store.dart';
+import 'package:panghu_music/features/songs/liked_songs_store.dart';
+import 'package:panghu_music/features/songs/widgets/song_row.dart';
 
 import 'helpers/prism_test_environment.dart';
 

@@ -4,10 +4,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/music_sources/music_source_models.dart';
-import 'package:muyin_music/core/music_sources/music_source_runtime.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/music_sources/music_source_models.dart';
+import 'package:panghu_music/core/music_sources/music_source_runtime.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

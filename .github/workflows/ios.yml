@@ -151,13 +151,13 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          zip -qry ../MuyinMusic-unsigned.ipa Payload
+          zip -qry ../PanghuMusic-unsigned.ipa Payload
           cd ../..
-          ls -lh build/MuyinMusic-unsigned.ipa
+          ls -lh build/PanghuMusic-unsigned.ipa
           echo "### 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "未签名 IPA: build/MuyinMusic-unsigned.ipa" >> "$GITHUB_STEP_SUMMARY"
+          echo "未签名 IPA: build/PanghuMusic-unsigned.ipa" >> "$GITHUB_STEP_SUMMARY"
           echo "版本: ${{ steps.version.outputs.name }} (${{ steps.version.outputs.number }})" >> "$GITHUB_STEP_SUMMARY"
           echo "App 大小: $(du -sh "$APP_PATH" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -166,8 +166,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MuyinMusic-unsigned-ipa
-          path: build/MuyinMusic-unsigned.ipa
+          name: PanghuMusic-unsigned-ipa
+          path: build/PanghuMusic-unsigned.ipa
           retention-days: 14
 
       - name: Upload build logs on failure

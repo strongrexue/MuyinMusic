@@ -10,7 +10,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 
-namespace muyin {
+namespace panghu {
 namespace ms_crypto {
 namespace {
 
@@ -344,4 +344,4 @@ std::string RsaEncryptBase64(const std::string& data_base64,
 }
 
 }  // namespace ms_crypto
-}  // namespace muyin
+}  // namespace panghu

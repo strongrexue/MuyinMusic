@@ -28,7 +28,7 @@
   散装副本保留作兜底：万一某个 Xcode 版本不吃
   ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES，把 Info.plist 里的
   CFBundleIcons 手工块加回去即可，PNG 已经在包里、不用重新生成。
-  原生侧（MuyinAppIconChannel）按候选名逐个尝试，两套名字都能命中。
+  原生侧（PanghuAppIconChannel）按候选名逐个尝试，两套名字都能命中。
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ ALT_ICON_DIR = os.path.join(ROOT, "ios", "Runner", "Icons")
 #
 # 第 4 个元素是资产目录里的图标集名（AppIcon<Name>.appiconset）。
 # 必须与 tool/patch_xcodeproj.py 的 ALTERNATE_APPICON_NAMES、
-# 以及 ios/Runner/MuyinNativePlugin.swift 的 alternateCandidates 一致。
+# 以及 ios/Runner/PanghuNativePlugin.swift 的 alternateCandidates 一致。
 ALTERNATES = [
     # 午夜蓝：深色海军蓝
     ("midnight", 148, 0.95, 0.72, "AppIconMidnight"),

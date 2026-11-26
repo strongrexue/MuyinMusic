@@ -1,10 +1,10 @@
-// MuyinMusic iOS —— BASS 播放引擎插件。
+// PanghuMusic iOS —— BASS 播放引擎插件。
 //
 // 与 Android 端 packages/bass_player/android/.../BassPlayerPlugin.kt 保持完全相同的
 // 对外契约：
-//   MethodChannel  com.muyin.muyinmusic/bass_player/methods
+//   MethodChannel  com.panghu.panghumusic/bass_player/methods
 //     initialize / load / play / pause / stop / seek / setVolume / setEqualizer / dispose
-//   EventChannel   com.muyin.muyinmusic/bass_player/events
+//   EventChannel   com.panghu.panghumusic/bass_player/events
 //     {event:"snapshot"|"error", playing, processingState, positionMs,
 //      bufferedPositionMs, durationMs, [errorCode, bassCode, errorMessage, operation]}
 //   错误码格式 BASS_<int>（dart 侧 BassPlayerException 用正则 ^BASS_(-?\d+)$ 解析）
@@ -21,8 +21,8 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
   // MARK: - 通道名
 
-  private static let methodChannelName = "com.muyin.muyinmusic/bass_player/methods"
-  private static let eventChannelName = "com.muyin.muyinmusic/bass_player/events"
+  private static let methodChannelName = "com.panghu.panghumusic/bass_player/methods"
+  private static let eventChannelName = "com.panghu.panghumusic/bass_player/events"
 
   // MARK: - 状态常量（与 Android 端逐字对应）
 
@@ -34,9 +34,9 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   /// 必须显式声明成 Int32：BassError.code 是 Int32，否则字面量会被推成 Int 而报类型错。
   private static let cancelledCode: Int32 = -1000
 
-  /// 原生→Dart 日志桥（与 ios/Runner/MuyinNativeLog.swift 同名通道），
+  /// 原生→Dart 日志桥（与 ios/Runner/PanghuNativeLog.swift 同名通道），
   /// 让 Release 包也能把原生打点落到 App 内「日志」页。仅用于诊断。
-  private static let nativeLogChannelName = "muyin_music/native_log"
+  private static let nativeLogChannelName = "panghu_music/native_log"
   private static var nativeLogChannel: FlutterMethodChannel?
 
   private static func logNative(_ tag: String, _ message: String) {
@@ -68,7 +68,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   // MARK: - 内部状态
 
   /// 所有 BASS 调用都在这条串行队列上执行，等价于 Android 端的 engineThread。
-  private let engineQueue = DispatchQueue(label: "com.muyin.muyinmusic.bass.engine")
+  private let engineQueue = DispatchQueue(label: "com.panghu.panghumusic.bass.engine")
 
   private let sinkLock = NSLock()
   private var eventSink: FlutterEventSink?
@@ -117,7 +117,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private var currentEq: [String: Any]?
 
   private var tickTimer: DispatchSourceTimer?
-  private let audioSessionQueue = DispatchQueue(label: "com.muyin.muyinmusic.bass.session")
+  private let audioSessionQueue = DispatchQueue(label: "com.panghu.panghumusic.bass.session")
 
   // MARK: - 通道回调
 
@@ -231,7 +231,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         DispatchQueue.main.async { result([String: Any?]()) }
       }
 
-    // ---- 沐音特有方法（蓝本无）。Dart 侧 BassPlayer 会调用，iOS 不提供对应
+    // ---- 胖虎特有方法（蓝本无）。Dart 侧 BassPlayer 会调用，iOS 不提供对应
     // 能力时返回空值即可，避免 MissingPluginException 中断播放路径。----
     case "setDiagnosticRecording":
       // Dart _initialize() 无条件调用；iOS 暂无诊断层，回空配置即可。
@@ -721,7 +721,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     let rawBands = configuration?["bands"] as? [[String: Any]] ?? []
     let bands = rawBands.compactMap(BassPlayerPlugin.parseBand)
       .filter { $0.enabled }
-      .prefix(Int(MUYIN_MAX_BIQUAD_BANDS))
+      .prefix(Int(PANGHU_MAX_BIQUAD_BANDS))
 
     if bands.isEmpty && abs(inputGainDb) < 0.001 && abs(outputGainDb) < 0.001 {
       detachEqualizer()
@@ -730,7 +730,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
     if eqChain == nil || forceRebuild {
       detachEqualizer()
-      guard let chain = muyin_biquad_chain_create(sampleRate()) else {
+      guard let chain = panghu_biquad_chain_create(sampleRate()) else {
         throw BassError(code: -1, operation: "setEqualizer",
                         message: "无法创建均衡器处理链")
       }
@@ -747,7 +747,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         Unmanaged.passUnretained(self).toOpaque(),
         0)
       if eqDsp == 0 {
-        muyin_biquad_chain_destroy(eqChain)
+        panghu_biquad_chain_destroy(eqChain)
         eqChain = nil
         throw BassError.fromLastError(operation: "setEqualizer")
       }
@@ -755,14 +755,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
     guard let chain = eqChain else { return }
 
-    var cBands = bands.map { band -> MuyinBiquadBand in
-      MuyinBiquadBand(type: Int32(band.filterType.rawValue),
+    var cBands = bands.map { band -> PanghuBiquadBand in
+      PanghuBiquadBand(type: Int32(band.filterType.rawValue),
                         frequencyHz: band.frequencyHz,
                         gainDb: band.gainDb,
                         q: band.q)
     }
     // 全部段都关掉但仍要保留输入/输出增益时，用零段配置。
-    muyin_biquad_chain_configure(chain, inputGainDb, outputGainDb, &cBands, Int32(cBands.count))
+    panghu_biquad_chain_configure(chain, inputGainDb, outputGainDb, &cBands, Int32(cBands.count))
   }
 
   private func detachEqualizer() {
@@ -771,14 +771,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     }
     eqDsp = 0
     if let chain = eqChain {
-      muyin_biquad_chain_destroy(chain)
+      panghu_biquad_chain_destroy(chain)
       eqChain = nil
     }
   }
 
   private func resetEqualizerState() {
     guard let chain = eqChain else { return }
-    muyin_biquad_chain_reset(chain)
+    panghu_biquad_chain_reset(chain)
   }
 
   /// DSP 在 BASS 的混音线程上执行，这里只做纯计算。
@@ -789,7 +789,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     guard frameBytes > 0 else { return }
     let frames = length / frameBytes
     if frames == 0 { return }
-    muyin_biquad_chain_process(chain, buffer, UInt(frames), channels)
+    panghu_biquad_chain_process(chain, buffer, UInt(frames), channels)
   }
 
   /// 交错声道数在 load 时由 BASS_ChannelGetInfo 缓存，避免在音频线程回调 BASS。
@@ -1350,14 +1350,14 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   }
 
   struct ParsedBand {
-    let filterType: MuyinFilterKind
+    let filterType: PanghuFilterKind
     let frequencyHz: Double
     let gainDb: Double
     let q: Double
     let enabled: Bool
   }
 
-  enum MuyinFilterKind: Int {
+  enum PanghuFilterKind: Int {
     case peaking = 0
     case lowShelf = 1
     case highShelf = 2
@@ -1367,7 +1367,7 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
   static func parseBand(_ raw: [String: Any]) -> ParsedBand? {
     guard let name = raw["filter"] as? String else { return nil }
-    let kind: MuyinFilterKind
+    let kind: PanghuFilterKind
     switch name {
     case "peaking", "peakingEq": kind = .peaking
     case "lowShelf": kind = .lowShelf
@@ -1444,7 +1444,7 @@ struct BassError: Error {
 // MARK: - 日志桥
 
 /// 与 lib/core/services/app_logger.dart 的 Android 侧行为对齐：iOS 上不写系统日志通道，
-/// 只在本地 console 留痕，避免依赖尚未移植的 muyin_music/app_task 通道。
+/// 只在本地 console 留痕，避免依赖尚未移植的 panghu_music/app_task 通道。
 enum AppLog {
   static func write(_ tag: String, _ message: String) {
     #if DEBUG

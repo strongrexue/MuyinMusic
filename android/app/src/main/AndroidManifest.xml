@@ -25,7 +25,7 @@
 
     <application
         android:label="${appLabel}"
-        android:name=".MuyinApplication"
+        android:name=".PanghuApplication"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="true">

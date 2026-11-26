@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/features/downloads/download_history_entry.dart';
-import 'package:muyin_music/features/player/player_models.dart';
-import 'package:muyin_music/features/playlists/playlist_models.dart';
-import 'package:muyin_music/features/songs/songs_playback_location.dart';
+import 'package:panghu_music/features/downloads/download_history_entry.dart';
+import 'package:panghu_music/features/player/player_models.dart';
+import 'package:panghu_music/features/playlists/playlist_models.dart';
+import 'package:panghu_music/features/songs/songs_playback_location.dart';
 
 void main() {
   const track = PlayerTrack(

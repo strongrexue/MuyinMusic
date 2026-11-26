@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/features/songs/songs_toolbar_state.dart';
-import 'package:muyin_music/features/songs/widgets/songs_batch_action_bar.dart';
-import 'package:muyin_music/features/songs/widgets/songs_placeholders.dart';
-import 'package:muyin_music/features/songs/widgets/songs_sort_sheet.dart';
+import 'package:panghu_music/features/songs/songs_toolbar_state.dart';
+import 'package:panghu_music/features/songs/widgets/songs_batch_action_bar.dart';
+import 'package:panghu_music/features/songs/widgets/songs_placeholders.dart';
+import 'package:panghu_music/features/songs/widgets/songs_sort_sheet.dart';
 
 import 'helpers/prism_test_environment.dart';
 

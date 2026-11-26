@@ -221,7 +221,7 @@ class _AppRefreshIndicatorState extends State<AppRefreshIndicator>
         FlutterErrorDetails(
           exception: refreshError,
           stack: refreshStackTrace,
-          library: 'MuyinMusic refresh indicator',
+          library: 'PanghuMusic refresh indicator',
           context: ErrorDescription('while refreshing scrollable content'),
         ),
       );

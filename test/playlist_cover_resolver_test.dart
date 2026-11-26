@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/api/music_api.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/features/playlists/lx_playlist_import.dart';
-import 'package:muyin_music/features/playlists/playlist_cover_resolver.dart';
+import 'package:panghu_music/core/api/music_api.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/features/playlists/lx_playlist_import.dart';
+import 'package:panghu_music/features/playlists/playlist_cover_resolver.dart';
 
 void main() {
   test(

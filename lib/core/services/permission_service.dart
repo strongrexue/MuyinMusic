@@ -10,7 +10,7 @@ class PermissionService {
   const PermissionService._();
 
   static const _storageSettingsChannel = MethodChannel(
-    'muyin_music/saf_storage',
+    'panghu_music/saf_storage',
   );
   static const _storagePermissionAttemptedKey =
       'storage_permission_request_attempted_v1';

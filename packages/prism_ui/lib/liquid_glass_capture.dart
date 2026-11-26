@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Modified by MuyinMusic (2026-11-13): threads LiquidGlassScope.styleTransform
+// Modified by PanghuMusic (2026-11-13): threads LiquidGlassScope.styleTransform
 // through the capture layer and applies it to every pane in _gather.
 // See NOTICE section 6 (GPLv3 section 5(a)).
 part of 'liquid_glass.dart';

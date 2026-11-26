@@ -36,10 +36,10 @@ establish sample-for-sample waveform equality with the original app. Physical
 phone listening and notification/lyric acceptance are documented in
 `docs/groove-shift-manual-test.md` at the repository root.
 
-Diagnostics are included in Release builds. The native `MuyinTrace` journal
+Diagnostics are included in Release builds. The native `PanghuTrace` journal
 records source identities, mixer/source clocks and transition stages. Dart
 records received snapshot sequences, EOF guards and metadata handoff decisions.
 Normal clock records and repeated jump records are limited to one per second;
 25 ms effect automation does not log per callback. The in-app log console can
-export both rotated files to `Download/MuyinMusic/logs/` using MediaStore.
+export both rotated files to `Download/PanghuMusic/logs/` using MediaStore.
 The exported text can be read with `adb pull` without root or a debug signature.

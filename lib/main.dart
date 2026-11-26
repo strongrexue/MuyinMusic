@@ -58,7 +58,7 @@ Future<void> _startApp() async {
     allowMixWithOthers: readAllowMixWithOthersPreference(prefs),
     player: Platform.isWindows ? BassPlayer(backend: WindowsBassBackend()) : null,
   );
-  // iOS / Windows 默认目录在运行时解析：扫描根 = Documents，下载 = Documents/MuyinMusic。
+  // iOS / Windows 默认目录在运行时解析：扫描根 = Documents，下载 = Documents/PanghuMusic。
   // Android 沿用 base_url.dart 的历史常量，保持既有行为。
   final documentsDir = (Platform.isIOS || Platform.isWindows)
       ? (await getApplicationDocumentsDirectory()).path
@@ -66,7 +66,7 @@ Future<void> _startApp() async {
   final defaultScanDir = documentsDir ?? kDefaultDownloadDir;
   final defaultDownloadDir = documentsDir == null
       ? kDefaultDownloadDir
-      : '$documentsDir/MuyinMusic';
+      : '$documentsDir/PanghuMusic';
   final container = ProviderContainer(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),
@@ -97,7 +97,7 @@ Future<void> _startApp() async {
   runApp(
     UncontrolledProviderScope(
       container: container,
-      child: const MuyinMusicApp(),
+      child: const PanghuMusicApp(),
     ),
   );
 }

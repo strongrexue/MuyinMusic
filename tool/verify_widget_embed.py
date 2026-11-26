@@ -15,9 +15,9 @@ APP_PATH = sys.argv[1]          # build/ios/iphoneos/Runner.app
 BUILD_NAME = sys.argv[2]        # 2.0.9
 BUILD_NUMBER = sys.argv[3]      # 24
 
-APPEX = os.path.join(APP_PATH, "PlugIns", "MuyinMusicWidget.appex")
-BUILT_APPEX = os.path.join("build", "ios", "iphoneos", "MuyinMusicWidget.appex")
-SRC_WIDGET_PLIST = os.path.join("ios", "MuyinMusicWidget", "Info.plist")
+APPEX = os.path.join(APP_PATH, "PlugIns", "PanghuMusicWidget.appex")
+BUILT_APPEX = os.path.join("build", "ios", "iphoneos", "PanghuMusicWidget.appex")
+SRC_WIDGET_PLIST = os.path.join("ios", "PanghuMusicWidget", "Info.plist")
 PBXPROJ = os.path.join("ios", "Runner.xcodeproj", "project.pbxproj")
 APP_PLIST = os.path.join(APP_PATH, "Info.plist")
 
@@ -44,7 +44,7 @@ if not os.path.isdir(APPEX) and os.path.isdir(BUILT_APPEX):
 
 if not os.path.isdir(APPEX):
     fail(f"{APPEX} 不存在，灵动岛扩展没打进去")
-exe = os.path.join(APPEX, "MuyinMusicWidget")
+exe = os.path.join(APPEX, "PanghuMusicWidget")
 if not os.path.isfile(exe):
     fail(f"{exe} 不存在，扩展可执行文件缺失")
 
@@ -71,7 +71,7 @@ with open(PBXPROJ, "r", encoding="utf-8") as f:
     pbx = f.read()
 ids = re.findall(r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);", pbx)
 ids = [i.strip() for i in ids]
-app_id = next((i for i in ids if i == "com.muyin.muyinmusic"), ids[0] if ids else "")
+app_id = next((i for i in ids if i == "com.panghu.panghumusic"), ids[0] if ids else "")
 appex_id = widget.get("CFBundleIdentifier", "")
 if not app_id:
     fail("无法从 project.pbxproj 提取主 App bundle id")

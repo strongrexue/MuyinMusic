@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
-import 'package:muyin_music/features/downloads/download_history_entry.dart';
-import 'package:muyin_music/features/songs/song_search.dart';
+import 'package:panghu_music/features/downloads/download_history_entry.dart';
+import 'package:panghu_music/features/songs/song_search.dart';
 
 void main() {
   group('filterSongsByQuery', () {

@@ -6,9 +6,9 @@
 
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/sdk/leaderboard_catalog.dart';
-import 'package:muyin_music/core/sdk/leaderboard_sdk.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/sdk/leaderboard_catalog.dart';
+import 'package:panghu_music/core/sdk/leaderboard_sdk.dart';
 
 void main() {
   for (final source in const [

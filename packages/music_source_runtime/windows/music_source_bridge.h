@@ -22,7 +22,7 @@ struct JSContext;
 struct JSRuntime;
 struct JSValue;
 
-namespace muyin {
+namespace panghu {
 
 // A single JS runtime bound to one MethodChannel. The plugin creates two
 // instances (main + update check), mirroring the Android/iOS plugins.
@@ -131,6 +131,6 @@ class MusicSourceBridge {
   std::mutex dispose_mutex_;  // serializes DisposeRuntime calls
 };
 
-}  // namespace muyin
+}  // namespace panghu
 
 #endif  // MUSIC_SOURCE_BRIDGE_H_

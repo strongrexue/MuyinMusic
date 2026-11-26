@@ -2,8 +2,8 @@ import Flutter
 import UIKit
 
 /// 实时活动 / 桌面小组件的深链 scheme。
-/// 与 ios/MuyinMusicWidget/Info.plist 的 CFBundleURLTypes 保持一致。
-let muyinURLScheme = "muyinmusic"
+/// 与 ios/PanghuMusicWidget/Info.plist 的 CFBundleURLTypes 保持一致。
+let panghuURLScheme = "panghumusic"
 
 /// 改名前的旧 scheme：已分享出去的深链仍用它，两个都接。
 let legacyURLScheme = "cyshinemusic"
@@ -24,14 +24,14 @@ let legacyURLScheme = "cyshinemusic"
     // 注册 Runner 侧自带的 6 个通道（app_icon / media_scan / storage_browser /
     // audio_intent / native_tagger / app_task）。这些不经过 pub 插件机制，
     // 所以必须在这里手动登记，否则 Dart 侧会拿到 MissingPluginException。
-    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "MuyinNativePlugin") {
-      MuyinNativePlugin.register(with: registrar)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "PanghuNativePlugin") {
+      PanghuNativePlugin.register(with: registrar)
     }
 
     // 系统媒体播放卡片（灵动岛/锁屏）：与 Live Activity 解耦，无条件注册。
     if let registrar = engineBridge.pluginRegistry
-        .registrar(forPlugin: "MuyinNowPlayingChannel") {
-      MuyinNowPlayingChannel.register(with: registrar.messenger())
+        .registrar(forPlugin: "PanghuNowPlayingChannel") {
+      PanghuNowPlayingChannel.register(with: registrar.messenger())
     }
 
     // 实时活动（灵动岛）/ 桌面小组件的桥接。
@@ -41,24 +41,24 @@ let legacyURLScheme = "cyshinemusic"
     // 部署目标下也能编译。
     if #available(iOS 16.2, *),
        let registrar = engineBridge.pluginRegistry
-        .registrar(forPlugin: "MuyinLiveActivityBridge") {
-      MuyinLiveActivityBridge.register(with: registrar.messenger())
+        .registrar(forPlugin: "PanghuLiveActivityBridge") {
+      PanghuLiveActivityBridge.register(with: registrar.messenger())
     }
   }
 
-  /// 老式（无 Scene）路径下的 URL 回跳：文件分享与 `muyinmusic://` 深链。
+  /// 老式（无 Scene）路径下的 URL 回跳：文件分享与 `panghumusic://` 深链。
   override func application(
     _ app: UIApplication,
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
     if url.isFileURL {
-      MuyinIncomingAudio.shared.accept(url: url)
+      PanghuIncomingAudio.shared.accept(url: url)
       return true
     }
     let scheme = url.scheme?.lowercased()
-    if scheme == muyinURLScheme || scheme == legacyURLScheme {
-      return MuyinIncomingAudio.handleAppURL(url)
+    if scheme == panghuURLScheme || scheme == legacyURLScheme {
+      return PanghuIncomingAudio.handleAppURL(url)
     }
     return super.application(app, open: url, options: options)
   }

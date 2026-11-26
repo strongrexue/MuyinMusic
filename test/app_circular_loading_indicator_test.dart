@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/app_circular_loading_indicator.dart';
+import 'package:panghu_music/core/ui/app_circular_loading_indicator.dart';
 
 void main() {
   testWidgets('expressive loader morphs without changing its layout size', (

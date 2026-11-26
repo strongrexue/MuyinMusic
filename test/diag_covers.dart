@@ -5,12 +5,12 @@
 
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/sdk/kg_sdk.dart';
-import 'package:muyin_music/core/sdk/kw_sdk.dart';
-import 'package:muyin_music/core/sdk/mg_sdk.dart';
-import 'package:muyin_music/core/sdk/tx_sdk.dart';
-import 'package:muyin_music/core/sdk/wy_sdk.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/sdk/kg_sdk.dart';
+import 'package:panghu_music/core/sdk/kw_sdk.dart';
+import 'package:panghu_music/core/sdk/mg_sdk.dart';
+import 'package:panghu_music/core/sdk/tx_sdk.dart';
+import 'package:panghu_music/core/sdk/wy_sdk.dart';
 
 void main() {
   Future<void> probe(

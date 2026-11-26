@@ -14,7 +14,7 @@ class ScreenCorners extends ChangeNotifier with WidgetsBindingObserver {
     _scheduleRefresh();
   }
 
-  static const _channel = MethodChannel('muyin_music/screen_corners');
+  static const _channel = MethodChannel('panghu_music/screen_corners');
   Size _window = Size.zero;
   List<double> _radii = const [0, 0, 0, 0];
   ScreenCornerCurve? curve;

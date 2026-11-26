@@ -2,11 +2,11 @@ plugins {
     id 'com.android.library'
 }
 
-group = 'com.muyin.music_home_widget'
+group = 'com.panghu.music_home_widget'
 version = '0.1.0'
 
 android {
-    namespace = 'com.muyin.music_home_widget'
+    namespace = 'com.panghu.music_home_widget'
     compileSdk = 35
 
     compileOptions {

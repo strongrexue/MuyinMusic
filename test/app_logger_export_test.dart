@@ -4,8 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:muyin_music/core/services/app_logger.dart';
-import 'package:muyin_music/core/services/log_category.dart';
+import 'package:panghu_music/core/services/app_logger.dart';
+import 'package:panghu_music/core/services/log_category.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +16,7 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
   setUpAll(() async {
-    temp = await Directory.systemTemp.createTemp('muyin-log-test-');
+    temp = await Directory.systemTemp.createTemp('panghu-log-test-');
     messenger.setMockMethodCallHandler(paths, (_) async => temp.path);
   });
 
@@ -110,7 +110,7 @@ void main() {
     'uncaught errors persist before returning with categories off',
     () async {
       final ordinaryLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${ordinaryLog.parent.path}/muyin-crash.log');
+      final crashLog = File('${ordinaryLog.parent.path}/panghu-crash.log');
       final stack = StackTrace.fromString(
         '#0 crashFrame ${'x' * 1600}\n#1 finalUsefulFrame',
       );
@@ -195,7 +195,7 @@ void main() {
         );
       }
       final normalLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${normalLog.parent.path}/muyin-crash.log');
+      final crashLog = File('${normalLog.parent.path}/panghu-crash.log');
       expect(await crashLog.length(), lessThanOrEqualTo(256 * 1024));
       final exported = await File(await AppLogger.exportFile()).readAsString();
       expect(exported, contains('bounded-marker-99'));
@@ -224,13 +224,13 @@ void main() {
       final log = await AppLogger.currentLogFile();
       expect(await log!.length(), lessThan(1024 * 1024));
       expect(
-        await File('${log.parent.path}/muyin.prev.log').exists(),
+        await File('${log.parent.path}/panghu.prev.log').exists(),
         isTrue,
       );
       await AppLogger.clear();
       expect(await log.length(), 0);
       expect(
-        await File('${log.parent.path}/muyin.prev.log').exists(),
+        await File('${log.parent.path}/panghu.prev.log').exists(),
         isFalse,
       );
     },
@@ -246,7 +246,7 @@ void main() {
         ui.PlatformDispatcher.instance.onError = previousPlatform;
       });
       final ordinaryLog = (await AppLogger.currentLogFile())!;
-      final crashLog = File('${ordinaryLog.parent.path}/muyin-crash.log');
+      final crashLog = File('${ordinaryLog.parent.path}/panghu-crash.log');
       var flutterDelegated = false;
       var platformDelegated = false;
       FlutterError.onError = (_) {

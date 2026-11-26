@@ -7,9 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/startup/jinrishici_client.dart';
-import 'package:muyin_music/features/startup/startup_gate.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/startup/jinrishici_client.dart';
+import 'package:panghu_music/features/startup/startup_gate.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

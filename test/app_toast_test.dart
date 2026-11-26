@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/ui/app_toast.dart';
+import 'package:panghu_music/core/ui/app_toast.dart';
 
 void main() {
   testWidgets('toast stays on the stable root overlay during navigation', (

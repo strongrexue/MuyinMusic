@@ -1,0 +1,1534 @@
+// PanghuMusic iOS —— Runner 侧原生通道。
+//
+// 把 Android 端 android/app/src/main/kotlin/com.panghu.panghumusic/MainActivity.kt 与
+// AppIconManager.kt 里注册的 6 个 MethodChannel 在 iOS 上 1:1 复刻：
+//
+//   panghu_music/app_icon          getCurrentIcon / setIcon
+//   panghu_music/media_scan        scan
+//   panghu_music/storage_browser   listRoots / listChildren（+ addRoot/removeRoot 扩展）
+//   panghu_music/audio_intent      takePendingAudio / openAudio（+ audioAvailable 回调）
+//   panghu_music/native_tagger     read / write
+//   panghu_music/app_task          moveToBack / diagnostics
+//
+// 通道名、方法名、参数与返回值的字段名都与 Android 完全一致，lib/ 层因此
+// 无需改动（唯一例外见 storage_browser：iOS 沙盒没有全盘扫描，见下方说明）。
+
+import AVFoundation
+import ActivityKit
+import Flutter
+import Foundation
+import MediaPlayer
+import Network
+import UIKit
+import UniformTypeIdentifiers
+import WidgetKit
+
+@available(iOS 13.0, *)
+public final class PanghuNativePlugin: NSObject, FlutterPlugin {
+
+  private let appIcon = PanghuAppIconChannel()
+  private let mediaScan = PanghuMediaScanChannel()
+  private let storageBrowser = PanghuStorageBrowserChannel()
+  private let audioIntent = PanghuAudioIntentChannel()
+  private let nativeTagger = PanghuNativeTaggerChannel()
+  private let appTask = PanghuAppTaskChannel()
+  private let networkType = PanghuNetworkTypeChannel()
+
+  public static func register(with registrar: FlutterPluginRegistrar) {
+    let instance = PanghuNativePlugin()
+    let messenger = registrar.messenger()
+    instance.bind(to: messenger)
+    registrar.publish(instance)
+  }
+
+  private func bind(to messenger: FlutterBinaryMessenger) {
+    connect("panghu_music/app_icon", messenger) { [appIcon] call, result in
+      appIcon.handle(call, result)
+    }
+    connect("panghu_music/media_scan", messenger) { [mediaScan] call, result in
+      mediaScan.handle(call, result)
+    }
+    connect("panghu_music/storage_browser", messenger) { [storageBrowser] call, result in
+      storageBrowser.handle(call, result)
+    }
+    connect("panghu_music/audio_intent", messenger) { [audioIntent] call, result in
+      audioIntent.handle(call, result)
+    }
+    connect("panghu_music/native_tagger", messenger) { [nativeTagger] call, result in
+      nativeTagger.handle(call, result)
+    }
+    connect("panghu_music/app_task", messenger) { [appTask] call, result in
+      appTask.handle(call, result)
+    }
+    // 在线播放音质按网络类型选档：方法读初值，事件通道推变化。
+    FlutterMethodChannel(
+      name: "panghu_music/network_type",
+      binaryMessenger: messenger
+    ).setMethodCallHandler { [networkType] call, result in
+      if call.method == "getNetworkType" {
+        result(networkType.currentType)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    FlutterEventChannel(
+      name: "panghu_music/network_type_events",
+      binaryMessenger: messenger
+    ).setStreamHandler(networkType)
+    // 原生 → Dart 的日志桥。必须最先注册，后面各处才敢往里写。
+    PanghuNativeLog.register(with: messenger)
+    PanghuIncomingAudio.shared.bind(to: messenger)
+  }
+
+  private func connect(_ name: String,
+                       _ messenger: FlutterBinaryMessenger,
+                       _ handler: @escaping (FlutterMethodCall, @escaping FlutterResult) -> Void) {
+    FlutterMethodChannel(name: name, binaryMessenger: messenger)
+      .setMethodCallHandler { call, result in handler(call, result) }
+  }
+}
+
+// MARK: - 应用图标
+//
+// Android 用 activity-alias 可以无提示切换；iOS 只能用 setAlternateIconName，
+// 且有几条硬约束：
+//   1. 备用图标必须**预先打进 bundle**，并在 Info.plist 的 CFBundleAlternateIcons
+//      里声明 —— 名字与图标文件必须一一对应；
+//   2. 切换时系统会弹一次提示，无法绕过（平台限制，不是实现问题）；
+//   3. 图标一旦涉及资产目录（Assets.car），就必须走 Xcode 的
+//      「Alternate App Icon Sets」构建设置，手工往 Info.plist 塞
+//      CFBundleAlternateIcons 在新 Xcode / 新 iOS 上会静默失效
+//      （表现为 supportsAlternateIcons 为 false 或切换直接报错）。
+//
+// 所以这里不赌单一来源：每个变体维护一串**候选名**，按顺序尝试，
+// 第一个成功的就采用。候选名与 tool/fetch_app_icons.py、tool/patch_xcodeproj.py
+// 生成的两套图标一一对应。
+
+@available(iOS 13.0, *)
+final class PanghuAppIconChannel {
+
+  /// Dart 侧的 AppIconVariant.code -> 系统里的图标名候选（按优先级）。
+  /// classic 是主图标，对应 setAlternateIconName(nil)。
+  ///
+  ///  · `AppIcon<Name>`  —— 资产目录里的备用图标集（Xcode 官方路径，
+  ///    由 ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES 声明）
+  ///  · `icon_<code>`    —— 旧路径：Runner/Icons/ 下散装的 PNG + Info.plist 手工声明
+  private static let alternateCandidates: [String: [String]] = [
+    "midnight": ["AppIconMidnight", "icon_midnight"],
+    "sky": ["AppIconSky", "icon_sky"],
+    "lavender": ["AppIconLavender", "icon_lavender"],
+    "mint": ["AppIconMint", "icon_mint"],
+    "peach": ["AppIconPeach", "icon_peach"],
+  ]
+
+  /// 反查表：任意候选名 -> Dart 侧 code。currentCode() 用它把
+  /// `UIApplication.alternateIconName` 还原成 code。
+  private static let codeByIconName: [String: String] = {
+    var map: [String: String] = [:]
+    for (code, names) in alternateCandidates {
+      for name in names { map[name] = code }
+    }
+    return map
+  }()
+
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "getCurrentIcon":
+      result(currentCode())
+
+    case "setIcon":
+      guard let args = call.arguments as? [String: Any],
+            let code = args["icon"] as? String, !code.isEmpty else {
+        result(FlutterError(code: "INVALID_ARGS", message: "请选择应用图标", details: nil))
+        return
+      }
+      if code != "classic" && Self.alternateCandidates[code] == nil {
+        result(FlutterError(code: "ICON_CHANGE_FAILED",
+                            message: "iOS 未声明该备用图标",
+                            details: "unknown icon code: \(code)"))
+        return
+      }
+      setIcon(code: code, result: result)
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func currentCode() -> String {
+    guard let name = UIApplication.shared.alternateIconName else { return "classic" }
+    return Self.codeByIconName[name] ?? "classic"
+  }
+
+  private func setIcon(code: String, result: @escaping FlutterResult) {
+    let current = UIApplication.shared.alternateIconName
+    if code == "classic" {
+      if current == nil { result("classic"); return }
+      apply(nil, code: code, attempt: 0) { error in result(error) }
+      return
+    }
+
+    let candidates = Self.alternateCandidates[code] ?? []
+    // 已经在用这个变体（任意一个候选名）时直接短路：
+    // iOS 对「设成同一个图标」会回错误，这里保持 Dart 侧语义幂等。
+    if let current, candidates.contains(current) {
+      result(currentCode())
+      return
+    }
+    applyFirstWorking(candidates, code: code, index: 0, errors: [], result: result)
+  }
+
+  /// 依次尝试候选名，第一个成功即返回；全失败时把所有原因一起报回去。
+  private func applyFirstWorking(_ candidates: [String],
+                                 code: String,
+                                 index: Int,
+                                 errors: [String],
+                                 result: @escaping FlutterResult) {
+    guard index < candidates.count else {
+      let detail = errors.isEmpty ? "没有可用的候选图标名" : errors.joined(separator: " | ")
+      PanghuNativeLog.write("app-icon", "切换 \(code) 全部失败：\(detail)")
+      result(FlutterError(code: "ICON_CHANGE_FAILED",
+                          message: "无法更换桌面图标",
+                          details: detail))
+      return
+    }
+    let name = candidates[index]
+    apply(name, code: code, attempt: 0) { [weak self] error in
+      guard let self else { return }
+      if let error {
+        self.applyFirstWorking(candidates,
+                               code: code,
+                               index: index + 1,
+                               errors: errors + ["\(name): \(Self.describe(error))"],
+                               result: result)
+        return
+      }
+      PanghuNativeLog.write("app-icon", "图标已切换为 \(name)")
+      result(self.currentCode())
+    }
+  }
+
+  /// ★ LaunchServices 的 `-54`（`"process may not map database"`）是 iOS 上
+  ///   换图标最常见的失败，而且**与打包是否正确无关**。
+  ///
+  ///   成因：`setAlternateIconName` 要让 LaunchServices 改写图标数据库，
+  ///   而这个写操作有互斥与「正在忙」的窗口。连着快速点两下、或上一次切换
+  ///   还没落盘就再切，就会撞上它。典型症状是**系统弹了「图标已更改」的提示
+  ///   但图标没变**，或者图标变成空白占位。
+  ///
+  ///   所以这里的处理是：**串行化 + 退避重试**，而不是当成致命错误。
+  ///   连着几轮都失败才回错误给 Dart。
+  private static let launchServicesBusyCode = -54
+  private static let maxApplyAttempts = 3
+
+  /// 正在进行的切换。系统不允许并发调用，必须排队。
+  private var iconChangeInFlight = false
+  /// 排队中的**整段请求**（取最后一次 —— 用户连点时中间那几次没有意义）。
+  ///
+  /// 存的是「把这次切换重新跑一遍」的闭包，而不是它的 completion ——
+  /// 否则排队的请求在轮到时无事可做却回 success，调用方会以为切换成功了。
+  private var pendingIconRequest: (() -> Void)?
+
+  /// 真正调用系统 API。completion 拿到 nil 表示成功。
+  private func apply(_ name: String?,
+                     code: String,
+                     attempt: Int,
+                     result: @escaping (Error?) -> Void) {
+    guard UIApplication.shared.supportsAlternateIcons else {
+      // 这一条最常被忽略：系统直接告诉你不支持，报错信息也不会有别的线索。
+      PanghuNativeLog.write("app-icon",
+                             "supportsAlternateIcons=false（当前=\(code)），系统或图标清单不允许切换")
+      DispatchQueue.main.async {
+        result(NSError(
+          domain: "PanghuAppIcon",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey:
+                      "系统不支持备用图标（supportsAlternateIcons=false），请检查备用图标是否已打进包并正确声明"]))
+      }
+      return
+    }
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      // 串行化：上一次没落盘就再切，必然撞 -54。
+      if self.iconChangeInFlight {
+        // 排的是**整段请求**：轮到时重新跑一遍 apply，那时 inFlight 已清零。
+        self.pendingIconRequest = { [weak self] in
+          self?.apply(name, code: code, attempt: 0, result: result)
+        }
+        PanghuNativeLog.write("app-icon", "上一次切换尚未结束，本次请求排队（当前=\(code)）")
+        return
+      }
+      self.iconChangeInFlight = true
+      UIApplication.shared.setAlternateIconName(name) { [weak self] error in
+        DispatchQueue.main.async {
+          guard let self else { return }
+          // -54 是 LaunchServices 暂时忙，退避后重试而不是直接失败。
+          let ns = error as NSError?
+          if ns?.domain == "NSOSStatusErrorDomain",
+             ns?.code == Self.launchServicesBusyCode,
+             attempt + 1 < Self.maxApplyAttempts {
+            self.iconChangeInFlight = false
+            // 350 / 700ms 递增退避。`DispatchTimeInterval.milliseconds(_:)` 是
+            // 静态构造器（不是 `.milliseconds` 这种实例成员），别写成后者。
+            let delayMs = 350 * (attempt + 1)
+            PanghuNativeLog.write(
+              "app-icon",
+              "LaunchServices 忙(-54)，\(delayMs)ms 后重试 "
+                + "第 \(attempt + 2)/\(Self.maxApplyAttempts) 次（当前=\(code)）")
+            DispatchQueue.main.asyncAfter(
+              deadline: .now() + DispatchTimeInterval.milliseconds(delayMs)
+            ) {
+              self.apply(name, code: code, attempt: attempt + 1, result: result)
+            }
+            return
+          }
+          self.iconChangeInFlight = false
+          if let error {
+            PanghuNativeLog.write(
+              "app-icon",
+              "切换 \(code) -> \(name ?? "主图标") 失败：\(Self.describe(error))")
+          }
+          result(error)
+          // 先回本次的结果，再把排队的请求放出去跑（它会看到 inFlight 已清零）。
+          if let queued = self.pendingIconRequest {
+            self.pendingIconRequest = nil
+            DispatchQueue.main.async(execute: queued)
+          }
+        }
+      }
+    }
+  }
+
+  static func describe(_ error: Error) -> String {
+    let ns = error as NSError
+    return "\(ns.domain)#\(ns.code) \(ns.localizedDescription)"
+  }
+}
+
+// MARK: - 媒体库扫描
+//
+// Android 用 MediaScannerConnection 让下载完的文件出现在系统音乐库里；
+// iOS 没有等价的「扫描某个路径进媒体库」机制（照片库有，音乐库没有）。
+// 保留通道并返回 true，行为上等价于「扫描成功但无需动作」。
+
+@available(iOS 13.0, *)
+final class PanghuMediaScanChannel {
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "scan":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String, !path.isEmpty else {
+        result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+        return
+      }
+      result(true)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+}
+
+// MARK: - 目录浏览
+//
+// Android 用 MANAGE_EXTERNAL_STORAGE 扫全盘；iOS 沙盒没有这个能力。
+// 做法：
+//   · 始终把 App 自己的 Documents 目录作为根（用户可通过「文件」App 放歌进来，
+//     需要 Info.plist 打开 UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace）；
+//   · 用户通过系统文档选择器授权的目录（如 iCloud Drive / 本机其他 App 的共享目录）
+//     以 security-scoped bookmark 持久化，作为额外的根列出。
+// 返回字段与 Android 的 storageEntry 完全一致。
+
+@available(iOS 13.0, *)
+final class PanghuStorageBrowserChannel {
+
+  private let bookmarks = PanghuSecurityScopedStore()
+  private let worker = DispatchQueue(label: "com.panghu.panghumusic.storage_browser")
+  /// 系统文档选择器的 delegate 必须被强引用，否则弹出后即被释放、回调丢失。
+  private var pickerDelegate: FolderPickerDelegate?
+  /// 会话级持有所有已授权外部目录的 security scope：Dart 的 dart:io 扫描与
+  /// BASS 的 C fopen 都按绝对路径访问，只有全程持有 scope 才能正常读写。
+  private var heldScopedURLs: [URL] = []
+
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "listRoots":
+      result(listRoots())
+
+    case "pickDirectory":
+      // iOS 扩展点：弹出系统文档选择器，建立 security-scoped bookmark 并
+      // 立即持有 scope。返回 {path, name}，与 Android 的 pickDirectory 对齐。
+      pickDirectory(result)
+
+    case "acquireAllAccess":
+      // 启动时对全部已保存的 bookmark 根持续持有 scope（不主动 stop），
+      // 让绝对路径的扫描/播放沿用既有代码。
+      result(acquireAllAccess())
+
+    case "listChildren":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String, !path.isEmpty else {
+        result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+        return
+      }
+      let includeFiles = args["includeFiles"] as? Bool ?? false
+      // 与 Android 一致：大目录遍历放到后台线程，别卡 UI。
+      worker.async {
+        do {
+          let entries = try self.listChildren(path: path, includeFiles: includeFiles)
+          DispatchQueue.main.async { result(entries) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "LIST_CHILDREN_FAILED",
+                                message: error.localizedDescription,
+                                details: "\(error)"))
+          }
+        }
+      }
+
+    case "addRoot":
+      // iOS 扩展点：Dart 侧选择目录后调用，传入
+      // {name, bookmarkBase64} 以持久化授权。
+      guard let args = call.arguments as? [String: Any],
+            let name = args["name"] as? String,
+            let encoded = args["bookmark"] as? String,
+            let data = Data(base64Encoded: encoded) else {
+        result(FlutterError(code: "INVALID_ARGS", message: "缺少 name/bookmark", details: nil))
+        return
+      }
+      bookmarks.save(name: name, bookmark: data)
+      result(true)
+
+    case "removeRoot":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGS", message: "缺少 path", details: nil))
+        return
+      }
+      bookmarks.remove(path: path)
+      result(true)
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  /// 弹出系统文档选择器（文件夹），建立 security-scoped bookmark 后立即持有
+  /// scope。返回 {path, name} 给 Dart 层；取消返回 nil。
+  private func pickDirectory(_ result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      guard let root = PanghuIncomingAudio.shared.topViewController() else {
+        result(FlutterError(code: "NO_VIEW_CONTROLLER",
+                            message: "无法弹出目录选择器", details: nil))
+        return
+      }
+      let delegate = FolderPickerDelegate(bookmarks: self.bookmarks, result: result)
+      // UIDocumentPickerViewController.delegate 是 weak，必须强引用到回调结束。
+      self.pickerDelegate = delegate
+      delegate.onDone = { [weak self] in self?.pickerDelegate = nil }
+      let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder],
+                                                  asCopy: false)
+      picker.delegate = delegate
+      picker.allowsMultipleSelection = false
+      // 不设置 directoryURL：从「位置」根开始浏览，用户才能进入 iCloud Drive /
+      // 我的 iPhone / 其它 App 目录并选中真正的文件夹。锁定到本 App 的
+      // Documents 会把用户困在（往往没有子文件夹的）沙盒目录里，框选不到就
+      // 只能取消——这正是「点了没反应/总是变取消」的来源。
+      root.present(picker, animated: true) {
+        PanghuNativeLog.write("picker", "present_completed dir=\(picker.directoryURL?.path ?? "nil")")
+      }
+      PanghuNativeLog.write("picker",
+                             "presented root=\(type(of: root)) dir=\(picker.directoryURL?.path ?? "nil")")
+    }
+  }
+
+  /// 启动时对全部已保存的 bookmark 根持续持有 scope（故意不 stop），
+  /// 使 dart:io 扫描与 BASS 的绝对路径访问在外部目录上同样可用。
+  /// 返回成功持有 scope 的根数量。
+  private func acquireAllAccess() -> Int {
+    var count = 0
+    for root in bookmarks.resolvedRoots() {
+      if root.url.startAccessingSecurityScopedResource() {
+        heldScopedURLs.append(root.url)
+        count += 1
+      }
+    }
+    return count
+  }
+
+  private func listRoots() -> [[String: Any?]] {
+    var roots: [[String: Any?]] = []
+
+    if let documents = try? FileManager.default.url(for: .documentDirectory,
+                                                    in: .userDomainMask,
+                                                    appropriateFor: nil,
+                                                    create: true) {
+      roots.append(entry(url: documents,
+                         isRoot: true,
+                         label: "我的文件",
+                         removable: false,
+                         state: nil))
+    }
+
+    for root in bookmarks.resolvedRoots() {
+      roots.append(entry(url: root.url,
+                         isRoot: true,
+                         label: root.name,
+                         removable: nil,
+                         state: nil))
+    }
+
+    return roots
+  }
+
+  private func listChildren(path: String, includeFiles: Bool) throws -> [[String: Any?]] {
+    let scoped = bookmarks.beginAccessIfScoped(path: path)
+    defer { if scoped.started { scoped.url?.stopAccessingSecurityScopedResource() } }
+
+    let directory = URL(fileURLWithPath: path)
+    let keys: [URLResourceKey] = [.isDirectoryKey, .isReadableKey, .isWritableKey, .nameKey]
+    let children = try FileManager.default.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: keys,
+      options: [.skipsHiddenFiles])
+
+    var entries: [[String: Any?]] = []
+    for child in children {
+      let values = try? child.resourceValues(forKeys: Set(keys))
+      let isDirectory = values?.isDirectory ?? false
+      // Android 的 listDirectoryChildren 同样过滤隐藏项与不可读项。
+      if !isDirectory && !includeFiles { continue }
+      if values?.isReadable == false { continue }
+      entries.append(entry(url: child,
+                           isRoot: false,
+                           label: nil,
+                           removable: nil,
+                           state: nil))
+    }
+
+    // 目录在前，然后按名称排序（Android 用 lowercase 比较）。
+    entries.sort { lhs, rhs in
+      let lhsDir = lhs["isDirectory"] as? Bool ?? false
+      let rhsDir = rhs["isDirectory"] as? Bool ?? false
+      if lhsDir != rhsDir { return lhsDir }
+      let lhsName = (lhs["name"] as? String ?? "").lowercased()
+      let rhsName = (rhs["name"] as? String ?? "").lowercased()
+      return lhsName < rhsName
+    }
+    return entries
+  }
+
+  private func entry(url: URL,
+                     isRoot: Bool,
+                     label: String?,
+                     removable: Bool?,
+                     state: String?) -> [String: Any?] {
+    let path = url.path
+    let values = try? url.resourceValues(forKeys: [.isDirectoryKey,
+                                                   .isReadableKey,
+                                                   .isWritableKey,
+                                                   .volumeTotalCapacityKey,
+                                                   .volumeAvailableCapacityKey])
+    let total = (values?.volumeTotalCapacity).map { Int64($0) } ?? 0
+    let free = (values?.volumeAvailableCapacity).map { Int64($0) } ?? 0
+
+    let displayName: String
+    if let label, !label.isEmpty {
+      displayName = label
+    } else {
+      let last = url.lastPathComponent
+      displayName = last.isEmpty ? path : last
+    }
+
+    return [
+      "path": path,
+      "name": displayName,
+      "isDirectory": values?.isDirectory ?? false,
+      "isRoot": isRoot,
+      "isRemovable": removable,
+      "canRead": values?.isReadable ?? FileManager.default.isReadableFile(atPath: path),
+      "canWrite": values?.isWritable ?? FileManager.default.isWritableFile(atPath: path),
+      "totalBytes": total,
+      "freeBytes": free,
+      "state": state,
+    ]
+  }
+}
+
+/// 系统文档选择器（选文件夹）的回调代理。UIDocumentPickerViewController 的
+/// delegate 是 weak，需由 PanghuStorageBrowserChannel 强引用到回调结束。
+@available(iOS 13.0, *)
+final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
+  private let bookmarks: PanghuSecurityScopedStore
+  private let result: FlutterResult
+  var onDone: (() -> Void)?
+
+  init(bookmarks: PanghuSecurityScopedStore, result: @escaping FlutterResult) {
+    self.bookmarks = bookmarks
+    self.result = result
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController,
+                      didPickDocumentsAt urls: [URL]) {
+    PanghuNativeLog.write("picker", "didPick count=\(urls.count) first=\(urls.first?.path ?? "nil")")
+    defer { onDone?() }
+    guard let url = urls.first else {
+      result(FlutterError(code: "CANCELLED", message: "未选择文件夹", details: nil))
+      return
+    }
+    // 选中后立即开始访问，随后建立可跨启动持久化的 security-scoped bookmark。
+    let scoped = url.startAccessingSecurityScopedResource()
+    do {
+      // iOS 不支持 .withSecurityScope（macOS-only）；用默认 options 建立 bookmark，
+      // 解析后由 startAccessingSecurityScopedResource() 恢复访问。
+      let data = try url.bookmarkData(options: [],
+                                      includingResourceValuesForKeys: nil,
+                                      relativeTo: nil)
+      bookmarks.save(name: url.lastPathComponent, bookmark: data)
+      // 会话内保持 scope（不 stop），让扫描与播放可立即读取该目录。
+      result(["path": url.path, "name": url.lastPathComponent, "scoped": scoped])
+    } catch {
+      if scoped { url.stopAccessingSecurityScopedResource() }
+      result(FlutterError(code: "BOOKMARK_FAILED",
+                          message: error.localizedDescription, details: nil))
+    }
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    PanghuNativeLog.write("picker", "cancelled")
+    onDone?()
+    // 取消不视为错误：返回 nil 让 Dart 层静默返回。
+    result(nil)
+  }
+}
+
+/// 用 security-scoped bookmark 记住用户授权过的目录，跨启动保持访问权。
+final class PanghuSecurityScopedStore {
+  private static let defaultsKey = "panghu.scoped_roots"
+  /// 改名前的旧键，仅用于一次性迁移。
+  private static let legacyDefaultsKey = "cyshine.scoped_roots"
+  private static var didMigrateLegacyKey = false
+
+  struct Root {
+    let name: String
+    let url: URL
+  }
+
+  private var cache: [Root] = []
+
+  private var defaults: UserDefaults { UserDefaults.standard }
+
+  private func load() -> [String: String] {
+    migrateLegacyKeyIfNeeded()
+    return defaults.dictionary(forKey: Self.defaultsKey) as? [String: String] ?? [:]
+  }
+
+  /// 一次性迁移：新键无值而旧键有值时整表搬过来，搬完删旧键。
+  private func migrateLegacyKeyIfNeeded() {
+    guard !Self.didMigrateLegacyKey else { return }
+    Self.didMigrateLegacyKey = true
+    guard defaults.object(forKey: Self.defaultsKey) == nil,
+          let legacy = defaults.dictionary(forKey: Self.legacyDefaultsKey) as? [String: String]
+    else { return }
+    defaults.set(legacy, forKey: Self.defaultsKey)
+    defaults.removeObject(forKey: Self.legacyDefaultsKey)
+  }
+
+  func save(name: String, bookmark: Data) {
+    var stored = load()
+    stored[name] = bookmark.base64EncodedString()
+    defaults.set(stored, forKey: Self.defaultsKey)
+  }
+
+  func remove(path: String) {
+    var stored = load()
+    for (name, encoded) in stored {
+      guard let data = Data(base64Encoded: encoded),
+            let url = try? resolve(data).url, url.path == path else { continue }
+      stored.removeValue(forKey: name)
+    }
+    defaults.set(stored, forKey: Self.defaultsKey)
+  }
+
+  /// 解析所有 bookmark；失效的条目直接丢弃，避免每次打开都报错。
+  func resolvedRoots() -> [Root] {
+    var roots: [Root] = []
+    var stillValid: [String: String] = [:]
+    for (name, encoded) in load() {
+      guard let data = Data(base64Encoded: encoded) else { continue }
+      if let resolved = try? resolve(data) {
+        roots.append(Root(name: name, url: resolved.url))
+        if !resolved.isStale { stillValid[name] = encoded }
+      }
+    }
+    if stillValid.count != load().count {
+      defaults.set(stillValid, forKey: Self.defaultsKey)
+    }
+    return roots
+  }
+
+  private func resolve(_ data: Data) throws -> (url: URL, isStale: Bool) {
+    var isStale = false
+    let url = try URL(resolvingBookmarkData: data,
+                      options: [.withoutUI],
+                      relativeTo: nil,
+                      bookmarkDataIsStale: &isStale)
+    return (url, isStale)
+  }
+
+  /// 访问沙盒外目录前必须开始安全作用域访问，否则读目录会失败。
+  func beginAccessIfScoped(path: String) -> (started: Bool, url: URL?) {
+    for root in resolvedRoots() {
+      let rootPath = root.url.path
+      if path == rootPath || path.hasPrefix(rootPath + "/") {
+        let started = root.url.startAccessingSecurityScopedResource()
+        return (started, root.url)
+      }
+    }
+    return (false, nil)
+  }
+}
+
+// MARK: - 外部音频文件
+
+@available(iOS 13.0, *)
+final class PanghuAudioIntentChannel {
+
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "takePendingAudio":
+      result(PanghuIncomingAudio.shared.takePendingPath())
+
+    case "openAudio":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String, !path.isEmpty else {
+        result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+        return
+      }
+      guard FileManager.default.fileExists(atPath: path) else {
+        result(FlutterError(code: "NOT_FOUND", message: "file does not exist", details: nil))
+        return
+      }
+      presentShareSheet(path: path, result: result)
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func presentShareSheet(path: String, result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      guard let root = PanghuIncomingAudio.shared.topViewController() else {
+        result(FlutterError(code: "OPEN_FAILED", message: "找不到可用的界面", details: nil))
+        return
+      }
+      let url = URL(fileURLWithPath: path)
+      let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+      if let popover = controller.popoverPresentationController {
+        popover.sourceView = root.view
+        popover.sourceRect = CGRect(x: root.view.bounds.midX,
+                                    y: root.view.bounds.midY,
+                                    width: 1, height: 1)
+        popover.permittedArrowDirections = []
+      }
+      root.present(controller, animated: true) { result(true) }
+    }
+  }
+}
+
+/// 处理「用其他 App 打开音乐文件」的场景。
+///
+/// iOS 走 SceneDelegate/AppDelegate 的 openURL，不像 Android 那样能在启动时
+/// 拿到 content://。这里把文件复制进 App 沙盒并缓存成路径，语义与 Android 的
+/// resolveIncomingAudio 一致（Android 也因为需要真实路径而做了复制）。
+final class PanghuIncomingAudio {
+  static let shared = PanghuIncomingAudio()
+
+  private var pendingPath: String?
+  private var channel: FlutterMethodChannel?
+  private let queue = DispatchQueue(label: "com.panghu.panghumusic.incoming_audio")
+
+  func bind(to messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "panghu_music/audio_intent",
+                                   binaryMessenger: messenger)
+  }
+
+  /// 处理 `panghumusic://` 深链 —— 点击实时活动卡片 / 灵动岛按钮 / 桌面小组件时
+  /// 由 AppDelegate 与 SceneDelegate 调用。返回 true 表示已消费掉这个 URL。
+  static func handleAppURL(_ url: URL) -> Bool {
+    if #available(iOS 16.2, *),
+       PanghuLiveActivityBridge.shared?.handleIncomingURL(url) == true {
+      return true
+    }
+    return false
+  }
+
+  func takePendingPath() -> String? {
+    let path = pendingPath
+    pendingPath = nil
+    return path
+  }
+
+  /// 由 AppDelegate 调用。
+  func accept(url: URL) {
+    queue.async {
+      do {
+        let imported = try self.importFile(url)
+        self.pendingPath = imported
+        DispatchQueue.main.async {
+          self.channel?.invokeMethod("audioAvailable", arguments: nil)
+        }
+      } catch {
+        NSLog("[audio_intent] 导入外部音频失败: \(error)")
+      }
+    }
+  }
+
+  private func importFile(_ url: URL) throws -> String {
+    let scoped = url.startAccessingSecurityScopedResource()
+    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+    let fileManager = FileManager.default
+    let caches = try fileManager.url(for: .cachesDirectory,
+                                     in: .userDomainMask,
+                                     appropriateFor: nil,
+                                     create: true)
+    let root = caches.appendingPathComponent("external_audio", isDirectory: true)
+    let directory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    var name = url.lastPathComponent
+    if name.isEmpty { name = "外部音乐" }
+    // 与 Android 一致：截断超长文件名（按字符而不是字节），保留扩展名。
+    if name.count > 60 {
+      let ext = url.pathExtension
+      let base = url.deletingPathExtension().lastPathComponent
+      name = String(base.prefix(50)) + (ext.isEmpty ? "" : ".\(ext)")
+    }
+
+    let target = directory.appendingPathComponent(name)
+    if fileManager.fileExists(atPath: target.path) {
+      try fileManager.removeItem(at: target)
+    }
+    try fileManager.copyItem(at: url, to: target)
+
+    let attributes = try? fileManager.attributesOfItem(atPath: target.path)
+    let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+    guard size > 0 else {
+      try? fileManager.removeItem(at: directory)
+      throw NSError(domain: "audio_intent", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "音乐文件为空"])
+    }
+
+    // 只保留最近 5 个，防止缓存无限增长（Android 同样只留 5 个）。
+    let keep = 5
+    if let children = try? fileManager.contentsOfDirectory(at: root,
+                                                           includingPropertiesForKeys: [.contentModificationDateKey]) {
+      let stale = children
+        .filter { $0 != directory }
+        .sorted { lhs, rhs in
+          let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+          let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+          return lhsDate > rhsDate
+        }
+      for item in stale.dropFirst(keep - 1) {
+        try? fileManager.removeItem(at: item)
+      }
+    }
+
+    return target.path
+  }
+
+  func topViewController() -> UIViewController? {
+    let scenes = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+    let window = scenes
+      .flatMap { $0.windows }
+      .first { $0.isKeyWindow }
+      ?? scenes.first?.windows.first
+    var controller = window?.rootViewController
+    while let presented = controller?.presentedViewController {
+      controller = presented
+    }
+    return controller
+  }
+}
+
+// MARK: - 音频标签读写
+//
+// Android 用 jaudiotagger。
+// iOS：
+//   · 读取 —— 用 AVFoundation 的 commonMetadata，覆盖 mp3 / m4a / flac / wav 等。
+//     FLAC 的读取在 Dart 侧就已经由 FlacMetadataWriter 纯 Dart 完成，不会走这里。
+//   · 写入 —— 只有 ISO-BMFF（m4a/mp4/mov）能用 AVAssetExportSession 安全重写；
+//     mp3 的 ID3 写入 iOS 系统框架不提供，需要一个 TagLib 级别的库。
+//     为了不冒「写坏用户文件」的风险，这里对不支持的格式**明确报错**，
+//     Dart 侧会把它显示成失败提示。补齐方案见 recon/IOS-PORT-INTERNALS.md。
+
+@available(iOS 13.0, *)
+final class PanghuNativeTaggerChannel {
+
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "read": readTags(call, result)
+    case "write": writeTags(call, result)
+    default: result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func readTags(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let path = args["path"] as? String, !path.isEmpty else {
+      result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+      return
+    }
+    let includeLyrics = args["includeLyrics"] as? Bool ?? true
+    let includeArtwork = args["includeArtwork"] as? Bool ?? true
+
+    guard FileManager.default.fileExists(atPath: path) else {
+      result(FlutterError(code: "NOT_FOUND", message: "file does not exist", details: nil))
+      return
+    }
+
+    // 用 AVAsset 的旧式异步加载 API（iOS 4+ 就有），不用 iOS 15 才引入的
+    // `load(_:)` async 版本，避免额外的 #available 分支。
+    // 这里刻意不检查 statusOfValue(forKey:error:)：该 API 在 Swift 里是
+    // 「NSErrorPointer + 返回值」形态，容易写出类型不匹配的代码；load 完成回调
+    // 已经触发，直接读 commonMetadata 即可，读不到就是空字典（与 Android 返回
+    // 一堆 null 的语义一致，Dart 侧会把它当成「没有标签」）。
+    let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+    asset.loadValuesAsynchronously(forKeys: ["commonMetadata"]) { [weak self] in
+      guard let self else { return }
+
+      let metadata = asset.commonMetadata
+      var payload: [String: Any] = [:]
+      for item in metadata {
+        guard let key = item.commonKey?.rawValue else { continue }
+        switch key {
+        case AVMetadataKey.commonKeyTitle.rawValue:
+          if let value = item.stringValue { payload["title"] = value }
+        case AVMetadataKey.commonKeyArtist.rawValue:
+          if let value = item.stringValue { payload["artist"] = value }
+        case AVMetadataKey.commonKeyAlbumName.rawValue:
+          if let value = item.stringValue { payload["album"] = value }
+        case AVMetadataKey.commonKeyArtwork.rawValue:
+          if includeArtwork { payload["artwork"] = item.dataValue }
+        default:
+          break
+        }
+      }
+
+      if includeLyrics {
+        // 歌词没有 commonKey，只能按 ID3 / iTunes 的标识符去找。
+        let identifiers: [AVMetadataIdentifier] = [
+          AVMetadataIdentifier(rawValue: "id3/ULT"),
+          AVMetadataIdentifier.iTunesMetadataLyrics,
+        ]
+        for identifier in identifiers {
+          let items = AVMetadataItem.metadataItems(from: metadata,
+                                                   filteredByIdentifier: identifier)
+          if let item = items.first, let text = item.stringValue, !text.isEmpty {
+            payload["lyrics"] = text
+            break
+          }
+        }
+      }
+
+      // MethodChannel 的 Result 是线程安全的，但按约定回主线程更稳妥。
+      DispatchQueue.main.async { result(payload) }
+    }
+  }
+
+  private func writeTags(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let path = args["path"] as? String, !path.isEmpty else {
+      result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+      return
+    }
+    guard FileManager.default.fileExists(atPath: path) else {
+      result(FlutterError(code: "NOT_FOUND", message: "file does not exist", details: nil))
+      return
+    }
+
+    let ext = (path as NSString).pathExtension.lowercased()
+    guard ["m4a", "mp4", "mov"].contains(ext) else {
+      // 明确、可操作地失败，而不是写坏文件。FLAC 不会走到这里（Dart 侧纯 Dart 处理）。
+      result(FlutterError(
+        code: "NATIVE_TAGGER_FAILED",
+        message: "iOS 暂不支持写入 .\(ext) 的标签",
+        details: "iOS 系统框架无法安全改写该格式的内嵌标签，需要引入 TagLib 级别的库；"
+          + "FLAC 与 m4a 已支持。"))
+      return
+    }
+
+    result(FlutterError(
+      code: "NATIVE_TAGGER_FAILED",
+      message: "iOS 标签写入尚未启用",
+      details: "AVAssetExportSession 元数据重写路径待接入，见 recon/IOS-PORT-INTERNALS.md。"))
+  }
+}
+
+// MARK: - 应用任务与诊断
+
+@available(iOS 13.0, *)
+final class PanghuAppTaskChannel {
+  // 决定性诊断用的系统播放器必须强引用，否则出作用域即被释放、声音与卡片都停。
+  private static var probePlayer: AVAudioPlayer?
+  // MPRemoteCommandCenter 的 target 必须强引用持有，否则被释放 → 命令失效、
+  // 系统可能因此不把本 App 认作当前媒体源（上岛三条件之一）。
+  private static var remoteCommandTargets: [Any] = []
+
+  func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    switch call.method {
+    case "moveToBack":
+      // iOS 不允许 App 主动退到后台（平台限制），返回 false 让 Dart 侧走原逻辑。
+      result(false)
+
+    case "diagnostics":
+      result(diagnostics())
+
+    case "signingIdentity":
+      result(signingIdentity())
+
+    case "mediaSession":
+      result(mediaSessionDiagnostics())
+
+    case "widgetStatus":
+      // 异步（getCurrentConfigurations 有回调），所以单独走一条路径。
+      widgetStatus(result)
+
+    case "systemPlayerProbe":
+      result(systemPlayerProbe())
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  /// ★ 判断「Widget 扩展到底有没有被系统加载」—— 这是灵动岛不显示时最关键的一个问题。
+  ///
+  ///   为什么必须用 `WidgetCenter.getCurrentConfigurations`：
+  ///   扩展的 `.appex` 文件**在不在包里**，和 iOS**有没有加载它**，是两件事。
+  ///   侧载重签时如果没给嵌套的 .appex 单独签名，文件还在、系统却不会加载它 ——
+  ///   此时 `Activity.request` 依然会**成功返回**（ActivityKit 不校验扩展存在），
+  ///   但屏幕上什么都不会出现。这正是我们观察到的现象：
+  ///     日志里 `活动已发起 id=...`，但锁屏与灵动岛都没有卡片。
+  ///
+  ///   `getCurrentConfigurations` 返回空数组 ⇒ 系统手里没有任何来自本 App 的小组件
+  ///   ⇒ 扩展没被加载，问题不在 ActivityKit 而在签名/安装。
+  private func widgetStatus(_ result: @escaping FlutterResult) {
+    let app = Bundle.main
+    let appId = app.bundleIdentifier ?? "?"
+    let plugIns = app.builtInPlugInsURL
+    let appex = plugIns?.appendingPathComponent("PanghuMusicWidget.appex")
+    let binary = appex?.appendingPathComponent("PanghuMusicWidget")
+
+    // ⚠ 必须用 [String: Any] 而不是 [String: Any?]：Flutter 的
+    //   StandardMessageCodec **不能编码 nil**，字典里放一个真 nil 会直接崩。
+    //   拿不到的值一律写字符串占位。
+    var base: [String: Any] = [:]
+    base["bundleIdentifier"] = appId
+    base["extensionOnDisk"] = appex.map {
+      FileManager.default.fileExists(atPath: $0.path)
+    } ?? false
+    base["extensionBinaryOnDisk"] = binary.map {
+      FileManager.default.fileExists(atPath: $0.path)
+    } ?? false
+    base["extensionIdentifier"] = appex.flatMap { Bundle(url: $0)?.bundleIdentifier } ?? "?"
+
+    if #available(iOS 16.2, *) {
+      base["liveActivitiesEnabled"] = ActivityAuthorizationInfo().areActivitiesEnabled
+      base["activityCount"] = Activity<PanghuActivityAttributes>.activities.count
+    } else {
+      base["liveActivitiesEnabled"] = false
+      base["activityCount"] = 0
+    }
+
+    WidgetCenter.shared.getCurrentConfigurations { configs in
+      var out = base
+      var count = -1
+      switch configs {
+      case .success(let list):
+        count = list.count
+        out["widgetConfigCount"] = list.count
+        out["widgetKinds"] = list.map { $0.kind }
+        out["extensionLoaded"] = !list.isEmpty
+      case .failure(let error):
+        out["widgetConfigCount"] = -1
+        out["extensionLoaded"] = false
+        out["configError"] = "\(error)"
+      }
+      let loaded = (out["extensionLoaded"] as? Bool) ?? false
+      out["verdict"] = loaded
+        ? "扩展已被系统加载（\(count) 个小组件）"
+        : "扩展未被系统加载⚠ —— 侧载重签多半没给 .appex 单独签名"
+      DispatchQueue.main.async { result(out) }
+    }
+  }
+
+  /// ★ 决定性诊断：用 iOS 系统 AVAudioPlayer（标准媒体路径，飞牛那一类）播放一段
+  ///   合成音并写 nowPlayingInfo。用来区分「BASS 自研引擎不被系统认作媒体源」与
+  ///   「巨魔重签本身拿不到媒体卡片权限」：
+  ///     · 出卡 ⇒ 系统媒体链是通的，问题在胖虎的 BASS 引擎 → 换引擎可解
+  ///     · 不出 ⇒ 连系统标准播放器都画不出卡 → 巨魔签名层，代码无解
+  private func systemPlayerProbe() -> [String: Any] {
+    var out: [String: Any] = [:]
+    // 独占：先清掉此前播放/其它写入者残留的卡，避免探针卡被旧态覆盖而误判。
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setCategory(.playback, mode: .default, options: [])
+      try session.setActive(true)
+      out["sessionSetActive"] = true
+    } catch {
+      out["sessionSetActive"] = false
+      out["sessionError"] = "\(error)"
+    }
+    // AVAudioSession 没有公开的 isActive 属性；是否激活以上面 setActive 是否抛错为准。
+    out["sessionCategory"] = session.category.rawValue
+
+    // 生成 12 秒 440Hz 正弦音（带标准 WAV 头），避免依赖任何音频文件/网络。
+    // ⚠ AVAudioPlayer(data:) 无法解析裸 PCM —— 必须自带 WAV 容器头，否则
+    //   初始化失败、没声音，诊断就白费一次侧载。
+    let data = Self.makeTestToneData()
+
+    do {
+      let player = try AVAudioPlayer(data: data)
+      player.numberOfLoops = -1
+      player.prepareToPlay()
+      let started = player.play()
+      Self.probePlayer = player
+      out["playerStarted"] = started
+    } catch {
+      out["playerStarted"] = false
+      out["playerError"] = "\(error)"
+    }
+
+    // ★ 上岛三条件之②：注册至少一个 MPRemoteCommandCenter handler（play/pause），
+    //   target 必须强引用持有。飞牛/官方 audio_service 都走系统播放器并自动注册，
+    //   胖虎的 BASS 自研引擎此前从未注册 —— 这是此前从未确证的盲点。
+    Self.setupRemoteCommands()
+    out["remoteCommandsRegistered"] = !Self.remoteCommandTargets.isEmpty
+
+    let center = MPNowPlayingInfoCenter.default()
+    center.nowPlayingInfo = [
+      MPMediaItemPropertyTitle: "系统播放器诊断",
+      MPMediaItemPropertyArtist: "AVAudioPlayer",
+      MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+      MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
+      MPMediaItemPropertyPlaybackDuration: 12.0,
+    ]
+    center.playbackState = .playing
+    out["nowPlayingWritten"] = center.nowPlayingInfo != nil
+    out["nowPlayingCount"] = center.nowPlayingInfo?.count ?? 0
+    return out
+  }
+
+  /// 注册远程控制命令并强引用持有 target（主线程，加 target 前先清旧）。
+  private static func setupRemoteCommands() {
+    let c = MPRemoteCommandCenter.shared()
+    remoteCommandTargets.removeAll()
+    c.playCommand.isEnabled = true
+    remoteCommandTargets.append(c.playCommand.addTarget { _ in
+      Self.probePlayer?.play()
+      MPNowPlayingInfoCenter.default().playbackState = .playing
+      return .success
+    })
+    c.pauseCommand.isEnabled = true
+    remoteCommandTargets.append(c.pauseCommand.addTarget { _ in
+      Self.probePlayer?.pause()
+      MPNowPlayingInfoCenter.default().playbackState = .paused
+      return .success
+    })
+  }
+
+  /// 生成 12 秒 440Hz 单声道 16bit 正弦音，带标准 44 字节 WAV 头。
+  private static func makeTestToneData() -> Data {
+    let sampleRate = 44_100
+    let frameCount = sampleRate * 12
+    let byteRate = sampleRate * 2  // 16bit 单声道
+
+    func le16(_ v: UInt16) -> [UInt8] {
+      [UInt8(v & 0xff), UInt8((v >> 8) & 0xff)]
+    }
+    func le32(_ v: UInt32) -> [UInt8] {
+      [UInt8(v & 0xff), UInt8((v >> 8) & 0xff),
+       UInt8((v >> 16) & 0xff), UInt8((v >> 24) & 0xff)]
+    }
+
+    let dataSize = frameCount * 2
+    var wav = Data()
+    wav.append(contentsOf: Array("RIFF".utf8))
+    wav.append(contentsOf: le32(UInt32(36 + dataSize)))
+    wav.append(contentsOf: Array("WAVE".utf8))
+    wav.append(contentsOf: Array("fmt ".utf8))
+    wav.append(contentsOf: le32(16))            // fmt chunk size
+    wav.append(contentsOf: le16(1))             // PCM
+    wav.append(contentsOf: le16(1))             // channels
+    wav.append(contentsOf: le32(UInt32(sampleRate)))
+    wav.append(contentsOf: le32(UInt32(byteRate)))
+    wav.append(contentsOf: le16(2))             // block align
+    wav.append(contentsOf: le16(16))            // bits per sample
+    wav.append(contentsOf: Array("data".utf8))
+    wav.append(contentsOf: le32(UInt32(dataSize)))
+
+    let twoPiFreq: Double = 2.0 * .pi * 440.0
+    for i in 0..<frameCount {
+      let phase = twoPiFreq * Double(i) / Double(sampleRate)
+      let s = 0.15 * sin(phase)
+      let clamped = max(-1.0, min(1.0, s))
+      let sample = Int16(clamped * Double(Int16.max))
+      var littleEndian = sample.littleEndian
+      withUnsafeBytes(of: &littleEndian) { wav.append(contentsOf: $0) }
+    }
+    return wav
+  }
+
+  /// ★ 锁屏 / 控制中心播放卡片的诊断。
+  ///
+  ///   这条链路与灵动岛**完全无关** —— 它由 `audio_service` → `MPNowPlayingInfoCenter`
+  ///   驱动，系统自己画卡片，不需要 ActivityKit，也不需要 Widget 扩展。
+  ///   （趣听音乐的锁屏卡片就是这一套，它根本没做灵动岛。）
+  ///
+  ///   卡片出不来的常见原因按「最可能 → 最不可能」排：
+  ///     1. 后台音频没被允许（`UIBackgroundModes` 缺 `audio`）
+  ///     2. 音频会话没激活 / 被别的 App 抢走
+  ///     3. `nowPlayingInfo` 为空 —— 卡片需要 title+artist+rate 至少有一项
+  ///     4. 封面是网络 URL 而非本地文件（audio_service 只认本地，见下）
+  private func mediaSessionDiagnostics() -> [String: Any?] {
+    let center = MPNowPlayingInfoCenter.default()
+    let info = center.nowPlayingInfo
+    let session = AVAudioSession.sharedInstance()
+
+    var parts: [String] = []
+    parts.append("后台音频=\(Self.backgroundModes().contains("audio") ? "已声明" : "未声明⚠")")
+    parts.append("会话分类=\(session.category.rawValue)")
+    parts.append("会话活动=\(session.isOtherAudioPlaying ? "他人有声" : "独占")")
+    // nowPlayingInfo 为 nil 时系统不会画卡片，这里是最直接的判据。
+    parts.append("nowPlaying=\(info == nil ? "空⚠" : "有\(info!.count)项")")
+
+    if let info {
+      let title = info[MPMediaItemPropertyTitle] as? String ?? ""
+      let artist = info[MPMediaItemPropertyArtist] as? String ?? ""
+      let rate = info[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0
+      let art = info[MPMediaItemPropertyArtwork] != nil
+      parts.append("标题=\(title.isEmpty ? "空⚠" : "有")")
+      parts.append("歌手=\(artist.isEmpty ? "空⚠" : "有")")
+      parts.append("速率=\(rate)")
+      parts.append("封面=\(art ? "有" : "无⚠")")
+    }
+
+    return [
+      "summary": parts.joined(separator: " "),
+      "hasNowPlaying": info != nil,
+      "backgroundAudioDeclared": Self.backgroundModes().contains("audio"),
+      "sessionCategory": session.category.rawValue,
+      "isOtherAudioPlaying": session.isOtherAudioPlaying,
+    ]
+  }
+
+  private static func backgroundModes() -> [String] {
+    (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]) ?? []
+  }
+
+  private func diagnostics() -> [String: Any?] {
+    let processInfo = ProcessInfo.processInfo
+    let device = UIDevice.current
+
+    return [
+      "manufacturer": "Apple",
+      "model": Self.modelIdentifier(),
+      "androidRelease": NSNull(),                 // iOS 无此概念
+      "sdk": device.systemVersion,
+      "abis": [Self.archName()],
+      "powerSaveMode": processInfo.isLowPowerModeEnabled,
+      "batteryOptimizationIgnored": true,          // iOS 无电池优化白名单
+      "deviceIdleMode": false,                     // iOS 无 Doze
+      "notificationsEnabled": Self.notificationsEnabled(),
+      "platform": "ios",
+      "systemVersion": device.systemVersion,
+      "thermalState": Self.thermalState(processInfo.thermalState),
+      "freeMemoryBytes": processInfo.physicalMemory,
+    ]
+  }
+
+  /// ★ 读出本进程二进制实际携带的签名身份。
+  ///
+  ///   锁屏卡 / 灵动岛「点卡回 App」这一步，系统按应用的签名身份
+  ///   （application-identifier）找人，不是按桌面图标。CI 出的 IPA
+  ///   完全未签名、主二进制不带 entitlements，最终身份取决于安装
+  ///   方式：巨魔只能保留二进制里已有的（没有就没有），证书签则由
+  ///   描述文件盖入。这里把三样东西原样读出来对账：代码签名
+  ///   identifier、二进制 entitlements 里的 application-identifier、
+  ///   内嵌描述文件（仅证书签安装才有）声明的 App ID。
+  private func signingIdentity() -> [String: Any] {
+    let bundleId = Bundle.main.bundleIdentifier ?? "?"
+    var out: [String: Any] = ["bundleId": bundleId]
+
+    // SecCode* 是 macOS 专属 API、iOS SDK 里不存在，改直接解析主
+    // 可执行文件代码签名 superblob 里的 CodeDirectory 与 entitlements。
+    let signature = Self.codeSignatureInfo()
+    out["codeIdentifier"] = signature.ident
+    out["teamId"] = signature.teamId
+    let appId =
+      signature.entitlements?["application-identifier"] as? String ?? ""
+    out["applicationIdentifier"] = appId.isEmpty ? "（无）" : appId
+    out["appIdMatchesBundle"] = !appId.isEmpty && appId.hasSuffix("." + bundleId)
+
+    // 内嵌描述文件：巨魔安装没有，证书签安装才有。
+    if let url = Bundle.main.url(
+      forResource: "embedded", withExtension: "mobileprovision"
+    ), let data = try? Data(contentsOf: url),
+      let slice = Self.plistSlice(in: data),
+      let profile = try? PropertyListSerialization.propertyList(
+        from: slice, options: [], format: nil
+      ) as? [String: Any]
+    {
+      let profileEntitlements = profile["Entitlements"] as? [String: Any]
+      out["profileName"] = profile["Name"] as? String ?? "?"
+      out["profileAppId"] =
+        profileEntitlements?["application-identifier"] as? String ?? "?"
+      out["profileTeam"] =
+        (profile["TeamIdentifier"] as? [String])?.joined(separator: ",")
+        ?? "?"
+    } else {
+      out["profileName"] = "（无内嵌描述文件）"
+      out["profileAppId"] = "?"
+      out["profileTeam"] = "?"
+    }
+    return out
+  }
+
+  /// mobileprovision 是 CMS 签名包裹的 plist：先做有损文本解码
+  /// （二进制尾巴会被替换字符污染，但 XML 段是纯 ASCII 不受影响），
+  /// 截取 XML 段再解析。
+  private static func plistSlice(in data: Data) -> Data? {
+    let text = String(decoding: data, as: UTF8.self)
+    guard let start = text.range(of: "<?xml"),
+      let end = text.range(of: "</plist>")
+    else { return nil }
+    return Data(text[start.lowerBound..<end.upperBound].utf8)
+  }
+
+  /// 解析主可执行文件的代码签名：读 Mach-O 的 LC_CODE_SIGNATURE，
+  /// 在 superblob 里取 CodeDirectory 的 ident/team 与 XML 形式的
+  /// entitlements。全程只做带边界检查的字节读取，任何一步对不上
+  /// 都返回空，诊断本身绝不让 App 崩。
+  private static func codeSignatureInfo()
+    -> (ident: String, teamId: String, entitlements: [String: Any]?)
+  {
+    guard let url = Bundle.main.executableURL,
+      let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+      data.count > 32
+    else { return ("?", "?", nil) }
+
+    func be32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return (Int(data[i]) << 24) | (Int(data[i + 1]) << 16)
+        | (Int(data[i + 2]) << 8) | Int(data[i + 3])
+    }
+    func le32(_ base: Int, _ offset: Int) -> Int {
+      let i = base + offset
+      guard i + 4 <= data.count else { return 0 }
+      return Int(data[i]) | (Int(data[i + 1]) << 8)
+        | (Int(data[i + 2]) << 16) | (Int(data[i + 3]) << 24)
+    }
+
+    // FAT 先定位 arm64 切片，thin 直接从 0 开始。
+    var base = 0
+    if be32(0, 0) == 0xcafebabe {
+      let archCount = be32(0, 4)
+      var found = false
+      for index in 0..<min(archCount, 8) {
+        let entry = 8 + index * 20
+        if be32(entry, 0) == 0x0100_000c {
+          base = be32(entry, 8)
+          found = true
+          break
+        }
+      }
+      if !found, archCount > 0 { base = be32(8, 8) }
+    }
+    guard base + 32 <= data.count, le32(base, 0) == 0xfeed_facf else {
+      return ("?", "?", nil)
+    }
+
+    // 遍历 load commands 找 LC_CODE_SIGNATURE(0x1d)。
+    let commandCount = le32(base, 16)
+    var cursor = base + 32
+    var signatureOffset = 0
+    for _ in 0..<min(commandCount, 64) {
+      guard cursor + 8 <= data.count else { break }
+      let command = le32(cursor, 0)
+      let size = le32(cursor, 4)
+      if command == 0x1d {
+        signatureOffset = le32(cursor, 8)
+        break
+      }
+      if size <= 0 { break }
+      cursor += size
+    }
+    guard signatureOffset > 0 else { return ("?", "?", nil) }
+    let superblob = base + signatureOffset
+    guard be32(superblob, 0) == 0xfade_0cc0 else { return ("?", "?", nil) }
+    let blobCount = be32(superblob, 8)
+
+    var ident = "?"
+    var teamId = "?"
+    var entitlements: [String: Any]?
+    for index in 0..<min(blobCount, 16) {
+      let entry = superblob + 12 + index * 8
+      let slot = be32(entry, 0)
+      let blob = superblob + be32(entry, 4)
+      guard blob + 8 <= data.count else { continue }
+      if slot == 0, be32(blob, 0) == 0xfade_0c02 {
+        // CodeDirectory：ident/team 是偏移指向的 C 字符串。
+        let version = be32(blob, 8)
+        let identOffset = be32(blob, 20)
+        if identOffset > 0 {
+          ident = cString(data, blob + identOffset) ?? "?"
+        }
+        if version >= 0x20100 {
+          let teamOffset = be32(blob, 48)
+          if teamOffset > 0 {
+            teamId = cString(data, blob + teamOffset) ?? "?"
+          }
+        }
+      } else if slot == 5, be32(blob, 0) == 0xfade_7171 {
+        // XML entitlements：8 字节头之后就是 plist 文本。
+        let length = be32(blob, 4)
+        if length > 8, blob + length <= data.count,
+          let parsed = try? PropertyListSerialization.propertyList(
+            from: data[(blob + 8)..<(blob + length)],
+            options: [], format: nil
+          ) as? [String: Any]
+        {
+          entitlements = parsed
+        }
+      }
+    }
+    return (ident, teamId, entitlements)
+  }
+
+  private static func cString(_ data: Data, _ start: Int) -> String? {
+    guard start >= 0, start < data.count else { return nil }
+    var end = start
+    while end < data.count, data[end] != 0, end - start < 256 { end += 1 }
+    guard end > start else { return nil }
+    return String(decoding: data[start..<end], as: UTF8.self)
+  }
+
+  private static var didMigrateLegacyNotificationsKey = false
+
+  private static func notificationsEnabled() -> Bool {
+    // 一次性迁移改名前的旧键：新键无值而旧键有值时搬过来，搬完删旧键。
+    if !didMigrateLegacyNotificationsKey {
+      didMigrateLegacyNotificationsKey = true
+      let defaults = UserDefaults.standard
+      if defaults.object(forKey: "panghu.notificationsEnabled") == nil,
+         let legacy = defaults.object(forKey: "cyshine.notificationsEnabled") as? Bool {
+        defaults.set(legacy, forKey: "panghu.notificationsEnabled")
+        defaults.removeObject(forKey: "cyshine.notificationsEnabled")
+      }
+    }
+    // 没有同步 API，读缓存值；未请求过权限时按「未启用」处理。
+    return UserDefaults.standard.object(forKey: "panghu.notificationsEnabled") as? Bool ?? true
+  }
+
+  private static func thermalState(_ state: ProcessInfo.ThermalState) -> String {
+    switch state {
+    case .nominal: return "nominal"
+    case .fair: return "fair"
+    case .serious: return "serious"
+    case .critical: return "critical"
+    @unknown default: return "unknown"
+    }
+  }
+
+  private static func archName() -> String {
+    #if arch(arm64)
+      return "arm64"
+    #elseif arch(x86_64)
+      return "x86_64"
+    #else
+      return "unknown"
+    #endif
+  }
+
+  private static func modelIdentifier() -> String {
+    var systemInfo = utsname()
+    uname(&systemInfo)
+    let mirror = Mirror(reflecting: systemInfo.machine)
+    let identifier = mirror.children.reduce(into: "") { acc, element in
+      guard let value = element.value as? Int8, value != 0 else { return }
+      acc.append(Character(UnicodeScalar(UInt8(value))))
+    }
+    return identifier.isEmpty ? "unknown" : identifier
+  }
+}
+
+// MARK: - 网络类型（WiFi / 移动流量）
+
+/// 用 NWPathMonitor 判断当前网络是否按流量计费（.isExpensive == cellular）。
+/// 同时实现 FlutterStreamHandler 供 EventChannel 推送类型变化。
+@available(iOS 13.0, *)
+final class PanghuNetworkTypeChannel: NSObject, FlutterStreamHandler {
+  private let monitor = NWPathMonitor()
+  private let queue = DispatchQueue(label: "panghu.network_type")
+  private var sink: FlutterEventSink?
+  private let lock = NSLock()
+
+  /// 'wifi' 或 'cellular'，供 MethodChannel 同步读取。
+  private(set) var currentType: String = "wifi"
+
+  override init() {
+    super.init()
+    monitor.pathUpdateHandler = { [weak self] path in
+      guard let self else { return }
+      // 断网时保留上一次的类型；.isExpensive 表示按流量计费（cellular）。
+      if path.status == .unsatisfied { return }
+      let next = path.isExpensive ? "cellular" : "wifi"
+      let changed = self.updateType(next)
+      if changed {
+        self.currentSink()?(next)
+      }
+    }
+    monitor.start(queue: queue)
+  }
+
+  deinit {
+    monitor.cancel()
+  }
+
+  private func updateType(_ next: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if currentType == next { return false }
+    currentType = next
+    return true
+  }
+
+  private func currentSink() -> FlutterEventSink? {
+    lock.lock()
+    defer { lock.unlock() }
+    return sink
+  }
+
+  func onListen(withArguments arguments: Any?,
+                eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    lock.lock()
+    sink = eventSink
+    let type = currentType
+    lock.unlock()
+    eventSink(type)
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    lock.lock()
+    sink = nil
+    lock.unlock()
+    return nil
+  }
+}

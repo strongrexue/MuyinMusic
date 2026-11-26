@@ -114,7 +114,7 @@ class DownloadService {
   DownloadService(this._ref);
 
   final Ref _ref;
-  static const _mediaScanChannel = MethodChannel('muyin_music/media_scan');
+  static const _mediaScanChannel = MethodChannel('panghu_music/media_scan');
   static const int batchConcurrency = 3;
 
   final Set<String> _batchDownloadKeys = {};
@@ -327,7 +327,7 @@ class DownloadService {
       // iOS 上下载根派生自扫描根，保证文件落在扫描目录内、saved 事件的
       // owner 归属判断恒成立；安卓沿用用户设置的下载目录。
       final downloadRoot = Platform.isIOS
-          ? p.join(normalizeStorageLocation(settings.localMusicDir), 'MuyinMusic')
+          ? p.join(normalizeStorageLocation(settings.localMusicDir), 'PanghuMusic')
           : settings.downloadDir;
       final destDir = await _resolveDestinationDir(downloadRoot, log);
       // 按歌手分文件夹：普通目录直接拼子目录（MediaStore 保存时会自动建），
@@ -346,7 +346,7 @@ class DownloadService {
         }
       }
       final cacheRoot = await getTemporaryDirectory();
-      taskCacheDir = await cacheRoot.createTemp('muyin-download-');
+      taskCacheDir = await cacheRoot.createTemp('panghu-download-');
       ensureActive();
 
       final MusicSourceFallbackResult<_DownloadedAudio> sourceResult;
@@ -719,14 +719,14 @@ class DownloadService {
         await dir.create(recursive: true);
       }
       // Concurrent downloads must not write/delete each other's probe.
-      probeDir = await dir.createTemp('.muyin-probe-');
+      probeDir = await dir.createTemp('.panghu-probe-');
       final probe = File(p.join(probeDir.path, 'write-test'));
       await probe.writeAsString('ok');
       return dir.path;
     } catch (e) {
       log('destDir FAILED ${dir.path}: $e; falling back to app-private');
       final fallback = await getApplicationDocumentsDirectory();
-      final fb = Directory(p.join(fallback.path, 'MuyinMusic'));
+      final fb = Directory(p.join(fallback.path, 'PanghuMusic'));
       if (!fb.existsSync()) fb.createSync(recursive: true);
       return fb.path;
     } finally {

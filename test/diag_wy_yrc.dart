@@ -7,8 +7,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:muyin_music/core/sdk/internal/crypto_util.dart';
-import 'package:muyin_music/core/sdk/internal/wy_yrc.dart';
+import 'package:panghu_music/core/sdk/internal/crypto_util.dart';
+import 'package:panghu_music/core/sdk/internal/wy_yrc.dart';
 
 final Uint8List _eapiKey = Uint8List.fromList(utf8.encode('e82ckenh8dichen8'));
 

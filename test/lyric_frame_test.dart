@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
-import 'package:muyin_music/features/player/lyric_frame.dart';
-import 'package:muyin_music/features/player/lyric_parser.dart';
+import 'package:panghu_music/features/player/lyric_frame.dart';
+import 'package:panghu_music/features/player/lyric_parser.dart';
 
 void main() {
   group('LyricFrameAlgorithms.shouldShow', () {

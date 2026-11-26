@@ -1,4 +1,4 @@
-import 'package:muyin_music/core/app_info.dart';
+import 'package:panghu_music/core/app_info.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -7,7 +7,7 @@ void main() {
   test('app version label uses package version', () async {
     PackageInfo.setMockInitialValues(
       appName: appDisplayName,
-      packageName: 'com.muyin.muyinmusic',
+      packageName: 'com.panghu.panghumusic',
       version: '1.0.0',
       buildNumber: '1',
       buildSignature: '',

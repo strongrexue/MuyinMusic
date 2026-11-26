@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/sync/sync_models.dart';
-import 'package:muyin_music/core/sync/webdav_client.dart';
-import 'package:muyin_music/core/sync/webdav_config_store.dart';
+import 'package:panghu_music/core/sync/sync_models.dart';
+import 'package:panghu_music/core/sync/webdav_client.dart';
+import 'package:panghu_music/core/sync/webdav_config_store.dart';
 
 void main() {
   test('normalizes WebDAV directory URLs', () {
@@ -69,7 +69,7 @@ void main() {
         ),
         isTrue,
       );
-      expect(requests.last.uri.path, '/root/MuyinMusic/sync-v1.json');
+      expect(requests.last.uri.path, '/root/PanghuMusic/sync-v1.json');
     },
   );
 

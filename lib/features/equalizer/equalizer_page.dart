@@ -282,7 +282,7 @@ class _EqualizerPageState extends ConsumerState<EqualizerPage> {
       // Desktop pickers only return a path, so write the file there.
       final path = await FilePicker.platform.saveFile(
         dialogTitle: '导出均衡器配置',
-        fileName: 'MuyinMusic.speq',
+        fileName: 'PanghuMusic.speq',
         type: FileType.custom,
         allowedExtensions: const ['speq'],
         bytes: Uint8List.fromList(utf8.encode(content)),

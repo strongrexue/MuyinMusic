@@ -5,21 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/search_response.dart';
-import 'package:muyin_music/core/models/search_category.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/core/ui/app_toast.dart';
-import 'package:muyin_music/features/player/player_audio_handler.dart';
-import 'package:muyin_music/features/playlists/playlist_store.dart';
-import 'package:muyin_music/features/search/search_controller.dart';
-import 'package:muyin_music/features/search/online_search_body.dart';
-import 'package:muyin_music/features/search/search_toolbar_state.dart';
-import 'package:muyin_music/features/search/widgets/search_result_tile.dart';
-import 'package:muyin_music/features/shell/widgets/dual_capsule_bottom_navigation.dart';
-import 'package:muyin_music/router.dart';
-import 'package:muyin_music/theme/app_theme.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/search_response.dart';
+import 'package:panghu_music/core/models/search_category.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/core/ui/app_toast.dart';
+import 'package:panghu_music/features/player/player_audio_handler.dart';
+import 'package:panghu_music/features/playlists/playlist_store.dart';
+import 'package:panghu_music/features/search/search_controller.dart';
+import 'package:panghu_music/features/search/online_search_body.dart';
+import 'package:panghu_music/features/search/search_toolbar_state.dart';
+import 'package:panghu_music/features/search/widgets/search_result_tile.dart';
+import 'package:panghu_music/features/shell/widgets/dual_capsule_bottom_navigation.dart';
+import 'package:panghu_music/router.dart';
+import 'package:panghu_music/theme/app_theme.dart';
 
 import 'helpers/prism_test_environment.dart';
 

@@ -25,7 +25,7 @@
 #include "music_source_crypto.h"
 #include "quickjs.h"
 
-namespace muyin {
+namespace panghu {
 namespace {
 
 using EncodableValue = flutter::EncodableValue;
@@ -924,4 +924,4 @@ std::string MusicSourceBridge::ResourceDir() {
                                     : full.substr(0, slash + 1);
 }
 
-}  // namespace muyin
+}  // namespace panghu

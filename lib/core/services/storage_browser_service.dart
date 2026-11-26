@@ -62,7 +62,7 @@ class StorageBrowserService {
   const StorageBrowserService({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
-  static const _channelName = 'muyin_music/storage_browser';
+  static const _channelName = 'panghu_music/storage_browser';
 
   final MethodChannel _channel;
 

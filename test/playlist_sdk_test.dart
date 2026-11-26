@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/sdk/playlist_sdk.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/sdk/playlist_sdk.dart';
 
 void main() {
   group('PlaylistSdk.parseTarget', () {

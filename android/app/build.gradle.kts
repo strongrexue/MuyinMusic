@@ -27,7 +27,7 @@ require(appChannel == "main" || appChannel == "dev") {
 }
 
 val isDevChannel = appChannel == "dev"
-val appId = if (isDevChannel) "com.muyin.muyinmusic.dev" else "com.muyin.muyinmusic"
+val appId = if (isDevChannel) "com.panghu.panghumusic.dev" else "com.panghu.panghumusic"
 val appLabel = if (isDevChannel) "胖虎音乐dev" else "胖虎音乐"
 
 val targetPlatformToAbi = mapOf(
@@ -65,7 +65,7 @@ val releaseSigningReady = signingStoreFile?.isFile == true &&
     !signingKeyPassword.isNullOrBlank()
 
 android {
-    namespace = "com.muyin.muyinmusic"
+    namespace = "com.panghu.panghumusic"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

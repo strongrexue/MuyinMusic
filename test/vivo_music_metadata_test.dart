@@ -1,8 +1,8 @@
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/lyric_info.dart';
-import 'package:muyin_music/features/player/lyric_parser.dart';
-import 'package:muyin_music/features/player/vivo_music_metadata.dart';
+import 'package:panghu_music/core/models/lyric_info.dart';
+import 'package:panghu_music/features/player/lyric_parser.dart';
+import 'package:panghu_music/features/player/vivo_music_metadata.dart';
 
 void main() {
   test('online word lyrics become plain timed LRC for the system card', () {

@@ -8,23 +8,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/music_api.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/lyric_info.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/music_url.dart';
-import 'package:muyin_music/core/music_sources/music_source_models.dart';
-import 'package:muyin_music/core/music_sources/music_source_runtime.dart';
-import 'package:muyin_music/core/music_sources/music_url_resolver.dart';
-import 'package:muyin_music/core/services/app_logger.dart';
-import 'package:muyin_music/core/services/log_category.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/player/player_audio_handler.dart';
-import 'package:muyin_music/features/player/player_controller.dart';
-import 'package:muyin_music/features/downloads/download_history_entry.dart';
-import 'package:muyin_music/features/player/player_session_snapshot.dart';
-import 'package:muyin_music/features/player/player_session_store.dart';
-import 'package:muyin_music/features/player/vivo_music_metadata.dart';
+import 'package:panghu_music/core/api/music_api.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/lyric_info.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/music_url.dart';
+import 'package:panghu_music/core/music_sources/music_source_models.dart';
+import 'package:panghu_music/core/music_sources/music_source_runtime.dart';
+import 'package:panghu_music/core/music_sources/music_url_resolver.dart';
+import 'package:panghu_music/core/services/app_logger.dart';
+import 'package:panghu_music/core/services/log_category.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/player/player_audio_handler.dart';
+import 'package:panghu_music/features/player/player_controller.dart';
+import 'package:panghu_music/features/downloads/download_history_entry.dart';
+import 'package:panghu_music/features/player/player_session_snapshot.dart';
+import 'package:panghu_music/features/player/player_session_store.dart';
+import 'package:panghu_music/features/player/vivo_music_metadata.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -1275,7 +1275,7 @@ void main() {
     final harness = await _Harness.create(loadFailures: 0);
     addTearDown(harness.dispose);
     final directory = await Directory.systemTemp.createTemp(
-      'muyin-player-shuffle-next-',
+      'panghu-player-shuffle-next-',
     );
     addTearDown(() => directory.delete(recursive: true));
     final entries = <DownloadHistoryEntry>[];
@@ -1301,7 +1301,7 @@ void main() {
       final harness = await _Harness.create(loadFailures: 0);
       addTearDown(harness.dispose);
       final directory = await Directory.systemTemp.createTemp(
-        'muyin-player-standalone-next-',
+        'panghu-player-standalone-next-',
       );
       addTearDown(() => directory.delete(recursive: true));
       final file = File(
@@ -1325,7 +1325,7 @@ void main() {
     final harness = await _Harness.create(loadFailures: 0);
     addTearDown(harness.dispose);
     final directory = await Directory.systemTemp.createTemp(
-      'muyin-player-expand-queue-',
+      'panghu-player-expand-queue-',
     );
     addTearDown(() => directory.delete(recursive: true));
     final expanded = <DownloadHistoryEntry>[];

@@ -1,7 +1,7 @@
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/features/downloads/download_history_entry.dart';
-import 'package:muyin_music/features/home/home_feed_logic.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/features/downloads/download_history_entry.dart';
+import 'package:panghu_music/features/home/home_feed_logic.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 DownloadHistoryEntry _entry(String id, String singer) {

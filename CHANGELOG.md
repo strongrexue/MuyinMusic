@@ -1,6 +1,6 @@
 # Changelog
 
-沐音的版本变更记录。
+胖虎音乐的版本变更记录。
 
 本项目是 [CyShineMusic（栖弦）](https://github.com/KevinllBin/CyShineMusic)
 的二开分支，基线版本 **v1.1.2**（commit `24a87ce`）。上游的变更记录不在本文件

@@ -2,11 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/sdk/internal/builders.dart';
-import 'package:muyin_music/core/sdk/internal/kg_quality.dart';
-import 'package:muyin_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/sdk/internal/builders.dart';
+import 'package:panghu_music/core/sdk/internal/kg_quality.dart';
+import 'package:panghu_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
 
 void main() {
   const baseHash = '8141FAA45AAD5BCFF5FF9873B89709E3';

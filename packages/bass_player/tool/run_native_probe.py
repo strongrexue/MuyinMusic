@@ -15,9 +15,9 @@ def main():
     stdlib=next((Path(os.environ['USERPROFILE'])/'.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.20').rglob('*.jar'))
     bass=ROOT/'build/basslib/intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar'
     classes=ROOT/'build/bass_player/tmp/kotlin-classes/release'
-    remote='/data/local/tmp/muyin-groove-shift-'+uuid.uuid4().hex[:10]
+    remote='/data/local/tmp/panghu-groove-shift-'+uuid.uuid4().hex[:10]
     adb=['adb','-s','emulator-5554']
-    with tempfile.TemporaryDirectory(prefix='muyin-groove-shift-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='panghu-groove-shift-') as tmp:
         work=Path(tmp);out=work/'classes';out.mkdir()
         run(['javac','-encoding','UTF-8','--release','17','-cp',os.pathsep.join(map(str,[sdkjar,stdlib,bass,classes])),'-d',out,Path(__file__).with_name('GrooveShiftNativeProbe.java')])
         jar=work/'engine.jar'

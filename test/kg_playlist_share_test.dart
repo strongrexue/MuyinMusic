@@ -1,9 +1,9 @@
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/sdk/internal/crypto_util.dart';
-import 'package:muyin_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
-import 'package:muyin_music/core/sdk/playlist_sdk.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/sdk/internal/crypto_util.dart';
+import 'package:panghu_music/core/sdk/playlist_adapters/kg_playlist_adapter.dart';
+import 'package:panghu_music/core/sdk/playlist_sdk.dart';
 
 const _globalId = 'collection_3_509005732_35_0';
 const _chain = 'share_token';

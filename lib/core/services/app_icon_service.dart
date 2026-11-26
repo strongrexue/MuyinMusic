@@ -32,7 +32,7 @@ final appIconProvider =
     );
 
 class AppIconController extends AsyncNotifier<AppIconVariant> {
-  static const _channel = MethodChannel('muyin_music/app_icon');
+  static const _channel = MethodChannel('panghu_music/app_icon');
 
   @override
   Future<AppIconVariant> build() async {

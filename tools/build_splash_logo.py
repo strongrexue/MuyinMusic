@@ -11,7 +11,7 @@ import os
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = r"D:\projects\MuyinMusic\logo.png"
+SRC = r"D:\projects\PanghuMusic\logo.png"
 OUT = os.path.join(ROOT, "logo_fg.png")
 CANVAS = 1024
 NOTE_DEEP = (32, 62, 150)

@@ -42,8 +42,8 @@ jobs:
           fi
 
           echo "APP_VERSION=${app_version}" >> "$GITHUB_ENV"
-          echo "ARM64_APK_NAME=MuyinMusic-v${app_version}-arm64-v8a.apk" >> "$GITHUB_ENV"
-          echo "V7A_APK_NAME=MuyinMusic-v${app_version}-armeabi-v7a.apk" >> "$GITHUB_ENV"
+          echo "ARM64_APK_NAME=PanghuMusic-v${app_version}-arm64-v8a.apk" >> "$GITHUB_ENV"
+          echo "V7A_APK_NAME=PanghuMusic-v${app_version}-armeabi-v7a.apk" >> "$GITHUB_ENV"
 
       - name: Prepare main signing
         shell: bash
@@ -100,7 +100,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MuyinMusic-v${{ env.APP_VERSION }}-android-apks
+          name: PanghuMusic-v${{ env.APP_VERSION }}-android-apks
           path: |
             ${{ env.ARM64_APK_NAME }}
             ${{ env.V7A_APK_NAME }}
@@ -114,7 +114,7 @@ jobs:
             gh release edit "$GITHUB_REF_NAME" --draft=false
           else
             gh release create "$GITHUB_REF_NAME" "$ARM64_APK_NAME" "$V7A_APK_NAME" \
-              --title "MuyinMusic ${APP_VERSION}" \
+              --title "PanghuMusic ${APP_VERSION}" \
               --generate-notes
           fi
 
@@ -146,14 +146,14 @@ jobs:
         shell: pwsh
         run: |
           $version = "$env:GITHUB_REF_NAME" -replace '^v', ''
-          $zip = "MuyinMusic-v$version-windows-x64.zip"
+          $zip = "PanghuMusic-v$version-windows-x64.zip"
           Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $zip
           "WINDOWS_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MuyinMusic-${{ github.ref_name}}-windows
+          name: PanghuMusic-${{ github.ref_name}}-windows
           path: ${{ env.WINDOWS_ZIP}}
 
       - name: Upload Windows zip to GitHub Release
@@ -288,13 +288,13 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          zip -qry ../MuyinMusic-unsigned.ipa Payload
+          zip -qry ../PanghuMusic-unsigned.ipa Payload
           cd ../..
-          ls -lh build/MuyinMusic-unsigned.ipa
+          ls -lh build/PanghuMusic-unsigned.ipa
           echo "### 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "未签名 IPA: build/MuyinMusic-unsigned.ipa" >> "$GITHUB_STEP_SUMMARY"
+          echo "未签名 IPA: build/PanghuMusic-unsigned.ipa" >> "$GITHUB_STEP_SUMMARY"
           echo "版本: ${{ steps.version.outputs.name }} (${{ steps.version.outputs.number }})" >> "$GITHUB_STEP_SUMMARY"
           echo "App 大小: $(du -sh "$APP_PATH" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -303,8 +303,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MuyinMusic-unsigned-ipa
-          path: build/MuyinMusic-unsigned.ipa
+          name: PanghuMusic-unsigned-ipa
+          path: build/PanghuMusic-unsigned.ipa
           retention-days: 14
 
       # tag 触发的构建把未签名 IPA 挂到 Android job 创建的同一个 Release。
@@ -315,8 +315,8 @@ jobs:
         run: |
           set -e
           TAG="${GITHUB_REF_NAME}"
-          IPA="MuyinMusic-${{ steps.version.outputs.name }}-unsigned.ipa"
-          cp build/MuyinMusic-unsigned.ipa "$IPA"
+          IPA="PanghuMusic-${{ steps.version.outputs.name }}-unsigned.ipa"
+          cp build/PanghuMusic-unsigned.ipa "$IPA"
           gh release upload "$TAG" "$IPA" --clobber
           echo "未签名 IPA 已发布到 Release $TAG" >> "$GITHUB_STEP_SUMMARY"
 

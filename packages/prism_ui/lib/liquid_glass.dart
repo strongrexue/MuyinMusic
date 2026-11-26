@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Modified by MuyinMusic (2026-11-13): `LiquidGlassScope` gains an optional
+// Modified by PanghuMusic (2026-11-13): `LiquidGlassScope` gains an optional
 // `styleTransform` hook so the app can override every pane's glass style from
 // one place. See NOTICE section 6 (GPLv3 section 5(a)) and
 // liquid_glass_capture.dart. No shader or uniform packing was changed.
@@ -75,7 +75,7 @@ class LiquidGlassScope extends InheritedWidget {
   final LiquidGlassQuality quality;
 
   /// Optional app-wide override applied to every pane's style at capture time.
-  /// Added by MuyinMusic; see NOTICE section 6.
+  /// Added by PanghuMusic; see NOTICE section 6.
   final LiquidGlassStyle Function(LiquidGlassStyle)? styleTransform;
 
   static bool of(BuildContext context) => _of(context)?.enabled ?? false;

@@ -4,16 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/music_api.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/playlist_info.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/downloads/download_history_store.dart';
-import 'package:muyin_music/features/playlists/lx_playlist_import.dart';
-import 'package:muyin_music/features/playlists/online_playlist_updater.dart';
-import 'package:muyin_music/features/playlists/playlist_models.dart';
-import 'package:muyin_music/features/playlists/playlist_store.dart';
+import 'package:panghu_music/core/api/music_api.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/playlist_info.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/downloads/download_history_store.dart';
+import 'package:panghu_music/features/playlists/lx_playlist_import.dart';
+import 'package:panghu_music/features/playlists/online_playlist_updater.dart';
+import 'package:panghu_music/features/playlists/playlist_models.dart';
+import 'package:panghu_music/features/playlists/playlist_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

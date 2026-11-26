@@ -53,10 +53,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.muyin.muyinmusic</string>
+			<string>com.panghu.panghumusic</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>muyinmusic</string>
+				<string>panghumusic</string>
 				<!-- 旧 scheme 保留注册，兼容已分享出去的历史深链。 -->
 				<string>cyshinemusic</string>
 			</array>

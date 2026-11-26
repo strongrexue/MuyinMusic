@@ -1,18 +1,18 @@
 Pod::Spec.new do |s|
   s.name             = 'music_source_runtime'
   s.version          = '0.1.0'
-  s.summary          = 'JavaScript source runtime bridge for MuyinMusic.'
+  s.summary          = 'JavaScript source runtime bridge for PanghuMusic.'
   s.description      = <<-DESC
 iOS 侧自定义音源运行时。与 Android 的 packages/music_source_runtime 保持完全相同的
-MethodChannel 契约（muyin_music/music_source_runtime 与
-muyin_music/music_source_update_runtime），JS 侧共用同一份
+MethodChannel 契约（panghu_music/music_source_runtime 与
+panghu_music/music_source_update_runtime），JS 侧共用同一份
 music_source_preload.js，因此 lib/ 层不需要任何改动。
 
 JS 引擎使用系统自带的 JavaScriptCore，无外部依赖。
                        DESC
-  s.homepage         = 'https://github.com/KevinllBin/MuyinMusic'
+  s.homepage         = 'https://github.com/KevinllBin/PanghuMusic'
   s.license          = { :type => 'MIT' }
-  s.author           = { 'MuyinMusic iOS port' => 'noreply@localhost' }
+  s.author           = { 'PanghuMusic iOS port' => 'noreply@localhost' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*.swift'
   s.resources        = 'Resources/**'

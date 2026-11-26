@@ -6,14 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/music_url.dart';
-import 'package:muyin_music/core/music_sources/music_source_controller.dart';
-import 'package:muyin_music/core/music_sources/music_source_models.dart';
-import 'package:muyin_music/core/music_sources/music_source_runtime.dart';
-import 'package:muyin_music/core/music_sources/music_source_store.dart';
-import 'package:muyin_music/core/music_sources/music_url_resolver.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/music_url.dart';
+import 'package:panghu_music/core/music_sources/music_source_controller.dart';
+import 'package:panghu_music/core/music_sources/music_source_models.dart';
+import 'package:panghu_music/core/music_sources/music_source_runtime.dart';
+import 'package:panghu_music/core/music_sources/music_source_store.dart';
+import 'package:panghu_music/core/music_sources/music_url_resolver.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

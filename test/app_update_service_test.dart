@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:muyin_music/core/services/app_update_service.dart';
+import 'package:panghu_music/core/services/app_update_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pub_semver/pub_semver.dart';
@@ -58,8 +58,8 @@ void main() {
       return {
         'tag_name': tag,
         'html_url': htmlUrl ??
-            'https://github.com/strongrexue/MuyinMusic/releases/tag/$tag',
-        'name': 'MuyinMusic $tag',
+            'https://github.com/strongrexue/PanghuMusic/releases/tag/$tag',
+        'name': 'PanghuMusic $tag',
         'draft': draft,
         'prerelease': prerelease,
       };
@@ -74,11 +74,11 @@ void main() {
       expect(result, isNotNull);
       expect(result!.version, Version(1, 10, 0));
       expect(result.tagName, 'v1.10.0');
-      expect(result.title, 'MuyinMusic v1.10.0');
+      expect(result.title, 'PanghuMusic v1.10.0');
       expect(
         result.pageUri,
         Uri.parse(
-          'https://github.com/strongrexue/MuyinMusic/releases/tag/v1.10.0',
+          'https://github.com/strongrexue/PanghuMusic/releases/tag/v1.10.0',
         ),
       );
     });
@@ -156,7 +156,7 @@ class _FakeAdapter implements HttpClientAdapter {
     expect(
       options.uri,
       Uri.parse(
-        'https://api.github.com/repos/strongrexue/MuyinMusic/releases',
+        'https://api.github.com/repos/strongrexue/PanghuMusic/releases',
       ),
     );
     return ResponseBody.fromString(

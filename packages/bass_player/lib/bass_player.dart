@@ -182,10 +182,10 @@ class BassPlayer {
   })  : _backend = backend,
         _methods =
             methodChannel ??
-            const MethodChannel('com.muyin.muyinmusic/bass_player/methods'),
+            const MethodChannel('com.panghu.panghumusic/bass_player/methods'),
         _events =
             eventChannel ??
-            const EventChannel('com.muyin.muyinmusic/bass_player/events');
+            const EventChannel('com.panghu.panghumusic/bass_player/events');
 
   final BassBackend? _backend;
   final MethodChannel _methods;

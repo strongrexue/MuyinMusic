@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/features/player/player_session_snapshot.dart';
-import 'package:muyin_music/features/player/player_session_store.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/features/player/player_session_snapshot.dart';
+import 'package:panghu_music/features/player/player_session_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

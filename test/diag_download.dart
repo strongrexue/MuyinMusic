@@ -11,7 +11,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
-import 'package:muyin_music/core/sdk/tx_sdk.dart';
+import 'package:panghu_music/core/sdk/tx_sdk.dart';
 
 const _baseUrl = 'https://example.com';
 

@@ -4,17 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/music_api.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/music_query.dart';
-import 'package:muyin_music/core/models/search_category.dart';
-import 'package:muyin_music/core/models/search_response.dart';
-import 'package:muyin_music/core/sdk/catalog/kw_catalog.dart';
-import 'package:muyin_music/core/sdk/catalog/tx_catalog.dart';
-import 'package:muyin_music/core/sdk/catalog/wy_catalog.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/search/search_controller.dart';
+import 'package:panghu_music/core/api/music_api.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/music_query.dart';
+import 'package:panghu_music/core/models/search_category.dart';
+import 'package:panghu_music/core/models/search_response.dart';
+import 'package:panghu_music/core/sdk/catalog/kw_catalog.dart';
+import 'package:panghu_music/core/sdk/catalog/tx_catalog.dart';
+import 'package:panghu_music/core/sdk/catalog/wy_catalog.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/search/search_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

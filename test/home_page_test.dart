@@ -5,20 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:muyin_music/core/api/music_api.dart';
-import 'package:muyin_music/core/models/enums.dart';
-import 'package:muyin_music/core/models/leaderboard_info.dart';
-import 'package:muyin_music/core/models/music_info.dart';
-import 'package:muyin_music/core/models/playlist_info.dart';
-import 'package:muyin_music/core/models/search_response.dart';
-import 'package:muyin_music/core/storage/settings_store.dart';
-import 'package:muyin_music/features/downloads/download_history_entry.dart';
-import 'package:muyin_music/features/home/home_page.dart';
-import 'package:muyin_music/features/home/recent_plays_store.dart';
-import 'package:muyin_music/features/home/widgets/home_search_capsule.dart';
-import 'package:muyin_music/features/player/player_audio_handler.dart';
-import 'package:muyin_music/features/songs/songs_toolbar_state.dart';
-import 'package:muyin_music/router.dart';
+import 'package:panghu_music/core/api/music_api.dart';
+import 'package:panghu_music/core/models/enums.dart';
+import 'package:panghu_music/core/models/leaderboard_info.dart';
+import 'package:panghu_music/core/models/music_info.dart';
+import 'package:panghu_music/core/models/playlist_info.dart';
+import 'package:panghu_music/core/models/search_response.dart';
+import 'package:panghu_music/core/storage/settings_store.dart';
+import 'package:panghu_music/features/downloads/download_history_entry.dart';
+import 'package:panghu_music/features/home/home_page.dart';
+import 'package:panghu_music/features/home/recent_plays_store.dart';
+import 'package:panghu_music/features/home/widgets/home_search_capsule.dart';
+import 'package:panghu_music/features/player/player_audio_handler.dart';
+import 'package:panghu_music/features/songs/songs_toolbar_state.dart';
+import 'package:panghu_music/router.dart';
 
 import 'helpers/prism_test_environment.dart';
 

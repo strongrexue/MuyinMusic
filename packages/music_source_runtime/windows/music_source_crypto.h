@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace muyin {
+namespace panghu {
 namespace ms_crypto {
 
 std::vector<uint8_t> Base64Decode(const std::string& text);
@@ -25,6 +25,6 @@ std::string RsaEncryptBase64(const std::string& data_base64,
                              const std::string& padding);
 
 }  // namespace ms_crypto
-}  // namespace muyin
+}  // namespace panghu
 
 #endif  // MUSIC_SOURCE_CRYPTO_H_
