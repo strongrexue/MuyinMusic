@@ -380,6 +380,40 @@ void main() {
     expect(player.isPlaying, isFalse);
   });
 
+  test('duck lowers the volume and duck end restores it', () async {
+    final player = _FakeBassPlayer()..isPlaying = true;
+    final handler = PlayerAudioHandler(player: player);
+    addTearDown(handler.disposeHandler);
+
+    await handler.setUserVolume(0.8);
+    await handler.handleAudioInterruption(
+      AudioInterruptionEvent(true, AudioInterruptionType.duck),
+    );
+    expect(player.volumes.last, closeTo(0.16, 1e-9));
+    await handler.handleAudioInterruption(
+      AudioInterruptionEvent(false, AudioInterruptionType.duck),
+    );
+    expect(player.volumes.last, 0.8);
+  });
+
+  test('track change clears a duck whose end event was lost', () async {
+    final player = _FakeBassPlayer()..isPlaying = true;
+    final handler = PlayerAudioHandler(player: player);
+    addTearDown(handler.disposeHandler);
+
+    await handler.handleAudioInterruption(
+      AudioInterruptionEvent(true, AudioInterruptionType.duck),
+    );
+    expect(player.volumes.last, 0.2);
+
+    await handler.beginTrackTransition(
+      item: const MediaItem(id: 'next-track', title: 'Next'),
+    );
+    // The duck clear is fire-and-forget from the publish funnel.
+    await pumpEventQueue();
+    expect(player.volumes.last, 1.0);
+  });
+
   test('pause cancels interruption resume while volume is restoring', () async {
     final player = _FakeBassPlayer()..isPlaying = true;
     final handler = PlayerAudioHandler(player: player);
@@ -422,6 +456,7 @@ class _FakeBassPlayer extends BassPlayer {
   bool isPlaying = false;
   int playCount = 0;
   int pauseCount = 0;
+  final List<double> volumes = [];
   Completer<void>? volumeRestore;
 
   @override
@@ -441,6 +476,7 @@ class _FakeBassPlayer extends BassPlayer {
 
   @override
   Future<void> setVolume(double volume) async {
+    volumes.add(volume);
     if (volume == 1) await volumeRestore?.future;
   }
 

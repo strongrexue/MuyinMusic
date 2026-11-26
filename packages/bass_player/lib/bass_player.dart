@@ -43,6 +43,7 @@ class BassEqualizerConfiguration {
     required this.enabled,
     this.inputGainDb = 0,
     this.outputGainDb = 0,
+    this.standaloneOutputGainDb = 0,
     this.bands = const [],
   }) : assert(bands.length <= 32);
 
@@ -50,17 +51,25 @@ class BassEqualizerConfiguration {
     : enabled = false,
       inputGainDb = 0,
       outputGainDb = 0,
+      standaloneOutputGainDb = 0,
       bands = const [];
 
   final bool enabled;
   final double inputGainDb;
   final double outputGainDb;
+
+  /// Extra output gain in dB that applies even when the equalizer itself is
+  /// disabled. Native sums it with [outputGainDb] (the equalizer's own value
+  /// only counts while [enabled]) at the single output-gain FX node, and
+  /// keeps that node attached while this is non-zero.
+  final double standaloneOutputGainDb;
   final List<BassEqualizerBand> bands;
 
   Map<String, Object> toMap() => {
     'enabled': enabled,
     'inputGainDb': inputGainDb,
     'outputGainDb': outputGainDb,
+    'standaloneOutputGainDb': standaloneOutputGainDb,
     'bands': bands.map((band) => band.toMap()).toList(growable: false),
   };
 }

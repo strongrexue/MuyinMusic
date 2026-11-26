@@ -198,6 +198,9 @@ class PlayerController extends StateNotifier<PlayerState>
       if (previous?.playerVolume != next.playerVolume) {
         unawaited(_applyPlayerVolume(next.playerVolume));
       }
+      if (previous?.outputGainDb != next.outputGainDb) {
+        _scheduleEqualizerApply(_ref.read(equalizerProvider));
+      }
     });
     _ref.listen<EqualizerSettings>(equalizerProvider, (_, next) {
       _scheduleEqualizerApply(next);
@@ -1165,12 +1168,15 @@ class PlayerController extends StateNotifier<PlayerState>
 
   void _scheduleEqualizerApply(EqualizerSettings settings) {
     unawaited(
-      _audioHandler.setEqualizer(settings.toBassConfiguration()).catchError((
-        Object error,
-        StackTrace stackTrace,
-      ) {
-        return AppLogger.write('player-equalizer', 'apply failed: $error');
-      }),
+      _audioHandler
+          .setEqualizer(
+            settings.toBassConfiguration(
+              standaloneOutputGainDb: _ref.read(settingsProvider).outputGainDb,
+            ),
+          )
+          .catchError((Object error, StackTrace stackTrace) {
+            return AppLogger.write('player-equalizer', 'apply failed: $error');
+          }),
     );
   }
 

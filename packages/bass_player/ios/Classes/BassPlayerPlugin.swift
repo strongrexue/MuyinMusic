@@ -711,17 +711,18 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     guard stream != 0 else { return }
 
     let enabled = configuration?["enabled"] as? Bool ?? false
-    if !enabled {
-      detachEqualizer()
-      return
-    }
-
-    let inputGainDb = configuration?["inputGainDb"] as? Double ?? 0
-    let outputGainDb = configuration?["outputGainDb"] as? Double ?? 0
+    // 与 Android 一致：独立输出增益走同一条输出增益级，均衡器关闭时也
+    // 生效并保持链路挂载；均衡器自身的增益与频段只在开启时计入。
+    let standaloneOutputGainDb = min(
+      max(configuration?["standaloneOutputGainDb"] as? Double ?? 0, 0), 24)
+    let inputGainDb = enabled ? configuration?["inputGainDb"] as? Double ?? 0 : 0
+    let outputGainDb = (enabled ? configuration?["outputGainDb"] as? Double ?? 0 : 0)
+      + standaloneOutputGainDb
     let rawBands = configuration?["bands"] as? [[String: Any]] ?? []
-    let bands = rawBands.compactMap(BassPlayerPlugin.parseBand)
+    let parsedBands = rawBands.compactMap(BassPlayerPlugin.parseBand)
       .filter { $0.enabled }
       .prefix(Int(PANGHU_MAX_BIQUAD_BANDS))
+    let bands = enabled ? parsedBands : parsedBands.prefix(0)
 
     if bands.isEmpty && abs(inputGainDb) < 0.001 && abs(outputGainDb) < 0.001 {
       detachEqualizer()

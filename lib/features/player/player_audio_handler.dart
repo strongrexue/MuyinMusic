@@ -177,6 +177,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<BassPlayerException>? _errorSubscription;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSubscription;
   StreamSubscription<void>? _becomingNoisySubscription;
+  StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSubscription;
   Timer? _statsTickTimer;
   Timer? _statsFlushTimer;
   bool _disposed = false;
@@ -196,6 +197,18 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _applyVolume() =>
       _player.setVolume(_ducked ? _userVolume * 0.2 : _userVolume);
+
+  /// Clears a duck whose end event never arrived. The duck-end event is
+  /// known to get lost when the audio route changes mid-duck, which would
+  /// otherwise pin the gain at the ducked level — re-asserted on every
+  /// play() — until some later interruption happens to unduck. Track
+  /// changes and route changes are points where any genuine transient
+  /// duck is over, so they double as the failsafe.
+  Future<void> _clearStuckDuck() async {
+    if (!_ducked) return;
+    _ducked = false;
+    await _applyVolume();
+  }
 
   Duration _loadTimeoutFor(Uri sourceUri) {
     return switch (sourceUri.scheme.toLowerCase()) {
@@ -325,6 +338,9 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     _becomingNoisySubscription ??= session.becomingNoisyEventStream.listen(
       (_) => unawaited(_pausePlayer(reason: 'becoming_noisy')),
+    );
+    _devicesChangedSubscription ??= session.devicesChangedEventStream.listen(
+      (_) => unawaited(_clearStuckDuck()),
     );
   }
 
@@ -593,6 +609,9 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void _publishMediaItem(MediaItem item) {
+    if (item.id != _currentMediaItem?.id) {
+      unawaited(_clearStuckDuck());
+    }
     _currentMediaItem = _withVivoPlaybackMode(item);
     if (_iosNowPlayingSuppressed) return;
     mediaItem.add(_currentMediaItem);
@@ -857,6 +876,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     await _errorSubscription?.cancel();
     await _interruptionSubscription?.cancel();
     await _becomingNoisySubscription?.cancel();
+    await _devicesChangedSubscription?.cancel();
     await _player.dispose();
   }
 

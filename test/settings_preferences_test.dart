@@ -57,23 +57,58 @@ void main() {
     },
   );
 
-  test('legacy single online quality migrates to both wifi and cellular', () async {
-    SharedPreferences.setMockInitialValues({
-      'online_playback_quality': 'flac',
-    });
+  test('output gain defaults to 0 dB, persists, and clamps to 0..12', () async {
     final prefs = await SharedPreferences.getInstance();
     final container = _settingsContainer(prefs);
     addTearDown(container.dispose);
 
-    final settings = container.read(settingsProvider);
-    expect(settings.onlinePlaybackQualityWifi, OnlinePlaybackQuality.lossless);
-    expect(
-      settings.onlinePlaybackQualityCellular,
-      OnlinePlaybackQuality.lossless,
-    );
-    expect(prefs.getString('online_playback_quality_wifi'), 'flac');
-    expect(prefs.getString('online_playback_quality_cellular'), 'flac');
+    expect(container.read(settingsProvider).outputGainDb, 0);
+
+    await container.read(settingsProvider.notifier).setOutputGainDb(4.5);
+    expect(container.read(settingsProvider).outputGainDb, 4.5);
+    expect(prefs.getDouble('output_gain_db'), 4.5);
+
+    await container.read(settingsProvider.notifier).setOutputGainDb(30);
+    expect(container.read(settingsProvider).outputGainDb, 12);
+
+    await container.read(settingsProvider.notifier).setOutputGainDb(-3);
+    expect(container.read(settingsProvider).outputGainDb, 0);
+
+    final restored = _settingsContainer(prefs);
+    addTearDown(restored.dispose);
+    expect(restored.read(settingsProvider).outputGainDb, 0);
   });
+
+  test('normalizeOutputGainDb rejects non-finite values', () {
+    expect(normalizeOutputGainDb(double.nan), 0);
+    expect(normalizeOutputGainDb(double.infinity), 0);
+    expect(normalizeOutputGainDb(6), 6);
+    expect(normalizeOutputGainDb(12), 12);
+  });
+
+  test(
+    'legacy single online quality migrates to both wifi and cellular',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'online_playback_quality': 'flac',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final container = _settingsContainer(prefs);
+      addTearDown(container.dispose);
+
+      final settings = container.read(settingsProvider);
+      expect(
+        settings.onlinePlaybackQualityWifi,
+        OnlinePlaybackQuality.lossless,
+      );
+      expect(
+        settings.onlinePlaybackQualityCellular,
+        OnlinePlaybackQuality.lossless,
+      );
+      expect(prefs.getString('online_playback_quality_wifi'), 'flac');
+      expect(prefs.getString('online_playback_quality_cellular'), 'flac');
+    },
+  );
 
   test('WebDAV appearance restore changes only appearance settings', () async {
     final prefs = await SharedPreferences.getInstance();

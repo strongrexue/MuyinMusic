@@ -91,6 +91,24 @@ void main() {
     expect(native.bands.single.enabled, isTrue);
   });
 
+  test('standalone output gain rides the native configuration', () {
+    const settings = EqualizerSettings(
+      enabled: false,
+      inputGainDb: 0,
+      outputGainDb: 0,
+      bands: [],
+    );
+
+    final plain = settings.toBassConfiguration();
+    expect(plain.standaloneOutputGainDb, 0);
+
+    final boosted = settings.toBassConfiguration(standaloneOutputGainDb: 6);
+    expect(boosted.enabled, isFalse);
+    expect(boosted.outputGainDb, 0);
+    expect(boosted.standaloneOutputGainDb, 6);
+    expect(boosted.toMap()['standaloneOutputGainDb'], 6.0);
+  });
+
   test('reads and writes speq bundles', () {
     const settings = EqualizerSettings(
       enabled: true,

@@ -1061,13 +1061,31 @@ class BassPlayerPlugin :
         previous: EqualizerConfiguration?,
     ) {
         if (stream == 0) return
-        if (!configuration.enabled) {
+        // The standalone output gain rides the same output-gain FX node: it
+        // counts even when the equalizer itself is off and keeps the chain
+        // attached while non-zero. The equalizer's own gains and bands only
+        // count while it is enabled.
+        val inputGainDb = if (configuration.enabled) configuration.inputGainDb else 0.0
+        val outputGainDb = (if (configuration.enabled) configuration.outputGainDb else 0.0) +
+            configuration.standaloneOutputGainDb
+        val enabledBands = if (configuration.enabled) {
+            configuration.bands.filter { it.enabled }
+        } else {
+            emptyList()
+        }
+        if (enabledBands.isEmpty() && inputGainDb == 0.0 && outputGainDb == 0.0) {
             val wasAttached = inputGainFx != 0 || outputGainFx != 0 || bandFx.isNotEmpty()
             detachEqualizer(strict = true)
             if (wasAttached) Log.i(TAG, "Equalizer disabled")
             return
         }
 
+        val previousInputGainDb = previous?.let {
+            if (it.enabled) it.inputGainDb else 0.0
+        }
+        val previousOutputGainDb = previous?.let {
+            (if (it.enabled) it.outputGainDb else 0.0) + it.standaloneOutputGainDb
+        }
         val previousBands = previous
             ?.takeIf { it.enabled }
             ?.bands
@@ -1078,15 +1096,6 @@ class BassPlayerPlugin :
             .mapIndexed { index, band -> band.id to index }
             .toMap()
 
-        val enabledBands = configuration.bands.filter { it.enabled }
-        if (enabledBands.isEmpty() &&
-            configuration.inputGainDb == 0.0 &&
-            configuration.outputGainDb == 0.0
-        ) {
-            detachEqualizer(strict = true)
-            return
-        }
-
         val newChain = inputGainFx == 0
         if (inputGainFx == 0) {
             inputGainFx = BASS.BASS_ChannelSetFX(
@@ -1096,8 +1105,8 @@ class BassPlayerPlugin :
             )
             if (inputGainFx == 0) fail("attach input gain")
         }
-        if (newChain || previous?.inputGainDb != configuration.inputGainDb) {
-            setGain(inputGainFx, configuration.inputGainDb, "input gain")
+        if (newChain || previousInputGainDb != inputGainDb) {
+            setGain(inputGainFx, inputGainDb, "input gain")
         }
 
         val expectedIds = enabledBands.mapTo(mutableSetOf()) { it.id }
@@ -1145,15 +1154,15 @@ class BassPlayerPlugin :
             )
             if (outputGainFx == 0) fail("attach output gain")
         }
-        if (newChain || previous?.outputGainDb != configuration.outputGainDb) {
-            setGain(outputGainFx, configuration.outputGainDb, "output gain")
+        if (newChain || previousOutputGainDb != outputGainDb) {
+            setGain(outputGainFx, outputGainDb, "output gain")
         }
         if (newChain) {
             Log.i(
                 TAG,
                 "Equalizer attached: bands=${enabledBands.size}, " +
-                    "input=${configuration.inputGainDb}dB, " +
-                    "output=${configuration.outputGainDb}dB",
+                    "input=${inputGainDb}dB, " +
+                    "output=${outputGainDb}dB",
             )
         }
     }
@@ -1659,6 +1668,11 @@ class BassPlayerPlugin :
             outputGainDb = finiteNumber(map["outputGainDb"], 0.0, "outputGainDb")
                 .coerceIn(MIN_GAIN_DB, MAX_GAIN_DB),
             bands = bands,
+            standaloneOutputGainDb = finiteNumber(
+                map["standaloneOutputGainDb"],
+                0.0,
+                "standaloneOutputGainDb",
+            ).coerceIn(0.0, MAX_GAIN_DB),
         )
     }
 
@@ -1742,6 +1756,7 @@ class BassPlayerPlugin :
         val inputGainDb: Double,
         val outputGainDb: Double,
         val bands: List<EqualizerBand>,
+        val standaloneOutputGainDb: Double = 0.0,
     ) {
         companion object {
             fun disabled() = EqualizerConfiguration(false, 0.0, 0.0, emptyList())

@@ -21,6 +21,7 @@ import '../../core/storage/settings_store.dart';
 import '../../core/sync/webdav_sync_controller.dart';
 import '../../core/ui/app_toast.dart';
 import '../debug/widgets/log_recording_menu.dart';
+import '../equalizer/widgets/equalizer_controls.dart';
 import '../shell/shell_toolbar_visibility.dart';
 import '../shell/shell_bottom_area.dart';
 import '../shell/widgets/scrolling_page_header.dart';
@@ -297,6 +298,30 @@ class SettingsPage extends ConsumerWidget {
                                 onChanged: (value) => ref
                                     .read(settingsProvider.notifier)
                                     .setAllowMixWithOthers(value),
+                              ),
+                              Padding(
+                                key: const ValueKey('output-gain-setting'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                child: EqualizerValueSlider(
+                                  label: '输出增益',
+                                  valueLabel: equalizerDbLabel(
+                                    settings.outputGainDb,
+                                  ),
+                                  value: settings.outputGainDb,
+                                  min: kOutputGainMinDb,
+                                  max: kOutputGainMaxDb,
+                                  onChanged: (value) => ref
+                                      .read(settingsProvider.notifier)
+                                      .setOutputGainDb(value),
+                                  onReset: settings.outputGainDb > 0
+                                      ? () => ref
+                                            .read(settingsProvider.notifier)
+                                            .setOutputGainDb(0)
+                                      : null,
+                                ),
                               ),
                               if (Platform.isIOS)
                                 SettingsSwitchAction(

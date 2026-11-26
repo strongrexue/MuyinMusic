@@ -249,12 +249,17 @@ class EqualizerSettings {
     );
   }
 
-  BassEqualizerConfiguration toBassConfiguration() {
+  BassEqualizerConfiguration toBassConfiguration({
+    double standaloneOutputGainDb = 0,
+  }) {
     final value = sanitized();
     return BassEqualizerConfiguration(
       enabled: value.enabled,
       inputGainDb: value.inputGainDb,
       outputGainDb: value.outputGainDb,
+      standaloneOutputGainDb: standaloneOutputGainDb.isFinite
+          ? standaloneOutputGainDb
+          : 0,
       bands: value.bands
           .map((band) => band.toBassBand())
           .toList(growable: false),

@@ -84,6 +84,7 @@ const String _kShowMiniLyricsKey = 'show_mini_lyrics';
 const String _kGrooveShiftEnabledKey = 'groove_shift_enabled';
 const String _kAllowMixWithOthersKey = 'allow_mix_with_others';
 const String _kPlayerVolumeKey = 'player_volume';
+const String _kOutputGainDbKey = 'output_gain_db';
 const String _kBluetoothLyricEnabledKey = 'bluetooth_lyric_enabled';
 const String _kBluetoothFullLyricEnabledKey = 'bluetooth_full_lyric_enabled';
 const String _kBluetoothLyricNoticeSeenKey = 'bluetooth_lyric_notice_seen';
@@ -104,6 +105,15 @@ double normalizeLyricFontWeight(double value) =>
 
 double normalizeLyricFontSize(double value) =>
     value.clamp(kLyricFontSizeMin, kLyricFontSizeMax).roundToDouble();
+
+const double kOutputGainMinDb = 0.0;
+const double kOutputGainMaxDb = 12.0;
+
+/// 输出增益只做提升不做衰减：0 dB 等于直通，非有限值一律回到 0。
+double normalizeOutputGainDb(double value) {
+  if (!value.isFinite) return 0;
+  return value.clamp(kOutputGainMinDb, kOutputGainMaxDb);
+}
 
 /// 横屏 KTV 播放页的背景样式：内置动态图，或用户导入的自定义图片。
 /// 上一版的 gradient / cover 两档已经下线，存量值一律按 builtin 读。
@@ -321,6 +331,7 @@ class AppSettings {
     this.iosDynamicIslandEnabled = true,
     required this.allowMixWithOthers,
     this.playerVolume = 1.0,
+    this.outputGainDb = 0.0,
     required this.bluetoothLyricEnabled,
     required this.bluetoothFullLyricEnabled,
     required this.bluetoothLyricNoticeSeen,
@@ -439,6 +450,11 @@ class AppSettings {
   /// dialled in for a quiet Bluetooth path survives restarts.
   final double playerVolume;
 
+  /// Extra output gain in dB (0..[kOutputGainMaxDb]), applied at the BASS FX
+  /// gain stage on top of [playerVolume]. Lets a quiet Bluetooth/car path be
+  /// lifted without touching the 0..1 user volume; 0 is a straight pass.
+  final double outputGainDb;
+
   final bool bluetoothLyricEnabled;
   final bool bluetoothFullLyricEnabled;
   final bool bluetoothLyricNoticeSeen;
@@ -491,6 +507,7 @@ class AppSettings {
     bool? iosDynamicIslandEnabled,
     bool? allowMixWithOthers,
     double? playerVolume,
+    double? outputGainDb,
     bool? bluetoothLyricEnabled,
     bool? bluetoothFullLyricEnabled,
     bool? bluetoothLyricNoticeSeen,
@@ -562,6 +579,7 @@ class AppSettings {
         iosDynamicIslandEnabled ?? this.iosDynamicIslandEnabled,
     allowMixWithOthers: allowMixWithOthers ?? this.allowMixWithOthers,
     playerVolume: playerVolume ?? this.playerVolume,
+    outputGainDb: outputGainDb ?? this.outputGainDb,
     bluetoothLyricEnabled: bluetoothLyricEnabled ?? this.bluetoothLyricEnabled,
     bluetoothFullLyricEnabled:
         bluetoothFullLyricEnabled ?? this.bluetoothFullLyricEnabled,
@@ -746,6 +764,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       playerVolume: (_prefs.getDouble(_kPlayerVolumeKey) ?? 1.0).clamp(
         0.0,
         1.0,
+      ),
+      outputGainDb: normalizeOutputGainDb(
+        _prefs.getDouble(_kOutputGainDbKey) ?? 0,
       ),
       bluetoothLyricEnabled:
           _prefs.getBool(_kBluetoothLyricEnabledKey) ?? false,
@@ -1644,6 +1665,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final volume = value.clamp(0.0, 1.0);
     await _prefs.setDouble(_kPlayerVolumeKey, volume);
     state = state.copyWith(playerVolume: volume);
+  }
+
+  Future<void> setOutputGainDb(double value) async {
+    final gainDb = normalizeOutputGainDb(value);
+    await _prefs.setDouble(_kOutputGainDbKey, gainDb);
+    state = state.copyWith(outputGainDb: gainDb);
   }
 
   Future<void> setBluetoothLyricEnabled(bool value) async {
