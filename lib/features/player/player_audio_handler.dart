@@ -44,6 +44,10 @@ const playerAudioServiceConfig = AudioServiceConfig(
   notificationColor: Color(0xFF006A60),
   artDownscaleWidth: 512,
   artDownscaleHeight: 512,
+  // Preload only the next track's artwork (capped in _loadNextTrackArtwork):
+  // its file must already be cached when the track starts, because some
+  // cars only read artwork at track change.
+  preloadArtwork: true,
 );
 
 /// Upper bound for a single [PlayerAudioHandler.load] attempt.

@@ -2251,7 +2251,10 @@ class PlayerController extends StateNotifier<PlayerState>
   }
 
   Uri? _networkArtworkUri(String? value) {
-    final normalized = CoverImageSource.normalizeUrl(value, size: 500)?.trim();
+    final normalized = CoverImageSource.normalizeUrl(
+      value,
+      size: CoverImageSource.playerCoverSize,
+    )?.trim();
     if (normalized == null || normalized.isEmpty) return null;
     final candidate = normalized.startsWith('//')
         ? 'https:$normalized'

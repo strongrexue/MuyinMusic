@@ -273,7 +273,7 @@ void main() {
     final item = harness.audio.currentMediaItem;
     expect(
       item?.artUri.toString(),
-      'https://p1.music.126.net/test/cover.jpg?param=500y500',
+      'https://p1.music.126.net/test/cover.jpg?param=700y700',
     );
     expect(item?.artHeaders, containsPair('Referer', 'https://music.163.com/'));
     expect(item?.artHeaders, contains('User-Agent'));

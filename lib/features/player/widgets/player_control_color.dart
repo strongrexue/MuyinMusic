@@ -23,7 +23,10 @@ final playerArtworkProvider = Provider<ImageProvider<Object>?>((ref) {
   if (bytes != null && bytes.isNotEmpty) {
     return ResizeImage(MemoryImage(bytes), width: 192, height: 192);
   }
-  final url = CoverImageSource.normalizeUrl(cover.url, size: 700);
+  final url = CoverImageSource.normalizeUrl(
+    cover.url,
+    size: CoverImageSource.playerCoverSize,
+  );
   if (url == null || url.isEmpty) return null;
   return ResizeImage(
     CachedNetworkImageProvider(url, headers: CoverImageSource.headersFor(url)),

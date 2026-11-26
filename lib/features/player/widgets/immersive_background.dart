@@ -71,7 +71,10 @@ class ImmersiveBackground extends ConsumerWidget {
         ),
       ),
     );
-    final coverUrl = CoverImageSource.normalizeUrl(cover.url, size: 700);
+    final coverUrl = CoverImageSource.normalizeUrl(
+      cover.url,
+      size: CoverImageSource.playerCoverSize,
+    );
     final hasCoverArtwork =
         (cover.bytes != null && cover.bytes!.isNotEmpty) ||
         (coverUrl != null && coverUrl.isNotEmpty);

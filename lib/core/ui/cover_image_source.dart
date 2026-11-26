@@ -1,6 +1,11 @@
 class CoverImageSource {
   const CoverImageSource._();
 
+  /// The size the player cover requests. The media session artwork URL
+  /// must be exactly this URL so the session reuses the file the cover
+  /// widget already downloaded, instead of fetching a different size.
+  static const int playerCoverSize = 700;
+
   static String? normalizeUrl(String? raw, {int? size}) {
     if (raw == null) return null;
     var url = raw.trim();

@@ -95,7 +95,7 @@ class _SpinningCoverArtState extends ConsumerState<SpinningCoverArt>
     );
     final normalized = CoverImageSource.normalizeUrl(
       widget.track.coverUrl,
-      size: 700,
+      size: CoverImageSource.playerCoverSize,
     );
     return RepaintBoundary(
       child: RotationTransition(

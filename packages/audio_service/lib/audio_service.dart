@@ -1,6 +1,7 @@
 // ignore_for_file: close_sinks
 
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:isolate';
 import 'dart:ui';
 
@@ -980,6 +981,54 @@ class SharedArtworkLoader {
       _inFlight.remove(key);
     }
   }
+
+  /// Whether a load for [key] is currently in flight.
+  bool isLoading(String key) => _inFlight.containsKey(key);
+}
+
+/// Memo of artwork files already resolved for a track, keyed by track id.
+///
+/// A track's metadata is re-sent on every lyric line. Looking the art file
+/// up here instead of in the cache manager keeps those re-sends off SQLite
+/// and off disk stats entirely.
+class ArtworkFileMemo {
+  final _entries = <String, _ArtworkMemoEntry>{};
+
+  /// Returns the resolved art file for [trackId] when it was resolved for
+  /// exactly [artUri], or null.
+  String? lookup(String trackId, String artUri) {
+    final entry = _entries[trackId];
+    if (entry == null || entry.artUri != artUri) return null;
+    return entry.filePath;
+  }
+
+  /// Records the resolved art file for [trackId] and [artUri].
+  void store(String trackId, String artUri, String filePath) {
+    _entries[trackId] = _ArtworkMemoEntry(artUri, filePath);
+  }
+
+  /// Drops every entry except those for [keepIds] (the current track and
+  /// the next one in the queue). Call when the current track changes.
+  void prune(Set<String> keepIds) {
+    _entries.removeWhere((id, _) => !keepIds.contains(id));
+  }
+}
+
+class _ArtworkMemoEntry {
+  const _ArtworkMemoEntry(this.artUri, this.filePath);
+
+  final String artUri;
+  final String filePath;
+}
+
+/// Whether [current] is a re-send of [previous] whose only change is the
+/// lyric line (carried in title/artist): same track and artwork, with
+/// duration and album untouched.
+bool isLyricOnlyResend(MediaItem previous, MediaItem current) {
+  return previous.id == current.id &&
+      previous.artUri?.toString() == current.artUri?.toString() &&
+      previous.duration == current.duration &&
+      previous.album == current.album;
 }
 
 /// Provides an API to manage the app's [AudioHandler]. An app must call [init]
@@ -1059,39 +1108,102 @@ class AudioService {
 
   static final _sharedArtworkLoader = SharedArtworkLoader();
 
+  /// Artwork files already resolved for a track, keyed by track id.
+  static final _artworkMemo = ArtworkFileMemo();
+
   static Future<void> _observeMediaItem() async {
     MediaItem? latestMediaItem;
-    _handler.mediaItem.listen((mediaItem) async {
-      if (mediaItem == null) {
-        return;
-      }
-      latestMediaItem = mediaItem;
+    MediaItem? lastPublishedMediaItem;
+    // Media item events arrive faster than their cache/download work
+    // finishes (one event per lyric line). Decisions run in arrival order
+    // on this chain so a later line can never overtake an earlier one;
+    // the artwork download itself waits off-chain (see below).
+    Future<void> decisionChain = Future<void>.value();
+    // Platform publishes also land in order on this chain.
+    Future<void> sendChain = Future<void>.value();
+
+    /// Enqueues a platform publish. [guard] is re-checked at publish
+    /// time: a publish for a track that has since been replaced is
+    /// dropped instead of landing after the new track's metadata.
+    void enqueueSend(MediaItem item, Future<void> Function() send) {
+      sendChain = sendChain.then((_) async {
+        if (latestMediaItem == null || latestMediaItem!.id != item.id) {
+          return;
+        }
+        try {
+          await send();
+          lastPublishedMediaItem = item;
+        } catch (e) {
+          _asyncError.add(e);
+        }
+      });
+      // Keep the chain alive after errors.
+      sendChain = sendChain.catchError((Object e) {
+        _asyncError.add(e);
+      });
+    }
+
+    /// Sends [item] to the platform, with the resolved art file attached
+    /// when one is available.
+    Future<void> sendToPlatform(MediaItem item, String? filePath) async {
+      final extras = item.extras;
+      final platformMediaItem = item.copyWith(
+        extras: <String, dynamic>{
+          if (extras != null) ...extras,
+          'artCacheFile': filePath,
+        },
+      );
+      await _platform.setMediaItem(
+          SetMediaItemRequest(mediaItem: platformMediaItem._toMessage()));
+    }
+
+    Future<void> sendRaw(MediaItem item) async {
+      await _platform.setMediaItem(
+          SetMediaItemRequest(mediaItem: item._toMessage()));
+    }
+
+    Future<void> handleMediaItem(MediaItem mediaItem) async {
       final artUri = mediaItem.artUri;
       if (artUri == null || artUri.scheme == 'content') {
-        _platform
-            .setMediaItem(
-                SetMediaItemRequest(mediaItem: mediaItem._toMessage()))
-            .catchError(_asyncError.add);
+        enqueueSend(mediaItem, () => sendRaw(mediaItem));
         return;
-      }
-
-      /// Sends [item] to the platform, with the resolved art file attached
-      /// when one is available.
-      Future<void> sendToPlatform(MediaItem item, String? filePath) async {
-        final extras = item.extras;
-        final platformMediaItem = item.copyWith(
-          extras: <String, dynamic>{
-            if (extras != null) ...extras,
-            'artCacheFile': filePath,
-          },
-        );
-        await _platform.setMediaItem(
-            SetMediaItemRequest(mediaItem: platformMediaItem._toMessage()));
       }
 
       if (artUri.scheme == 'file') {
-        sendToPlatform(mediaItem, artUri.toFilePath())
-            .catchError(_asyncError.add);
+        enqueueSend(mediaItem, () => sendToPlatform(mediaItem, artUri.toFilePath()));
+        return;
+      }
+
+      final url = artUri.toString();
+
+      // Track change: drop memo entries for tracks that are neither the
+      // new current track nor the next one in the queue (preloaded art
+      // for the next track must survive the switch).
+      final previousPublished = lastPublishedMediaItem;
+      if (previousPublished == null || previousPublished.id != mediaItem.id) {
+        _artworkMemo.prune(_memoKeepIds(mediaItem.id));
+      }
+
+      // Lyric fast path: a re-send whose only change is the lyric line
+      // publishes immediately with the art file resolved when the track
+      // first published, without touching the cache manager at all.
+      if (previousPublished != null &&
+          isLyricOnlyResend(previousPublished, mediaItem)) {
+        final memoPath = _artworkMemo.lookup(mediaItem.id, url);
+        if (memoPath != null) {
+          enqueueSend(mediaItem, () => sendToPlatform(mediaItem, memoPath));
+          return;
+        }
+        // Memo miss (art never resolved for this track): fall through to
+        // the cache checks below.
+      }
+
+      // A download for this track's art is already in flight (started by
+      // an earlier event); publish the new line right away. The in-flight
+      // load's completion attaches the art to the freshest metadata, so
+      // this event must wait on neither the caches nor the download.
+      if (_sharedArtworkLoader.isLoading(url)) {
+        enqueueSend(mediaItem, () => sendRaw(mediaItem));
         return;
       }
 
@@ -1099,47 +1211,69 @@ class AudioService {
       // metadata published for a track can carry its artwork. Cars read
       // the artwork once, at track change, and never ask again, so an
       // art-less first publish can mean no cover for the whole track.
-      final url = artUri.toString();
       final memoryInfo = await cacheManager.getFileFromMemory(url);
       var filePath = memoryInfo?.file.path;
       if (filePath == null) {
         final diskInfo = await cacheManager.getFileFromCache(url);
         filePath = diskInfo?.file.path;
       }
-      if (!identical(latestMediaItem, mediaItem)) {
-        // A newer media item superseded this one while the caches were
-        // being checked; its own event runs this same flow.
+      if (latestMediaItem == null || latestMediaItem!.id != mediaItem.id) {
+        // A newer media item for a different track superseded this one
+        // while the caches were being checked; its own event runs this
+        // same flow. Same-track re-sends are never dropped here.
         return;
       }
       if (filePath != null) {
-        sendToPlatform(mediaItem, filePath).catchError(_asyncError.add);
+        _artworkMemo.store(mediaItem.id, url, filePath);
+        enqueueSend(mediaItem, () => sendToPlatform(mediaItem, filePath));
         return;
       }
 
       // We haven't fetched the art yet, so show the metadata now, and
       // again after we load the art. The load is shared per URL, so
       // re-sends of this track (duration, lyrics, playback mode) wait on
-      // the same download instead of invalidating it.
-      try {
-        await _platform.setMediaItem(
-            SetMediaItemRequest(mediaItem: mediaItem._toMessage()));
-      } catch (e) {
-        _asyncError.add(e);
-        return;
-      }
+      // the same download instead of invalidating it. The download waits
+      // off the decision chain, so later lyric lines still flow.
+      enqueueSend(mediaItem, () => sendRaw(mediaItem));
       final loadedFilePath = await _sharedArtworkLoader.load(
           url, () => _loadArtwork(mediaItem));
       if (loadedFilePath == null) {
         return;
       }
+      _artworkMemo.store(mediaItem.id, url, loadedFilePath);
       // Attach the art to the freshest metadata for this track, which may
       // be a re-send newer than the event that started the load.
       final current = latestMediaItem;
       if (current == null || current.artUri?.toString() != url) {
         return;
       }
-      sendToPlatform(current, loadedFilePath).catchError(_asyncError.add);
+      enqueueSend(current, () => sendToPlatform(current, loadedFilePath));
+    }
+
+    _handler.mediaItem.listen((mediaItem) {
+      if (mediaItem == null) {
+        return;
+      }
+      latestMediaItem = mediaItem;
+      decisionChain = decisionChain.then((_) => handleMediaItem(mediaItem));
+      decisionChain = decisionChain.catchError((Object e) {
+        _asyncError.add(e);
+      });
     });
+  }
+
+  /// Track ids whose memo entries survive a track change: the new current
+  /// track and the next track in the queue.
+  static Set<String> _memoKeepIds(String currentTrackId) {
+    final keep = <String>{currentTrackId};
+    final queue = _handler.queue.nvalue;
+    if (queue != null) {
+      final index = queue.indexWhere((item) => item.id == currentTrackId);
+      if (index >= 0 && index + 1 < queue.length) {
+        keep.add(queue[index + 1].id);
+      }
+    }
+    return keep;
   }
 
   static Future<void> _observeAndroidPlaybackInfo() async {
@@ -1157,7 +1291,7 @@ class AudioService {
   static Future<void> _observeQueue() async {
     await for (var queue in _handler.queue) {
       if (_config.preloadArtwork) {
-        _loadAllArtwork(queue);
+        _loadNextTrackArtwork(queue);
       }
       try {
         await _platform.setQueue(SetQueueRequest(
@@ -1278,10 +1412,16 @@ class AudioService {
     await _platform.stopService(const StopServiceRequest());
   }
 
-  static Future<void> _loadAllArtwork(List<MediaItem> queue) async {
-    for (var mediaItem in queue) {
-      await _loadArtwork(mediaItem);
-    }
+  /// Loads the artwork for the track after the current one, so its file
+  /// is already cached when the track starts. Only the next track is
+  /// preloaded; the rest of the queue is left alone.
+  static void _loadNextTrackArtwork(List<MediaItem> queue) {
+    final currentId = _handler.mediaItem.nvalue?.id;
+    if (currentId == null) return;
+    final index = queue.indexWhere((item) => item.id == currentId);
+    if (index < 0 || index + 1 >= queue.length) return;
+    // Fire and forget; the result lands in the memo via _loadArtwork.
+    _loadArtwork(queue[index + 1]);
   }
 
   static Future<String?> _loadArtwork(MediaItem mediaItem) async {
@@ -1289,7 +1429,13 @@ class AudioService {
     // and later media item re-sends check the cache again regardless.
     for (var attempt = 0; attempt < 2; attempt++) {
       final filePath = await _loadArtworkOnce(mediaItem);
-      if (filePath != null) return filePath;
+      if (filePath != null) {
+        final artUri = mediaItem.artUri;
+        if (artUri != null) {
+          _artworkMemo.store(mediaItem.id, artUri.toString(), filePath);
+        }
+        return filePath;
+      }
     }
     return null;
   }
@@ -1310,9 +1456,12 @@ class AudioService {
         }
       }
     } catch (e, st) {
-      // TODO: handle this somehow?
-      // ignore: avoid_print
-      print('Error loading artUri: $e\n$st');
+      developer.log(
+        'Error loading artUri: $e',
+        name: 'audio_service',
+        error: e,
+        stackTrace: st,
+      );
     }
     return null;
   }
