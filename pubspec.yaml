@@ -76,3 +76,4 @@ flutter:
     - assets/platform_icons/qs.png
   shaders:
     - shaders/flowing_light.frag
+    - shaders/sonnet_glitch.frag
