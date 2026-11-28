@@ -23,6 +23,7 @@ const String _kDownloadFileNameFormatKey = 'download_file_name_format';
 const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
 const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
 const String _kPlayerStyleKey = 'player_style';
+const String _kFoliaStyleIdKey = 'folia_style_id';
 const String _kIosDynamicIslandEnabledKey = 'ios_dynamic_island_enabled';
 const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
 const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
@@ -318,6 +319,7 @@ class AppSettings {
     this.downloadGroupByArtist = false,
     this.ktvModeEnabled = false,
     this.playerStyle = PlayerStyle.ktv,
+    this.foliaStyleId = 'sonnet',
     this.ktvBackgroundStyle = KtvBackgroundStyle.builtin,
     this.ktvBackgroundImagePath,
     this.ktvBackgroundItems = const [],
@@ -374,6 +376,10 @@ class AppSettings {
 
   /// 横屏播放样式（KTV / Folia），见 [PlayerStyle]。
   final PlayerStyle playerStyle;
+
+  /// Folia 模式内选中的舞台样式 id（见 FoliaStageRegistry，如
+  /// 'sonnet' 商籁）；未注册的 id 回落到首个已注册样式。
+  final String foliaStyleId;
 
   final KtvBackgroundStyle ktvBackgroundStyle;
 
@@ -505,6 +511,7 @@ class AppSettings {
     bool? downloadGroupByArtist,
     bool? ktvModeEnabled,
     PlayerStyle? playerStyle,
+    String? foliaStyleId,
     KtvBackgroundStyle? ktvBackgroundStyle,
     Object? ktvBackgroundImagePath = _unsetValue,
     List<KtvBackgroundItem>? ktvBackgroundItems,
@@ -560,6 +567,7 @@ class AppSettings {
     downloadGroupByArtist: downloadGroupByArtist ?? this.downloadGroupByArtist,
     ktvModeEnabled: ktvModeEnabled ?? this.ktvModeEnabled,
     playerStyle: playerStyle ?? this.playerStyle,
+    foliaStyleId: foliaStyleId ?? this.foliaStyleId,
     ktvBackgroundStyle: ktvBackgroundStyle ?? this.ktvBackgroundStyle,
     ktvBackgroundImagePath: identical(ktvBackgroundImagePath, _unsetValue)
         ? this.ktvBackgroundImagePath
@@ -710,6 +718,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
           _prefs.getBool(_kDownloadGroupByArtistKey) ?? false,
       ktvModeEnabled: _prefs.getBool(_kKtvModeEnabledKey) ?? false,
       playerStyle: PlayerStyle.fromCode(_prefs.getString(_kPlayerStyleKey)),
+      foliaStyleId: _prefs.getString(_kFoliaStyleIdKey) ?? 'sonnet',
       ktvBackgroundStyle: KtvBackgroundStyle.fromCode(
         _prefs.getString(_kKtvBackgroundStyleKey),
       ),
@@ -885,6 +894,13 @@ class SettingsNotifier extends Notifier<AppSettings> {
       playerStyle: style,
       ktvModeEnabled: style == PlayerStyle.ktv,
     );
+  }
+
+  /// 切换 Folia 模式内的舞台样式（按 id，未注册的 id 由舞台页
+  /// 回落到首个已注册样式）。
+  Future<void> setFoliaStyleId(String id) async {
+    await _prefs.setString(_kFoliaStyleIdKey, id);
+    state = state.copyWith(foliaStyleId: id);
   }
 
   Future<void> setIosDynamicIslandEnabled(bool value) async {

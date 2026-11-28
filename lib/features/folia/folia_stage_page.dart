@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/storage/settings_store.dart';
 import '../player/player_audio_handler.dart';
 import '../player/player_controller.dart';
 import '../player/widgets/immersive_chrome.dart';
@@ -18,9 +19,10 @@ import 'folia_theme.dart';
 /// the lyric layer only.
 ///
 /// The shell owns the [AudioAnalysisService], resolves the per-song
-/// theme from the cover, and hosts the first registered style. With no
-/// style registered yet it shows a plain placeholder. Style selection
-/// arrives with the style phase.
+/// theme from the cover, and hosts the style selected in settings
+/// (falling back to the first registered style). Switching styles
+/// mid-playback cross-fades with a soft transition; the song never
+/// restarts.
 class FoliaStagePage extends ConsumerStatefulWidget {
   const FoliaStagePage({super.key});
 
@@ -68,20 +70,29 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
         text: vm.localWithoutLyrics ? '本地播放 · 未找到歌词' : '暂无歌词',
       );
     }
-    final style = foliaStageRegistry.styles.firstOrNull;
+    final foliaStyleId = ref.watch(
+      settingsProvider.select((s) => s.foliaStyleId),
+    );
+    final style =
+        foliaStageRegistry.byId(foliaStyleId) ??
+        foliaStageRegistry.styles.firstOrNull;
+    final stageContext = FoliaStageContext(
+      lyrics: vm.lyrics,
+      theme: theme,
+      analysis: _analysis.frames,
+      songId: vm.trackId ?? '',
+      positionNow: () => ref.read(playerControllerProvider).position,
+      playingNow: () => ref.read(playerControllerProvider).playing,
+    );
     return Stack(
       fit: StackFit.expand,
       children: [
         if (style != null)
-          style.builder(
-            context,
-            FoliaStageContext(
-              lyrics: vm.lyrics,
-              theme: theme,
-              analysis: _analysis.frames,
-              songId: vm.trackId ?? '',
-              positionNow: () =>
-                  ref.read(playerControllerProvider).position,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: KeyedSubtree(
+              key: ValueKey(style.id),
+              child: style.builder(context, stageContext),
             ),
           )
         else

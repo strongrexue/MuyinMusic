@@ -35,6 +35,7 @@ class FoliaStageContext {
     required this.analysis,
     required this.songId,
     required this.positionNow,
+    required this.playingNow,
   });
 
   final KaraokeLyrics lyrics;
@@ -42,6 +43,11 @@ class FoliaStageContext {
   final Stream<AudioAnalysisFrame> analysis;
   final String songId;
   final Duration Function() positionNow;
+
+  /// Whether playback is running right now. Stages use it to
+  /// freeze their interpolated clock on pause instead of drifting
+  /// forward on the wall clock.
+  final bool Function() playingNow;
 }
 
 /// One registered stage style: an id, the display label shown in the

@@ -15,6 +15,7 @@ import 'core/services/native_log_bridge.dart';
 import 'core/services/storage_browser_service.dart';
 import 'core/debug/debug_paint_guard.dart';
 import 'core/storage/settings_store.dart';
+import 'features/folia/sonnet_style.dart';
 import 'features/player/player_audio_handler.dart';
 import 'features/player/live_activity_service.dart';
 import 'features/player/music_home_widget_service.dart';
@@ -94,6 +95,9 @@ Future<void> _startApp() async {
     }
   }
   container.read(liveActivitySyncProvider);
+  // Folia 舞台样式注册（纯 Dart 注册表，无 IO）：必须在首帧前
+  // 完成，否则 Folia 模式进场时没有可用样式。
+  registerFoliaStyles();
   runApp(
     UncontrolledProviderScope(
       container: container,
