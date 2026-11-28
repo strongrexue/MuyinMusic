@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../core/services/app_logger.dart';
@@ -217,11 +218,14 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
   }
 
   int _lastTimingSampleWallMs = 0;
+  bool _renderProbePending = false;
 
   void _maybeLogTimingSample(
     FoliaShot shot,
     _ShotLayout layout,
     int nowMs,
+    _CameraEvaluation frame,
+    SonnetTransitionFrame transition,
   ) {
     if (!kSonnetTimingDiagnostics) return;
     final wall = DateTime.now().millisecondsSinceEpoch;
@@ -245,13 +249,130 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       );
       if (glyph.alpha > 0) visible++;
     }
+    // Camera + beat + transition state on the same line: a NaN
+    // beatImpact would poison the camera matrix (sonnetBeatZoom),
+    // and a zero transition alpha would hide the whole stage
+    // (words and MG alike). Matrix storage is column-major:
+    // [m00, m01, m10, m11, tx, ty].
+    final impact = _latestAnalysis?.beatImpact;
+    final storage = frame.matrix.storage;
     _logTiming(
       'raw=${widget.stage.positionNow().inMilliseconds} '
       'now=$nowMs playing=${widget.stage.playingNow()} '
       'shot=${shot.startMs}-${shot.endMs} kind=${shot.kind} '
       'words=$visible/${layout.placements.length} '
-      'firstWord=$firstWordStart lastWord=$lastWordStart',
+      'firstWord=$firstWordStart lastWord=$lastWordStart '
+      'beat=${impact?.toStringAsFixed(3) ?? 'null'} '
+      'beatNaN=${impact?.isNaN ?? false} '
+      'cam=[${storage[0].toStringAsFixed(2)},'
+      '${storage[4].toStringAsFixed(2)},'
+      '${storage[1].toStringAsFixed(2)},'
+      '${storage[5].toStringAsFixed(2)},'
+      '${storage[12].toStringAsFixed(1)},'
+      '${storage[13].toStringAsFixed(1)}] '
+      'camFinite=${storage.every((v) => v.isFinite)} '
+      'trA=${transition.alpha.toStringAsFixed(2)} '
+      'trBlur=${transition.blur.toStringAsFixed(1)} '
+      'trGlitch=${transition.glitch.toStringAsFixed(2)}',
     );
+    // Render-tree snapshot, read after layout in a post-frame
+    // callback (never during build: sizes/offsets are not
+    // trustworthy until layout has run). At most one pending.
+    if (!_renderProbePending) {
+      _renderProbePending = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _renderProbePending = false;
+        if (mounted && kSonnetTimingDiagnostics) {
+          _logRenderProbe(shot, nowMs);
+        }
+      });
+    }
+  }
+
+  /// Post-frame render-tree snapshot (temporary diagnostic): walks
+  /// the stage's render tree after layout and reports every
+  /// RenderParagraph — its text, laid-out size, attached state,
+  /// global position, painted alpha and whether its global rect
+  /// intersects the stage — so an on-device capture can tell
+  /// "words not in the tree" (no paragraphs for the shot's words)
+  /// from "in the tree but not painted" (paragraphs present but
+  /// zero-size / unattached / zero alpha) from "painted but
+  /// off-screen" (paragraphs present with sane alpha but a global
+  /// rect outside the stage). Wrapped in try/catch: diagnostics
+  /// must never break the stage.
+  void _logRenderProbe(FoliaShot shot, int nowMs) {
+    try {
+      final root = context.findRenderObject();
+      if (root is! RenderBox || !root.hasSize) {
+        _logTiming('render unavailable root=$root');
+        return;
+      }
+      final stageOffset = MatrixUtils.transformPoint(
+        root.getTransformTo(null),
+        Offset.zero,
+      );
+      final stageRect = Rect.fromLTWH(
+        stageOffset.dx,
+        stageOffset.dy,
+        root.size.width,
+        root.size.height,
+      );
+      final tokens = <String>[];
+      void visit(RenderObject child) {
+        if (child is RenderParagraph) {
+          final text = child.text.toPlainText().replaceAll('\n', '');
+          final size = child.hasSize ? child.size : Size.zero;
+          var global = Offset.zero;
+          var onScreen = false;
+          if (child.attached) {
+            global = MatrixUtils.transformPoint(
+              child.getTransformTo(null),
+              Offset.zero,
+            );
+            onScreen = Rect.fromLTWH(
+              global.dx,
+              global.dy,
+              size.width,
+              size.height,
+            ).overlaps(stageRect);
+          }
+          tokens.add(
+            '$text:${size.width.toStringAsFixed(0)}x'
+            '${size.height.toStringAsFixed(0)}@'
+            '${global.dx.toStringAsFixed(0)},'
+            '${global.dy.toStringAsFixed(0)} '
+            'a=${_paragraphAlpha(child).toStringAsFixed(2)} '
+            'att=${child.attached ? 1 : 0} on=${onScreen ? 1 : 0}',
+          );
+        }
+        child.visitChildren(visit);
+      }
+
+      root.visitChildren(visit);
+      final capped = tokens.length > 24 ? tokens.sublist(0, 24) : tokens;
+      _logTiming(
+        'render shot=${shot.startMs}-${shot.endMs} now=$nowMs '
+        'stage=${root.size.width.toStringAsFixed(0)}x'
+        '${root.size.height.toStringAsFixed(0)}@'
+        '${stageOffset.dx.toStringAsFixed(0)},'
+        '${stageOffset.dy.toStringAsFixed(0)} '
+        'paragraphs=${tokens.length} [${capped.join(' | ')}]',
+      );
+    } catch (e) {
+      _logTiming('render probe failed: $e');
+    }
+  }
+
+  /// Effective painted alpha of a paragraph: the core word Text
+  /// carries it in its style color; ghost/CA copies in their
+  /// foreground paint. -1 when neither is set.
+  double _paragraphAlpha(RenderParagraph paragraph) {
+    final style = paragraph.text.style;
+    final color = style?.color;
+    if (color != null) return color.a;
+    final foreground = style?.foreground;
+    if (foreground != null) return foreground.color.a;
+    return -1;
   }
 
   @override
@@ -353,7 +474,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         final layout = _layoutFor(shot, size);
         final frame = _cameraFrame(shot, layout, nowMs, size);
         final transition = _transitionFrame(shot, nowMs);
-        _maybeLogTimingSample(shot, layout, nowMs);
+        _maybeLogTimingSample(shot, layout, nowMs, frame, transition);
         const mg = SonnetMgSettings.blueprintDefaults;
         Widget content = Transform(
           transform: frame.matrix,
