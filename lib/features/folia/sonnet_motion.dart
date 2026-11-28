@@ -522,6 +522,65 @@ SonnetGlyphFrame resolveSonnetGlyphFrame({
 /// (sonnetTextViewBuilder.ts).
 double sonnetGlowBlur(double fontSize) => math.max(12, fontSize * 0.18);
 
+/// Elastic-out easing for the frame-decor corner ornaments
+/// (sonnetMotion.ts easeSonnetElasticOut, p = 0.3).
+double sonnetElasticOut(double value) =>
+    math.pow(2, -10 * value) *
+            math.sin((value - 0.3 / 4) * (2 * math.pi) / 0.3) +
+        1;
+
+/// Glyph motion window: min(1.8, max(0.65, shotDuration × 0.42)),
+/// capped at shotDuration × 0.72
+/// (sonnetGlyphLayout.ts resolveSonnetGlyphMotionDuration).
+/// The frame decor grows over 1.25× this window.
+double sonnetGlyphMotionDurationSeconds(double shotDurationSeconds) {
+  final preferred = math.min(
+    1.8,
+    math.max(0.65, shotDurationSeconds * 0.42),
+  );
+  return math.min(preferred, shotDurationSeconds * 0.72);
+}
+
+/// Deterministic seeds (visualizerSeedHash.ts, shared by every
+/// Folia visualizer): FNV-1a string hash, salt mixing, per-element
+/// 0..1 jitter, and a mulberry32 stream. All seek-safe: the same
+/// song always produces the same frame.
+int sonnetSeedHash(String value) {
+  var hash = 2166136261;
+  for (var i = 0; i < value.length; i++) {
+    hash ^= value.codeUnitAt(i);
+    hash = (hash * 16777619) & 0xFFFFFFFF;
+  }
+  return hash;
+}
+
+/// Mixes a numeric seed with a salt so different sub-systems (layout
+/// variants, HUD, fixed geo, decor, per-particle jitter) stay
+/// decorrelated (visualizerSeedHash.ts mixVisualizerSeed).
+int sonnetMixSeed(int seed, int salt) =>
+    (((seed ^ salt) & 0xFFFFFFFF) * 2654435761) & 0xFFFFFFFF;
+
+/// Deterministic 0..1 jitter for element [index]
+/// (visualizerSeedHash.ts visualizerHash01).
+double sonnetHash01(int seed, int index, int salt) =>
+    sonnetMixSeed(seed + (index + 1) * 97, salt) / 4294967296;
+
+/// Mulberry32 stream seeded by [seed] (visualizerSeedHash.ts
+/// createVisualizerRng). The blueprint's guides use Math.random();
+/// the port seeds the same shapes deterministically so seeks and
+/// replays keep the same guides.
+double Function() sonnetMulberry32(int seed) {
+  var state = seed & 0xFFFFFFFF;
+  return () {
+    state = (state + 0x6D2B79F5) & 0xFFFFFFFF;
+    var t = state;
+    t = ((t ^ (t >> 15)) * (1 | t)) & 0xFFFFFFFF;
+    t = (t + ((t ^ (t >> 7)) * (61 | t))) & 0xFFFFFFFF;
+    t ^= t >> 14;
+    return (t & 0xFFFFFFFF) / 4294967296;
+  };
+}
+
 /// Chromatic aberration copy tints (sonnetTextViewBuilder.ts):
 /// cyan 0x00ffff, red 0xff0044, alpha 0.8 for the hero, 0.5 else.
 const int kSonnetCaCyan = 0xFF00FFFF;
@@ -538,9 +597,10 @@ const List<double> kSonnetGhostAlphas = [0.3, 0.16];
 enum SonnetTransitionKind { fastBlur, monoGlitch, cameraPull }
 
 /// One transition frame: alpha / blur / glitch amounts
-/// (sonnetTransitions.ts). v1 only renders [cameraPull] (pure
-/// alpha fade — no filter, no saveLayer); fast-blur and mono-glitch
-/// resolve here so the timing is right when their rendering lands.
+/// (sonnetTransitions.ts). All three kinds render: fast-blur
+/// through an ImageFilter blur, mono-glitch through the
+/// sonnet_glitch fragment shader (Impeller only), camera-pull as a
+/// pure alpha fade.
 class SonnetTransitionFrame {
   const SonnetTransitionFrame({
     required this.alpha,
