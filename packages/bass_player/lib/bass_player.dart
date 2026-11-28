@@ -141,6 +141,17 @@ class BassPlaybackSnapshot {
   }
 }
 
+/// One FFT snapshot of the audible output channel: [fft] holds the
+/// linear magnitudes of the FFT1024 bins (512 values), [sampleRateHz]
+/// is the channel's sample rate so callers can map bins to frequencies.
+@immutable
+class BassFftData {
+  const BassFftData({required this.fft, required this.sampleRateHz});
+
+  final List<double> fft;
+  final int sampleRateHz;
+}
+
 class BassPlayerException implements Exception {
   const BassPlayerException({
     required this.code,
@@ -398,6 +409,29 @@ class BassPlayer {
   Future<void> setVolume(double volume) async {
     if (_initialization == null) return;
     await _invokeMap('setVolume', {'volume': volume.clamp(0.0, 1.0)});
+  }
+
+  /// One FFT snapshot from the audible output channel, or null when no
+  /// stream is playing, the backend has no FFT support (Windows), or
+  /// the plugin is missing. Never throws: callers poll this on a timer.
+  Future<BassFftData?> getFft() async {
+    if (_initialization == null || _disposed) return null;
+    try {
+      final raw = await _invokeMap('getFft');
+      if (raw['available'] != true) return null;
+      final fft = raw['fft'];
+      if (fft is! List || fft.isEmpty) return null;
+      final freq = raw['freq'];
+      return BassFftData(
+        fft: fft.map((value) => (value as num).toDouble()).toList(),
+        sampleRateHz: freq is num ? freq.toInt() : 44100,
+      );
+    } on BassPlayerException {
+      return null;
+    } on UnimplementedError {
+      // The Windows backend throws for methods it does not implement.
+      return null;
+    }
   }
 
   Future<void> setEqualizer(BassEqualizerConfiguration configuration) async {

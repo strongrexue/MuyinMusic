@@ -119,6 +119,12 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   private var tickTimer: DispatchSourceTimer?
   private let audioSessionQueue = DispatchQueue(label: "com.panghu.panghumusic.bass.session")
 
+  /// FFT snapshot cache, engine queue only. Callers poll at ~12Hz; a
+  /// repeat within 50ms returns the cached snapshot instead of asking
+  /// BASS again.
+  private var lastFftAtMs: Double = 0
+  private var lastFft: [String: Any]?
+
   // MARK: - 通道回调
 
   /// 注意：不要把这个方法命名成 `handle(_:result:)`。
@@ -211,6 +217,12 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         } catch {
           DispatchQueue.main.async { result(BassPlayerPlugin.flutterError(error)) }
         }
+      }
+
+    case "getFft":
+      engineQueue.async {
+        let value = self.fftSnapshot()
+        DispatchQueue.main.async { result(value) }
       }
 
     case "setEqualizer":
@@ -697,6 +709,30 @@ public final class BassPlayerPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       }
     }
     return snapshot()
+  }
+
+  /// One FFT1024 snapshot of the audible output channel: 512 linear
+  /// magnitudes plus the channel sample rate, or `available: false`
+  /// when no stream is playing. Engine queue only.
+  private func fftSnapshot() -> [String: Any] {
+    guard stream != 0 else { return ["available": false] }
+    let now = Date().timeIntervalSince1970 * 1000
+    if let cached = lastFft, now - lastFftAtMs < 50 { return cached }
+    var info = BASS_CHANNELINFO()
+    let freq = BASS_ChannelGetInfo(stream, &info) != 0 ? Int(info.freq) : 44100
+    var fft = [Float](repeating: 0, count: 512)
+    let count = fft.withUnsafeMutableBufferPointer { buffer in
+      BASS_ChannelGetData(stream, buffer.baseAddress, UInt32(BASS_DATA_FFT1024))
+    }
+    guard count != 0, count != UInt32.max else { return ["available": false] }
+    let result: [String: Any] = [
+      "available": true,
+      "freq": freq,
+      "fft": fft.map { Double($0) },
+    ]
+    lastFft = result
+    lastFftAtMs = now
+    return result
   }
 
   // MARK: - 均衡器

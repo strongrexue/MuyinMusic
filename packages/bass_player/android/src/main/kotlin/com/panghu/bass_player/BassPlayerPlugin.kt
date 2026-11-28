@@ -23,6 +23,8 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.ln
@@ -272,6 +274,7 @@ class BassPlayerPlugin :
                 val volume = call.argument<Number>("volume")?.toFloat() ?: 1f
                 postResult(result) { setVolume(volume) }
             }
+            "getFft" -> postResult(result) { getFft() }
             "setEqualizer" -> postResult(result) {
                 setEqualizer(readEqualizerConfiguration(call.arguments))
             }
@@ -961,6 +964,39 @@ class BassPlayerPlugin :
                 releaseWakeLock()
             }
         }
+    }
+
+    // FFT scratch state, engine thread only. Callers poll at ~12Hz; a
+    // repeat within 50ms returns the cached snapshot instead of asking
+    // BASS again.
+    private var lastFftAtMs = 0L
+    private var lastFft: Map<String, Any?>? = null
+    private val fftBuffer: ByteBuffer =
+        ByteBuffer.allocateDirect(2048).order(ByteOrder.nativeOrder())
+
+    /// One FFT1024 snapshot of the audible output channel: 512 linear
+    /// magnitudes plus the channel sample rate, or `available: false`
+    /// when no stream is playing. The buffer is reused, never allocated.
+    private fun getFft(): Map<String, Any?> {
+        if (stream == 0) return mapOf("available" to false)
+        val now = SystemClock.elapsedRealtime()
+        val cached = lastFft
+        if (cached != null && now - lastFftAtMs < 50) return cached
+        val info = BASS.BASS_CHANNELINFO()
+        val freq = if (BASS.BASS_ChannelGetInfo(stream, info)) info.freq else 44100
+        fftBuffer.clear()
+        val count = BASS.BASS_ChannelGetData(stream, fftBuffer, BASS.BASS_DATA_FFT1024)
+        if (count <= 0) return mapOf("available" to false)
+        val floats = FloatArray(512)
+        fftBuffer.asFloatBuffer().get(floats)
+        val result: Map<String, Any?> = mapOf(
+            "available" to true,
+            "freq" to freq,
+            "fft" to floats.toList(),
+        )
+        lastFft = result
+        lastFftAtMs = now
+        return result
     }
 
     private fun snapshot(): Map<String, Any?> {
