@@ -906,6 +906,37 @@ void main() {
     expect(panel, findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  test('player style defaults to KTV and stays in sync with the KTV switch',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final container = _settingsContainer(prefs);
+    addTearDown(container.dispose);
+
+    expect(container.read(settingsProvider).playerStyle, PlayerStyle.ktv);
+    expect(container.read(settingsProvider).ktvModeEnabled, isFalse);
+
+    await container.read(settingsProvider.notifier).setPlayerStyle(
+      PlayerStyle.folia,
+    );
+    expect(container.read(settingsProvider).playerStyle, PlayerStyle.folia);
+    expect(container.read(settingsProvider).ktvModeEnabled, isFalse);
+    expect(prefs.getString('player_style'), 'folia');
+
+    await container.read(settingsProvider.notifier).setPlayerStyle(
+      PlayerStyle.ktv,
+    );
+    expect(container.read(settingsProvider).playerStyle, PlayerStyle.ktv);
+    expect(container.read(settingsProvider).ktvModeEnabled, isTrue);
+
+    await container.read(settingsProvider.notifier).setKtvModeEnabled(false);
+    expect(container.read(settingsProvider).ktvModeEnabled, isFalse);
+    expect(container.read(settingsProvider).playerStyle, PlayerStyle.ktv);
+
+    final restored = _settingsContainer(prefs);
+    addTearDown(restored.dispose);
+    expect(restored.read(settingsProvider).playerStyle, PlayerStyle.ktv);
+  });
 }
 
 ProviderContainer _settingsContainer(SharedPreferences prefs) {
