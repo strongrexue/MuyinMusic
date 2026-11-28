@@ -13,6 +13,21 @@ import 'sonnet_layout.dart';
 import 'sonnet_mg.dart';
 import 'sonnet_motion.dart';
 
+/// Temporary timing diagnostic for the 2026-11-28 second-round
+/// blank/flash report （偏偏喜欢你： lines blank ~5s, flash ~1s).
+/// Flip to true for ONE diagnostic build, reproduce, capture logcat
+/// filtered on `[sonnet-timing]`, then flip back to false. Default
+/// off: no logging in normal builds. It logs (a) the lyrics object
+/// the stage actually received (line/word timings) at compile time,
+/// (b) a 1Hz sample of raw vs effective clock, active shot and how
+/// many of its words are visible, and (c) backward-jump decisions.
+/// (a) vs (b) decides data problem vs clock problem: spread word
+/// timings + a smoothly advancing clock with 0 visible words
+/// mid-line would be a stage bug; bunched word timings would be a
+/// lyrics-data problem; a frozen/jumping clock would be a
+/// position-source problem.
+const bool kSonnetTimingDiagnostics = false;
+
 /// Sonnet (商籁) stage: the deterministic Japanese MG lyric-PV
 /// director, ported from the Folia blueprint
 /// (src/components/visualizer/sonnet). All motion is a pure
@@ -162,6 +177,64 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     _programKey = key;
     _program = _compiler.compile(widget.stage.lyrics, widget.stage.songId);
     _layoutCache.clear();
+    if (kSonnetTimingDiagnostics) _logLyricsFingerprint();
+  }
+
+  void _logLyricsFingerprint() {
+    final lyrics = widget.stage.lyrics;
+    final withTiming =
+        lyrics.lines.where((line) => line.hasWordTiming).length;
+    debugPrint(
+      '[sonnet-timing] lyrics songId=${widget.stage.songId} '
+      'lines=${lyrics.lines.length} withWordTiming=$withTiming',
+    );
+    for (var i = 0; i < lyrics.lines.length && i < 10; i++) {
+      final line = lyrics.lines[i];
+      final wordStarts = line.words.map((w) => w.startMs).join(',');
+      debugPrint(
+        '[sonnet-timing] line $i ${line.startMs}-${line.endMs} '
+        'words=${line.words.length} starts=[$wordStarts] '
+        'text=${line.text}',
+      );
+    }
+  }
+
+  int _lastTimingSampleWallMs = 0;
+
+  void _maybeLogTimingSample(
+    FoliaShot shot,
+    _ShotLayout layout,
+    int nowMs,
+  ) {
+    if (!kSonnetTimingDiagnostics) return;
+    final wall = DateTime.now().millisecondsSinceEpoch;
+    if (wall - _lastTimingSampleWallMs < 1000) return;
+    _lastTimingSampleWallMs = wall;
+    var visible = 0;
+    var firstWordStart = -1;
+    var lastWordStart = -1;
+    for (final placement in layout.placements) {
+      final word = placement.word;
+      if (firstWordStart < 0 || word.startMs < firstWordStart) {
+        firstWordStart = word.startMs;
+      }
+      if (word.startMs > lastWordStart) lastWordStart = word.startMs;
+      final glyph = resolveSonnetGlyphFrame(
+        startMs: word.startMs,
+        settleMs: word.endMs,
+        nowMs: nowMs,
+        isEmphasis: false,
+        shotKind: shot.kind,
+      );
+      if (glyph.alpha > 0) visible++;
+    }
+    debugPrint(
+      '[sonnet-timing] raw=${widget.stage.positionNow().inMilliseconds} '
+      'now=$nowMs playing=${widget.stage.playingNow()} '
+      'shot=${shot.startMs}-${shot.endMs} kind=${shot.kind} '
+      'words=$visible/${layout.placements.length} '
+      'firstWord=$firstWordStart lastWord=$lastWordStart',
+    );
   }
 
   @override
@@ -187,6 +260,12 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         // Large backward jump: hold the clock and wait for
         // confirmation (a real seek) or a jump back up (stale read).
         _pendingBackwardRawMs = raw;
+        if (kSonnetTimingDiagnostics) {
+          debugPrint(
+            '[sonnet-timing] hold backward jump: '
+            'anchor=$_anchorMs raw=$raw',
+          );
+        }
       } else if (raw >= _pendingBackwardRawMs! &&
           raw - _pendingBackwardRawMs! <= _maxBackwardJumpMs) {
         // The position is advancing from the lower value: a real
@@ -194,12 +273,23 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         _anchorMs = raw;
         _anchorWallMs = wall;
         _pendingBackwardRawMs = null;
+        if (kSonnetTimingDiagnostics) {
+          debugPrint('[sonnet-timing] accept backward seek: raw=$raw');
+        }
       } else if (raw > _anchorMs) {
         // The position jumped back up: the candidate was a stale
         // read. Discard it and re-anchor forward.
+        final heldAnchor = _anchorMs;
+        final heldCandidate = _pendingBackwardRawMs;
         _pendingBackwardRawMs = null;
         _anchorMs = raw;
         _anchorWallMs = wall;
+        if (kSonnetTimingDiagnostics) {
+          debugPrint(
+            '[sonnet-timing] discard stale backward candidate: '
+            'anchor=$heldAnchor candidate=$heldCandidate raw=$raw',
+          );
+        }
       } else if (raw < _anchorMs - _maxBackwardJumpMs) {
         // A different large backward jump: replace the candidate.
         _pendingBackwardRawMs = raw;
@@ -249,6 +339,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         final layout = _layoutFor(shot, size);
         final frame = _cameraFrame(shot, layout, nowMs, size);
         final transition = _transitionFrame(shot, nowMs);
+        _maybeLogTimingSample(shot, layout, nowMs);
         const mg = SonnetMgSettings.blueprintDefaults;
         Widget content = Transform(
           transform: frame.matrix,

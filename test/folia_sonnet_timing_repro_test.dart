@@ -342,4 +342,135 @@ void main() {
     visible = await at(99500, lineC);
     expect(visible, contains('情'));
   });
+
+  testWidgets('playing clock enters words progressively in real time',
+      (tester) async {
+    // The branch the manual-step tests never cover: playing=true,
+    // where _effectiveNowMs interpolates from the anchor with the
+    // wall clock between position readings. Drive positionNow from
+    // a real Stopwatch (like the 40ms interpolated ticks on
+    // device) and let real seconds pass between pumps.
+    final stopwatch = Stopwatch()..start();
+    const startMs = 93807; // line B starts here.
+    final stage = FoliaStageContext(
+      lyrics: _realLyrics(),
+      theme: FoliaTheme.fallback,
+      analysis: const Stream.empty(),
+      songId: 'qq-147057',
+      positionNow: () =>
+          Duration(milliseconds: startMs + stopwatch.elapsedMilliseconds),
+      playingNow: () => true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 400,
+            child: SonnetStageWidget(stage: stage),
+          ),
+        ),
+      ),
+    );
+
+    Future<Set<String>> afterReal(
+      Duration delay,
+      List<String> words,
+    ) async {
+      await tester.runAsync(
+        () async => Future.delayed(delay),
+      );
+      await tester.pump();
+      return _visibleWords(tester, words);
+    }
+
+    const lineB = ['为', '何', '你', '一', '点', '都', '不', '记', '起'];
+    const lineC = ['情', '义', '已', '失', '去', '恩', '爱', '都', '失', '去'];
+
+    // ~1.2s into line B: 为 93807 何 94190 你 94607 are in;
+    // 一 starts at 95646 (+1.84s), so not yet.
+    var visible = await afterReal(
+      const Duration(milliseconds: 1200),
+      lineB,
+    );
+    expect(visible, containsAll(['为', '何', '你']));
+    expect(visible, isNot(contains('一')));
+
+    // ~2.7s into line B: middle words accumulated, 起 still waiting.
+    visible = await afterReal(
+      const Duration(milliseconds: 1500),
+      lineB,
+    );
+    expect(visible, containsAll(['为', '何', '你', '一', '点', '都']));
+    expect(visible, isNot(contains('起')));
+
+    // ~4.2s into line B: the whole line is on screen and stays.
+    visible = await afterReal(
+      const Duration(milliseconds: 1500),
+      lineB,
+    );
+    expect(visible, containsAll(lineB));
+
+    // ~5.7s in: line C has started, no blank gap.
+    visible = await afterReal(
+      const Duration(milliseconds: 1500),
+      lineC,
+    );
+    expect(visible, contains('情'));
+  });
+
+  testWidgets('wall interpolation keeps words entering while raw stalls',
+      (tester) async {
+    // Device failure mode: position readings freeze (no new raw
+    // for seconds) while audio keeps playing. With playing=true
+    // the stage clock must keep advancing off the wall clock, so
+    // words keep entering during the stall instead of freezing.
+    var rawMs = 95000; // mid-line B: 为何你 entered, 点 not yet.
+    var playing = true;
+    final stage = FoliaStageContext(
+      lyrics: _realLyrics(),
+      theme: FoliaTheme.fallback,
+      analysis: const Stream.empty(),
+      songId: 'qq-147057',
+      positionNow: () => Duration(milliseconds: rawMs),
+      playingNow: () => playing,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 400,
+            child: SonnetStageWidget(stage: stage),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    const lineB = ['为', '何', '你', '一', '点', '都', '不', '记', '起'];
+
+    // Baseline: only 为何你 visible while raw is frozen at 95000.
+    var visible = _visibleWords(tester, lineB);
+    expect(visible, containsAll(['为', '何', '你']));
+    expect(visible, isNot(contains('点')));
+
+    // Hold raw frozen for 1.6 real seconds: the wall clock carries
+    // the stage to ~96600, so 都 (starts 96378) must appear even
+    // though no new reading arrived.
+    await tester.runAsync(
+      () async => Future.delayed(const Duration(milliseconds: 1600)),
+    );
+    await tester.pump();
+    visible = _visibleWords(tester, lineB);
+    expect(visible, containsAll(['为', '何', '你', '一', '点', '都']));
+    expect(visible, isNot(contains('起')));
+
+    // A fresh reading resumes: the whole line is there.
+    rawMs = 99000;
+    playing = true;
+    await tester.pump();
+    visible = _visibleWords(tester, lineB);
+    expect(visible, containsAll(lineB));
+  });
 }
