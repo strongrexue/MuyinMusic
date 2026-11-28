@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
-import '../player/lyric_parser.dart';
 import 'audio_analysis.dart';
 import 'folia_stage_registry.dart';
 import 'folia_storyboard.dart';
@@ -518,10 +518,10 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         sonnetBeatRotation(impact, _beatIndex);
     final focus = _focusAt(layout, nowMs);
     final matrix = Matrix4.identity()
-      ..translate(focus.x + dx, focus.y + dy)
-      ..scale(zoom)
+      ..translateByDouble(focus.x + dx, focus.y + dy, 0, 1)
+      ..scaleByDouble(zoom, zoom, 1, 1)
       ..rotateZ(rotation)
-      ..translate(-focus.x, -focus.y);
+      ..translateByDouble(-focus.x, -focus.y, 0, 1);
     return _CameraEvaluation(matrix: matrix);
   }
 
@@ -681,12 +681,14 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       child: Transform(
         alignment: Alignment.center,
         transform: Matrix4.identity()
-          ..translate(
+          ..translateByDouble(
             placement.enterX * glyph.offsetFactor,
             placement.enterY * glyph.offsetFactor,
+            0,
+            1,
           )
           ..rotateZ(placement.entryRotation * glyph.offsetFactor)
-          ..scale(glyph.scale),
+          ..scaleByDouble(glyph.scale, glyph.scale, 1, 1),
         child: Stack(children: children),
       ),
     );

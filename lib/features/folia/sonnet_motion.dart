@@ -71,7 +71,7 @@ double sonnetEaseEnter(double value) =>
 /// High-tension PV easing for the per-word entrance
 /// (sonnetMotion.ts easeSonnetExpoOut).
 double sonnetExpoOut(double value) =>
-    value == 1 ? 1 : 1 - math.pow(2, -10 * value);
+    value == 1 ? 1 : (1 - math.pow(2, -10 * value)).toDouble();
 
 /// Per-word entrance progress: ExpoOut over the word's own duration,
 /// floored at 80ms (sonnetMotion.ts resolveSegmentProgress).
