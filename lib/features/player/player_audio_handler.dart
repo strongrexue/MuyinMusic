@@ -202,6 +202,11 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> _applyVolume() =>
       _player.setVolume(_ducked ? _userVolume * 0.2 : _userVolume);
 
+  /// One FFT snapshot from the audible output channel, or null when no
+  /// stream is playing or the backend has no FFT support. Backs the
+  /// folia stage's audio analysis.
+  Future<BassFftData?> getFft() => _player.getFft();
+
   /// Clears a duck whose end event never arrived. The duck-end event is
   /// known to get lost when the audio route changes mid-duck, which would
   /// otherwise pin the gain at the ducked level — re-asserted on every

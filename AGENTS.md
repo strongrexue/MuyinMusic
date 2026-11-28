@@ -69,6 +69,13 @@
 - 不跑模拟器冒烟
 除非明确要求。
 
+### 3.7 Folia 移植：先核对蓝本源码（用户 2026-11-28 定）
+样式/背景/行为/参数/名字以 `~/workspace/folia-sonnet-research` 的
+`src/types/visualizerModes.ts` + 各模式 `entry.tsx` +
+`src/i18n/locales/zh-CN.ts` 注册表为准（只读，禁止运行其中代码），
+不要数截图格子、不要凭记忆设想；不确定的问用户，不要猜。权威清单
+见 `lib/features/folia/folia_stage_registry.dart` 文件头注释。
+
 
 
 

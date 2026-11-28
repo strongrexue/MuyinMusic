@@ -501,6 +501,9 @@ class _MoreMenuItems extends ConsumerWidget {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
     );
+    final playerStyle = ref.watch(
+      settingsProvider.select((s) => s.playerStyle),
+    );
     final cast = ref.watch(castControllerProvider);
     // prism's menu rows have no trailing-text slot; the connection state
     // rides in the subtitle under the label instead.
@@ -523,6 +526,19 @@ class _MoreMenuItems extends ConsumerWidget {
           onPressed: () => ref
               .read(settingsProvider.notifier)
               .setKtvModeEnabled(!ktvModeEnabled),
+        ),
+        prism.PopupMenuItem(
+          label: 'Folia 模式',
+          leading: leading(Icons.auto_awesome_rounded),
+          checked: playerStyle == PlayerStyle.folia,
+          keepsOpen: true,
+          onPressed: () => ref
+              .read(settingsProvider.notifier)
+              .setPlayerStyle(
+                playerStyle == PlayerStyle.folia
+                    ? PlayerStyle.ktv
+                    : PlayerStyle.folia,
+              ),
         ),
         prism.PopupMenuItem(
           label: '定时关闭',

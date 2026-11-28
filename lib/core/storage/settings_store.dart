@@ -22,6 +22,7 @@ const String _kDownloadDirKey = 'download_dir';
 const String _kDownloadFileNameFormatKey = 'download_file_name_format';
 const String _kDownloadGroupByArtistKey = 'download_group_by_artist';
 const String _kKtvModeEnabledKey = 'player_ktv_mode_enabled';
+const String _kPlayerStyleKey = 'player_style';
 const String _kIosDynamicIslandEnabledKey = 'ios_dynamic_island_enabled';
 const String _kKtvBackgroundStyleKey = 'player_ktv_background_style';
 const String _kKtvBackgroundImageKey = 'player_ktv_background_image';
@@ -138,6 +139,22 @@ enum KtvBackgroundStyle {
 
   static KtvBackgroundStyle fromCode(String? code) =>
       code == custom.code ? custom : builtin;
+}
+
+/// 横屏播放样式：KTV 字幕机，或沉浸式歌词舞台（Folia 模式）。
+/// 与 [AppSettings.ktvModeEnabled] 双向同步：切到 Folia 时 KTV 关闭，
+/// 打开 KTV 时样式回到 KTV，两个开关永远不会打架。
+enum PlayerStyle {
+  ktv('ktv', 'KTV'),
+  folia('folia', 'Folia');
+
+  const PlayerStyle(this.code, this.label);
+
+  final String code;
+  final String label;
+
+  static PlayerStyle fromCode(String? code) =>
+      code == folia.code ? folia : ktv;
 }
 
 /// 用户导入的一张 KTV 自定义背景图。图片实体放在应用文档目录的
@@ -300,6 +317,7 @@ class AppSettings {
     this.downloadFileNameFormat = DownloadFileNameFormat.artistTitle,
     this.downloadGroupByArtist = false,
     this.ktvModeEnabled = false,
+    this.playerStyle = PlayerStyle.ktv,
     this.ktvBackgroundStyle = KtvBackgroundStyle.builtin,
     this.ktvBackgroundImagePath,
     this.ktvBackgroundItems = const [],
@@ -353,6 +371,10 @@ class AppSettings {
   final DownloadFileNameFormat downloadFileNameFormat;
   final bool downloadGroupByArtist;
   final bool ktvModeEnabled;
+
+  /// 横屏播放样式（KTV / Folia），见 [PlayerStyle]。
+  final PlayerStyle playerStyle;
+
   final KtvBackgroundStyle ktvBackgroundStyle;
 
   /// 旧版单张自定义 KTV 背景图的本机文件路径，仅用于一次性迁移到
@@ -482,6 +504,7 @@ class AppSettings {
     DownloadFileNameFormat? downloadFileNameFormat,
     bool? downloadGroupByArtist,
     bool? ktvModeEnabled,
+    PlayerStyle? playerStyle,
     KtvBackgroundStyle? ktvBackgroundStyle,
     Object? ktvBackgroundImagePath = _unsetValue,
     List<KtvBackgroundItem>? ktvBackgroundItems,
@@ -536,6 +559,7 @@ class AppSettings {
         downloadFileNameFormat ?? this.downloadFileNameFormat,
     downloadGroupByArtist: downloadGroupByArtist ?? this.downloadGroupByArtist,
     ktvModeEnabled: ktvModeEnabled ?? this.ktvModeEnabled,
+    playerStyle: playerStyle ?? this.playerStyle,
     ktvBackgroundStyle: ktvBackgroundStyle ?? this.ktvBackgroundStyle,
     ktvBackgroundImagePath: identical(ktvBackgroundImagePath, _unsetValue)
         ? this.ktvBackgroundImagePath
@@ -685,6 +709,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       downloadGroupByArtist:
           _prefs.getBool(_kDownloadGroupByArtistKey) ?? false,
       ktvModeEnabled: _prefs.getBool(_kKtvModeEnabledKey) ?? false,
+      playerStyle: PlayerStyle.fromCode(_prefs.getString(_kPlayerStyleKey)),
       ktvBackgroundStyle: KtvBackgroundStyle.fromCode(
         _prefs.getString(_kKtvBackgroundStyleKey),
       ),
@@ -841,7 +866,25 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   Future<void> setKtvModeEnabled(bool value) async {
     await _prefs.setBool(_kKtvModeEnabledKey, value);
-    state = state.copyWith(ktvModeEnabled: value);
+    state = state.copyWith(
+      ktvModeEnabled: value,
+      // 打开 KTV 时样式回到 KTV；关闭 KTV 只关开关，样式保持原值。
+      playerStyle: value ? PlayerStyle.ktv : state.playerStyle,
+    );
+  }
+
+  /// 切换横屏播放样式，并同步 KTV 开关：切到 Folia 时 KTV 关闭，
+  /// 切回 KTV 时 KTV 打开。
+  Future<void> setPlayerStyle(PlayerStyle style) async {
+    await _prefs.setString(_kPlayerStyleKey, style.code);
+    await _prefs.setBool(
+      _kKtvModeEnabledKey,
+      style == PlayerStyle.ktv,
+    );
+    state = state.copyWith(
+      playerStyle: style,
+      ktvModeEnabled: style == PlayerStyle.ktv,
+    );
   }
 
   Future<void> setIosDynamicIslandEnabled(bool value) async {

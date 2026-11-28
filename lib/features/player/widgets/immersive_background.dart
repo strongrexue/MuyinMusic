@@ -47,6 +47,11 @@ class ImmersiveBackground extends ConsumerWidget {
     final ktvModeEnabled = ref.watch(
       settingsProvider.select((s) => s.ktvModeEnabled),
     );
+    // The folia stage is a lyric layer over the same backdrop the KTV
+    // stage uses; entering it must not swap the background underneath.
+    final foliaModeEnabled = ref.watch(
+      settingsProvider.select((s) => s.playerStyle == PlayerStyle.folia),
+    );
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final scheme = Theme.of(context).colorScheme;
@@ -92,7 +97,7 @@ class ImmersiveBackground extends ConsumerWidget {
       fit: StackFit.expand,
       children: [
         ColoredBox(color: baseSurface),
-        if (ktvModeEnabled && isLandscape)
+        if ((ktvModeEnabled || foliaModeEnabled) && isLandscape)
           const KtvBackground()
         else if (showDiscBlurBackdrop)
           _DiscBlurBackdropLayer(

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/settings_store.dart';
 import '../../theme/app_motion.dart';
+import '../folia/folia_stage_page.dart';
 import '../shell/player_transition.dart';
 import 'player_controller.dart';
 import 'widgets/album_cluster.dart';
@@ -116,25 +117,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final showEmpty = ref.watch(
       playerControllerProvider.select((s) => s.track == null && !s.loading),
     );
-    // In landscape KTV the top chrome (title, quality / timer / equalizer)
-    // stays on screen in immersive mode; only the transport bar fades.
-    final ktvChromePinned =
-        ref.watch(
-          settingsProvider.select((settings) => settings.ktvModeEnabled),
-        ) &&
+    // In landscape KTV and Folia mode the top chrome (title, quality /
+    // timer / equalizer) stays on screen in immersive mode; only the
+    // transport bar fades. Both are full-screen stages.
+    final stageChromePinned =
+        (ref.watch(
+              settingsProvider.select((settings) => settings.ktvModeEnabled),
+            ) ||
+            ref.watch(
+              settingsProvider.select(
+                (settings) => settings.playerStyle == PlayerStyle.folia,
+              ),
+            )) &&
         MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
-    // Hide the system bars only while landscape KTV is actually the
+    // Hide the system bars only while a landscape stage is actually the
     // active page; the page stays mounted (inactive) under other routes.
-    _syncKtvSystemUi(ktvChromePinned && widget.active);
+    _syncKtvSystemUi(stageChromePinned && widget.active);
     // The force-landscape lock likewise applies only while this page is
     // the active route.
     final landscapeLocked = ref.watch(landscapeLockProvider);
     _syncOrientationLock(landscapeLocked && widget.active);
-    // Landscape without KTV drops the three-band column: the body
+    // Landscape without a stage drops the three-band column: the body
     // takes the full height and the top chrome floats over it, so the
     // cover and lyrics read as one plane with the chrome on top.
     final landscapeFloating =
-        !ktvChromePinned &&
+        !stageChromePinned &&
         MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
     final topChromeRow = TopChromeRow(
       onOpenEqualizer: () => widget.onDismissRequested('/settings/equalizer'),
@@ -223,7 +230,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   // Landscape KTV stretches full-bleed like mainstream KTV
                   // apps: only the top chrome keeps its safe-area insets,
                   // the body reaches every screen edge.
-                  child: ktvChromePinned
+                  child: stageChromePinned
                       ? Column(
                           key: const ValueKey('player-chrome'),
                           children: [
@@ -415,6 +422,13 @@ class _NowPlayingBodyState extends ConsumerState<_NowPlayingBody> {
       settingsProvider.select((settings) => settings.squareAlbumCoverEnabled),
     );
     final mediaSize = MediaQuery.sizeOf(context);
+    final playerStyle = ref.watch(
+      settingsProvider.select((settings) => settings.playerStyle),
+    );
+    if (playerStyle == PlayerStyle.folia &&
+        mediaSize.width > mediaSize.height) {
+      return const FoliaStagePage(key: ValueKey('player-folia-layout'));
+    }
     if (ktvModeEnabled && mediaSize.width > mediaSize.height) {
       return const KtvPlayerLayout(key: ValueKey('player-ktv-layout'));
     }
