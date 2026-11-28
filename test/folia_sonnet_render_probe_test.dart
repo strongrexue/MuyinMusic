@@ -166,4 +166,84 @@ void main() {
       }
     }
   });
+
+  testWidgets(
+      'mid-shot stage keeps full size under loose constraints (device layout)',
+      (tester) async {
+    var nowMs = 0;
+    final stage = FoliaStageContext(
+      lyrics: _deviceLyrics(),
+      theme: FoliaTheme.fallback,
+      analysis: const Stream.empty(),
+      songId: 'tx-device',
+      positionNow: () => Duration(milliseconds: nowMs),
+      playingNow: () => true,
+    );
+    // Device layout: the stage sits in AnimatedSwitcher's Stack,
+    // which lays it out with loose constraints — unlike the tight
+    // SizedBox the first probe used (which masked this bug). The
+    // stage Stack holds only Positioned children once every word
+    // has started, but the not-yet-started words are
+    // SizedBox.shrink placeholders (non-positioned, 0x0), so a
+    // loose-fit Stack collapses to 0x0 and Clip.hardEdge hides
+    // every word until the last word starts. Viewport set to the
+    // device-like 820x360 so the stage size is exact.
+    tester.view.physicalSize = const Size(820, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 820,
+            height: 360,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [SonnetStageWidget(stage: stage)],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Size stageSize() {
+      final element = tester.element(find.byType(SonnetStageWidget));
+      return (element.findRenderObject() as RenderBox).size;
+    }
+
+    Future<void> at(int ms) async {
+      nowMs = ms;
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    void expectWordsOnStage(List<String> words, int ms) {
+      for (final word in words) {
+        final finder = find.text(word);
+        expect(finder, findsWidgets, reason: '$word missing at $ms');
+        final rect = tester.getRect(finder.first);
+        expect(
+          rect.left >= -1 &&
+              rect.top >= -1 &&
+              rect.right <= 821 &&
+              rect.bottom <= 361,
+          isTrue,
+          reason: '$word rect $rect outside 820x360 stage at $ms',
+        );
+      }
+    }
+
+    // Mid-line 5 (~15.0s): last word starts at 19573, not yet.
+    // The stage must already be full size and the started words
+    // on screen.
+    await at(15000);
+    expect(stageSize(), const Size(820, 360),
+        reason: 'stage collapsed before last word at 15000');
+    expectWordsOnStage(['愁', '绪'], 15000);
+
+    // Mid-line 5 (~18.0s): still before the last word.
+    await at(18000);
+    expect(stageSize(), const Size(820, 360),
+        reason: 'stage collapsed before last word at 18000');
+    expectWordsOnStage(['愁', '绪', '挥', '不', '去', '苦', '闷'], 18000);
+  });
 }

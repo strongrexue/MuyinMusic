@@ -479,6 +479,15 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         Widget content = Transform(
           transform: frame.matrix,
           child: Stack(
+            // Fill the stage even while some words have not started
+            // yet: their placeholders are non-positioned 0x0
+            // SizedBox.shrink widgets, and a loose-fit Stack sizes
+            // itself to its largest non-positioned child — 0x0 —
+            // so Clip.hardEdge hid every word (and the MG layer)
+            // until the last word started and all children became
+            // Positioned. With expand the Stack is always the
+            // full stage size.
+            fit: StackFit.expand,
             children: [
               if (mg.showBackgroundMg)
                 Positioned.fill(
