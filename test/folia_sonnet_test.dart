@@ -28,7 +28,9 @@ void main() {
     test('easeInOut endpoints and symmetry', () {
       expect(sonnetEaseInOut(0), 0);
       expect(sonnetEaseInOut(1), 1);
-      expect(sonnetEaseInOut(0.5), closeTo(0.5, 1e-6));
+      // 12 bisection iterations (the blueprint's count) leave
+      // ~2e-4 of solver error at the midpoint.
+      expect(sonnetEaseInOut(0.5), closeTo(0.5, 1e-3));
       // Monotonic.
       var previous = 0.0;
       for (var i = 1; i <= 10; i++) {
@@ -140,13 +142,12 @@ void main() {
         const SonnetWord(text: '都已', startMs: 3600, endMs: 4200),
         const SonnetWord(text: '过去', startMs: 4200, endMs: 5000),
       ];
-      // Hero is the longest word (怎么了, 3 chars, 0.8s); it leans
-      // late, so the semi-hero must come from before it.
+      // 无论是 and 怎么了 tie at 56.4; the first wins, so the hero
+      // leans early and the semi-hero comes from after it.
       final hero = findSonnetHeroIndex(words);
-      expect(hero, 3);
+      expect(hero, 0);
       final semi = findSonnetSemiHeroIndices(words, hero);
-      expect(semi, isNotEmpty);
-      expect(semi.first, lessThan(hero));
+      expect(semi, [3]);
     });
 
     test('font scales follow the blueprint table', () {
@@ -309,21 +310,19 @@ void main() {
     testWidgets('hero word renders giant at the sung position', (
       tester,
     ) async {
+      // Two short lines in one shot; neither line earns a
+      // semi-hero (fewer than 4 words each), so the counts below
+      // are exact.
       final lyrics = KaraokeLyrics([
-        _line(0, 3200, '无论是后来故事怎么了', [
+        _line(0, 2000, '无论是后来', [
           const KaraokeWordTiming(text: '无论', startMs: 0, endMs: 400),
           const KaraokeWordTiming(text: '是', startMs: 400, endMs: 600),
           const KaraokeWordTiming(text: '后来', startMs: 600, endMs: 1800),
-          const KaraokeWordTiming(text: '故事', startMs: 1800, endMs: 2200),
-          const KaraokeWordTiming(text: '怎么', startMs: 2200, endMs: 2600),
-          const KaraokeWordTiming(text: '了', startMs: 2600, endMs: 2800),
         ]),
-        _line(3200, 6000, '也要让后来人生精彩着', [
-          const KaraokeWordTiming(text: '也要', startMs: 3200, endMs: 3600),
-          const KaraokeWordTiming(text: '让', startMs: 3600, endMs: 3800),
-          const KaraokeWordTiming(text: '后来', startMs: 3800, endMs: 4600),
-          const KaraokeWordTiming(text: '人生', startMs: 4600, endMs: 5000),
-          const KaraokeWordTiming(text: '精彩着', startMs: 5000, endMs: 5800),
+        _line(2400, 3400, '故事怎么了', [
+          const KaraokeWordTiming(text: '故事', startMs: 2400, endMs: 2800),
+          const KaraokeWordTiming(text: '怎么', startMs: 2800, endMs: 3200),
+          const KaraokeWordTiming(text: '了', startMs: 3200, endMs: 3400),
         ]),
       ]);
       final stage = FoliaStageContext(
@@ -346,14 +345,16 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
-      // 后来 is the hero: core text plus two chromatic-aberration
-      // copies. 无论 has started too; 故事 has not.
+      // 后来 is the line's hero: core text plus two
+      // chromatic-aberration copies. 无论 has started too; 故事
+      // has not.
       expect(find.text('后来'), findsNWidgets(3));
       expect(find.text('无论'), findsOneWidget);
       expect(find.text('故事'), findsNothing);
-      // Hero font size: base 400 × 0.052 = 20.8, editorial hero ×4.
+      // Hero font size: base 400 × 0.052 = 20.8, editorial
+      // variant 3 hero ×3.8.
       final hero = tester.widget<Text>(find.text('后来').first);
-      expect(hero.style?.fontSize, closeTo(20.8 * 4.0, 0.5));
+      expect(hero.style?.fontSize, closeTo(20.8 * 3.8, 0.5));
     });
 
     testWidgets('shows nothing before the first word starts', (

@@ -212,34 +212,37 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         words.add(_FlowWord(word: word, lineIndex: li));
       }
     }
-    final wordLikes = [
-      for (var i = 0; i < words.length; i++)
-        if (words[i].word.isWordLike) i,
-    ];
-    final heroIndex = wordLikes.isEmpty
-        ? -1
-        : findSonnetHeroIndex([
-            for (final i in wordLikes) words[i].word,
-          ]).let((local) => wordLikes[local]);
-    // Semi-heroes are picked per line (blueprint); the global hero
-    // is excluded from them.
+    // Heroes are picked per line (sonnetTypographyLayout.ts: each
+    // line gets its own hero); the global hero — the highest score
+    // across the shot — only sets the two-line split point and the
+    // focus phase. Semi-heroes are picked per line too, excluding
+    // that line's hero.
+    final heroIndices = <int>{};
+    var globalHeroIndex = -1;
+    var globalHeroScore = double.negativeInfinity;
     final semiHeroes = <int>{};
+    var flowOffset = 0;
     for (var li = 0; li < lines.length; li++) {
       final lineWords = [
         for (var i = 0; i < words.length; i++)
           if (words[i].lineIndex == li) words[i].word,
       ];
       final localHero = findSonnetHeroIndex(lineWords);
-      final localSemi = findSonnetSemiHeroIndices(lineWords, localHero);
-      var offset = 0;
-      for (var i = 0; i < words.length; i++) {
-        if (words[i].lineIndex == li) break;
-        offset++;
+      final globalHero = flowOffset + localHero;
+      heroIndices.add(globalHero);
+      final score = sonnetHeroScore(lineWords[localHero]);
+      if (score > globalHeroScore) {
+        globalHeroScore = score;
+        globalHeroIndex = globalHero;
       }
-      for (final local in localSemi) {
-        final global = offset + local;
-        if (global != heroIndex) semiHeroes.add(global);
+      for (final local in findSonnetSemiHeroIndices(
+        lineWords,
+        localHero,
+      )) {
+        final global = flowOffset + local;
+        if (global != globalHero) semiHeroes.add(global);
       }
+      flowOffset += lineWords.length;
     }
 
     final scales = sonnetFontScales(shot.kind, editorialVariant: 3);
@@ -255,7 +258,8 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     for (var attempt = 0; attempt < 4; attempt++) {
       placements = _placeWords(
         words: words,
-        heroIndex: heroIndex,
+        heroIndices: heroIndices,
+        splitIndex: globalHeroIndex,
         semiHeroes: semiHeroes,
         scales: scales,
         baseFontSize: baseFontSize * fitScale,
@@ -274,14 +278,15 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       size: size,
       shot: shot,
       placements: placements,
-      heroIndex: heroIndex,
+      heroIndex: globalHeroIndex,
       baseFontSize: baseFontSize * fitScale,
     );
   }
 
   List<_WordPlacement> _placeWords({
     required List<_FlowWord> words,
-    required int heroIndex,
+    required Set<int> heroIndices,
+    required int splitIndex,
     required Set<int> semiHeroes,
     required ({double hero, double support}) scales,
     required double baseFontSize,
@@ -294,7 +299,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     for (var i = 0; i < words.length; i++) {
       final word = words[i].word;
       final flowIndex = i;
-      final role = i == heroIndex
+      final role = heroIndices.contains(i)
           ? SonnetRole.hero
           : semiHeroes.contains(i)
           ? SonnetRole.semiHero
@@ -324,8 +329,8 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     if (measured.isEmpty) return const [];
     // Editorial variant 3: two offset lines, left-to-right in
     // timeline order; line 1 holds words up to and including the
-    // hero, line 2 the rest (sonnetShotFlowLayouts.ts).
-    final split = heroIndex < 0 ? measured.length : heroIndex + 1;
+    // global hero, line 2 the rest (sonnetShotFlowLayouts.ts).
+    final split = splitIndex < 0 ? measured.length : splitIndex + 1;
     final line1 = measured.sublist(0, split);
     final line2 = measured.sublist(split);
     double lineWidth(List<_MeasuredWord> line) =>
@@ -775,8 +780,4 @@ class _ShotLayout {
   final List<_WordPlacement> placements;
   final int heroIndex;
   final double baseFontSize;
-}
-
-extension _Let<T> on T {
-  R let<R>(R Function(T value) f) => f(this);
 }
