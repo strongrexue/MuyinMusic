@@ -96,9 +96,20 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
   // times a second, so between ticks the wall clock carries the
   // time forward; any jump in the controller position (seek or a
   // fresh tick) re-anchors. Pauses freeze the anchor.
+  //
+  // The controller position can also deliver a stale reading that
+  // jumps far backwards (observed on device: the clock falling
+  // back to ~0 for seconds while audio kept playing, which blanked
+  // the lyrics until the next good reading). A large backward jump
+  // is therefore held, not followed: it is only accepted once the
+  // next reading confirms the position is really advancing from
+  // the lower value (a genuine seek). If the next reading jumps
+  // back up, the candidate is discarded as a stale read.
+  static const int _maxBackwardJumpMs = 1500;
   int _anchorMs = 0;
   int _anchorWallMs = 0;
   int _lastRawMs = -1;
+  int? _pendingBackwardRawMs;
 
   // Layout cache, keyed by shot start/end ms. Cleared on recompile.
   final Map<String, _ShotLayout> _layoutCache = {};
@@ -164,9 +175,40 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     final raw = widget.stage.positionNow().inMilliseconds;
     final wall = DateTime.now().millisecondsSinceEpoch;
     if (raw != _lastRawMs) {
-      _anchorMs = raw;
-      _anchorWallMs = wall;
       _lastRawMs = raw;
+      final backwardJump = _anchorMs - raw;
+      if (backwardJump <= _maxBackwardJumpMs) {
+        // Forward tick, small correction, or the first reading:
+        // accept and re-anchor.
+        _anchorMs = raw;
+        _anchorWallMs = wall;
+        _pendingBackwardRawMs = null;
+      } else if (_pendingBackwardRawMs == null) {
+        // Large backward jump: hold the clock and wait for
+        // confirmation (a real seek) or a jump back up (stale read).
+        _pendingBackwardRawMs = raw;
+      } else if (raw >= _pendingBackwardRawMs! &&
+          raw - _pendingBackwardRawMs! <= _maxBackwardJumpMs) {
+        // The position is advancing from the lower value: a real
+        // backward seek. Accept it.
+        _anchorMs = raw;
+        _anchorWallMs = wall;
+        _pendingBackwardRawMs = null;
+      } else if (raw > _anchorMs) {
+        // The position jumped back up: the candidate was a stale
+        // read. Discard it and re-anchor forward.
+        _pendingBackwardRawMs = null;
+        _anchorMs = raw;
+        _anchorWallMs = wall;
+      } else if (raw < _anchorMs - _maxBackwardJumpMs) {
+        // A different large backward jump: replace the candidate.
+        _pendingBackwardRawMs = raw;
+      } else {
+        // Small backward move near the anchor: a correction.
+        _pendingBackwardRawMs = null;
+        _anchorMs = raw;
+        _anchorWallMs = wall;
+      }
     }
     if (!widget.stage.playingNow()) return _anchorMs;
     return _anchorMs + (wall - _anchorWallMs);
