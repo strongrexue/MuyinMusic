@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +9,8 @@ import 'audio_analysis.dart';
 import 'folia_stage_registry.dart';
 import 'folia_storyboard.dart';
 import 'folia_theme.dart';
+import 'sonnet_layout.dart';
+import 'sonnet_mg.dart';
 import 'sonnet_motion.dart';
 
 /// Sonnet (商籁) stage: the deterministic Japanese MG lyric-PV
@@ -24,9 +27,11 @@ import 'sonnet_motion.dart';
 ///   - hero = highest-scoring word-like segment
 ///     (length × 14 + duration × 18), semi-heroes per the
 ///     opposite-side rule (sonnetTypographyRoles.ts)
-///   - editorial-column variant 3 layout: two offset lines,
-///     left-to-right, enterX +30 / -30, hero enterY +15% of the
-///     stage height (sonnetShotFlowLayouts.ts)
+///   - all 5 editorial variants (0 vertical pillar, 1 flush-right
+///     rail, 2 magazine header, 3 double hero lines, 4 logo badge)
+///     plus each of the other 6 shot kinds' own layout
+///     (sonnetTypographyLayout.ts, sonnetShotFlowLayouts.ts,
+///     sonnetPosterBlocksLayout.ts), selected by seed
 ///   - per-glyph entrance: ExpoOut, core alpha 0.16 → 1.0, halo
 ///     1.0 → 0.72, scale 0.86 → 1.0 (0.52 → 1.0 for emphasis in
 ///     type-impact), entry rotation ±0.055 / ±0.035 rad
@@ -41,19 +46,31 @@ import 'sonnet_motion.dart';
 ///     red 0xff0044, alpha 0.8 hero / 0.5 else; semi-hero echo
 ///     ghosts, hollow, spread fontSize × 0.85, alphas 0.3 / 0.16
 ///     (sonnetTextViewBuilder.ts)
+///   - shot-boundary transitions: fast-blur (blur to 14),
+///     mono-glitch (14 coarse + 58 fine slice-tear bands,
+///     sonnetGlitchFilter.ts) and camera-pull, kind per boundary
+///     from the program seed (sonnetTransitions.ts)
+///   - MG decorations, all on by default (entry.tsx
+///     DEFAULT_SONNET_TUNING): guide lines, background HUD + scene
+///     hairlines, shot fixed geometry, giant decorative text,
+///     background decor, text fixed geometry, and the full outer
+///     frame (sonnetTextViewBuilder.ts, sonnetBackgroundMg.ts,
+///     sonnetBackgroundDecor.ts, sonnetFrameOverlay.ts,
+///     sonnetGuides.ts)
 ///
-/// Deliberately v1-scoped (see the report for the full list):
-/// layout is editorial variant 3 for every shot kind; shot
-/// boundaries fade (camera-pull) only — fast-blur / mono-glitch
-/// are not rendered; the 11 folium tunables run at identity; no
-/// MG decorations, guides, or outer frame. The style draws the
-/// lyric layer only, on a transparent background.
+/// Remaining known gaps (deliberately v1-scoped): the 11 folium
+/// tunables run at identity with no tuning UI; beat-impact frame
+/// interpolation is as-is; the 100-variant geometric-chaos layer
+/// (sonnetShotMg.ts) is not rendered; '♪'-only segments do not get
+/// the staff-notation view; the glitch shader renders only on
+/// Impeller and needs on-device verification.
 ///
 /// Performance: no new per-frame saveLayer. Word alpha runs
 /// through the text color, glow through TextStyle shadows, CA and
 /// ghosts are plain positioned texts. Layout is measured once per
 /// shot and cached; per frame only progress/alpha/transforms are
-/// re-evaluated.
+/// re-evaluated. The transition blur/glitch filters only exist
+/// during the 0.14–0.24s boundary windows.
 class SonnetStageWidget extends StatefulWidget {
   const SonnetStageWidget({super.key, required this.stage});
 
@@ -86,10 +103,16 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
   // Layout cache, keyed by shot start/end ms. Cleared on recompile.
   final Map<String, _ShotLayout> _layoutCache = {};
 
+  // Mono-glitch shader (Impeller only). Null until loaded, or on
+  // backends that cannot run it — transitions then fall back to
+  // the alpha component of the mono-glitch frame.
+  ui.FragmentProgram? _glitchProgram;
+
   @override
   void initState() {
     super.initState();
     _compile();
+    _loadGlitchProgram();
     _ticker = createTicker((_) {
       if (mounted) setState(() {});
     });
@@ -98,6 +121,19 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       _latestAnalysis = frame;
       if (frame.beat) _beatIndex++;
     });
+  }
+
+  Future<void> _loadGlitchProgram() async {
+    try {
+      final program = await ui.FragmentProgram.fromAsset(
+        'shaders/sonnet_glitch.frag',
+      );
+      if (mounted) setState(() => _glitchProgram = program);
+    } catch (_) {
+      // Shader unavailable (e.g. GLES backend): mono-glitch falls
+      // back to its alpha component; the other two transitions
+      // are unaffected.
+    }
   }
 
   @override
@@ -170,20 +206,187 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         }
         final layout = _layoutFor(shot, size);
         final frame = _cameraFrame(shot, layout, nowMs, size);
-        final transitionAlpha = _transitionAlpha(shot, nowMs);
-        final content = Transform(
+        final transition = _transitionFrame(shot, nowMs);
+        const mg = SonnetMgSettings.blueprintDefaults;
+        Widget content = Transform(
           transform: frame.matrix,
           child: Stack(
             children: [
+              if (mg.showBackgroundMg)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetBackgroundHudPainter(
+                      variant: sonnetBackgroundHudVariant(layout.shotSeed),
+                      sceneSeed: layout.sceneSeed,
+                      shotSeed: layout.shotSeed,
+                      primary: theme.primary,
+                      accent: theme.accent,
+                      isEditorial: shot.kind == FoliaShotKind.editorial,
+                      isTableauOrReveal:
+                          shot.kind == FoliaShotKind.tableau ||
+                          shot.kind == FoliaShotKind.reveal,
+                    ),
+                  ),
+                ),
+              if (mg.showFixedGeo)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetFixedGeoShotPainter(
+                      variant: sonnetFixedGeoShotVariant(layout.shotSeed),
+                      seed: layout.shotSeed,
+                      radius: math.min(size.width, size.height) * 0.4,
+                      primary: theme.primary,
+                      accent: theme.accent,
+                      isChorus: layout.isChorus,
+                    ),
+                  ),
+                ),
+              if (mg.showBackgroundDecor)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetBackgroundDecorPainter(
+                      variant: sonnetBackgroundDecorVariant(layout.shotSeed),
+                      seed: layout.shotSeed,
+                      particleCount: shot.kind == FoliaShotKind.impact
+                          ? 24
+                          : 12,
+                      primary: theme.primary,
+                      accent: theme.accent,
+                    ),
+                  ),
+                ),
+              if (mg.showGuide)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetGuidePainter(
+                      guides: _guideSpecs(layout, nowMs),
+                      primary: theme.primary,
+                      accent: theme.accent,
+                    ),
+                  ),
+                ),
+              if (mg.showFixedGeo && layout.textFixedGeoSpecs.isNotEmpty)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetTextFixedGeoPainter(
+                      specs: layout.textFixedGeoSpecs,
+                      primary: theme.primary,
+                      accent: theme.accent,
+                    ),
+                  ),
+                ),
+              if (mg.showGiantDecorativeText)
+                for (final decoration in layout.decorations)
+                  _decorationWidget(decoration, layout, nowMs, theme),
+              if (layout.frameDecorSpecs.isNotEmpty)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: SonnetFrameDecorPainter(
+                      specs: _frameDecorSpecs(layout, nowMs),
+                      primary: theme.primary,
+                      accent: theme.accent,
+                    ),
+                  ),
+                ),
               for (final placement in layout.placements)
                 _wordWidget(placement, layout, nowMs, theme),
             ],
           ),
         );
-        if (transitionAlpha >= 1) return content;
-        return Opacity(opacity: transitionAlpha, child: content);
+        if (transition.blur > 0.01) {
+          content = ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: transition.blur,
+              sigmaY: transition.blur,
+            ),
+            child: content,
+          );
+        } else if (transition.glitch > 0.01 &&
+            _glitchProgram != null &&
+            ui.ImageFilter.isShaderFilterSupported) {
+          final shader = _glitchProgram!.fragmentShader();
+          // Uniform layout: vec2 uSize is set by the engine;
+          // float uAmount is slot 2, float uSeed is slot 3.
+          shader.setFloat(2, transition.glitch);
+          shader.setFloat(3, transition.glitchSeed);
+          content = ImageFiltered(
+            imageFilter: ui.ImageFilter.shader(shader),
+            child: content,
+          );
+        }
+        if (transition.alpha < 1) {
+          content = Opacity(opacity: transition.alpha, child: content);
+        }
+        if (!mg.showFrameOverlay) return content;
+        return Stack(
+          children: [
+            content,
+            Positioned.fill(
+              child: CustomPaint(
+                painter: SonnetFrameOverlayPainter(primary: theme.primary),
+              ),
+            ),
+          ],
+        );
       },
     );
+  }
+
+  List<SonnetGuideSpec> _guideSpecs(_ShotLayout layout, int nowMs) {
+    final specs = <SonnetGuideSpec>[];
+    for (final placement in layout.placements) {
+      if (!placement.word.isWordLike) continue;
+      final durationSeconds =
+          (placement.word.endMs - placement.word.startMs) / 1000;
+      final leadMs = (sonnetGuideLeadSeconds(durationSeconds) * 1000)
+          .round();
+      final startMs = placement.word.startMs - leadMs;
+      final progress = (nowMs - startMs) / 650;
+      if (progress <= 0 || progress > 1) continue;
+      specs.add(
+        SonnetGuideSpec(
+          center: Offset(
+            placement.x + placement.width / 2 - layout.size.width / 2,
+            placement.y + placement.height / 2 - layout.size.height / 2,
+          ),
+          enterX: placement.enterX,
+          enterY: placement.enterY,
+          fontSize: placement.fontSize,
+          isHero: placement.role == SonnetRole.hero,
+          seed: layout.shotSeed + placement.flowIndex * 97,
+          progress: progress.clamp(0.0, 1.0),
+          wordStartMs: placement.word.startMs,
+        ),
+      );
+    }
+    return specs;
+  }
+
+  List<SonnetFrameDecorSpec> _frameDecorSpecs(
+    _ShotLayout layout,
+    int nowMs,
+  ) {
+    final shotDurationSeconds =
+        (layout.shot.endMs - layout.shot.startMs) / 1000;
+    final growSeconds =
+        1.25 * sonnetGlyphMotionDurationSeconds(shotDurationSeconds);
+    final firstGlyphStartMs = layout.placements
+        .map((p) => p.word.startMs)
+        .fold(layout.shot.startMs, math.min);
+    final progress = ((nowMs - firstGlyphStartMs) / 1000 / growSeconds)
+        .clamp(0.0, 1.0);
+    return [
+      for (final spec in layout.frameDecorSpecs)
+        SonnetFrameDecorSpec(
+          center: spec.center,
+          width: spec.width,
+          height: spec.height,
+          rotation: spec.rotation,
+          fontSize: spec.fontSize,
+          variant: spec.variant,
+          progress: progress,
+        ),
+    ];
   }
 
   _ShotLayout _layoutFor(FoliaShot shot, Size size) {
@@ -196,6 +399,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
   }
 
   _ShotLayout _computeLayout(FoliaShot shot, Size size) {
+    final program = _program!;
     final lines = [
       for (final index in shot.lineIndices) widget.stage.lyrics.lines[index],
     ];
@@ -244,61 +448,60 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       }
       flowOffset += lineWords.length;
     }
-
-    final scales = sonnetFontScales(shot.kind, editorialVariant: 3);
-    final baseFontSize = size.height * 0.052;
-    final flowGap = (baseFontSize * 0.35).clamp(16, 40).toDouble();
-    final stackGap = math.max(24, flowGap * 1.35);
-
-    // Measure with a global fit loop: shrink all sizes together
-    // until the composition fits 82% of the stage
-    // (sonnetTypographyLayout.ts placeWithGlobalFit).
-    var fitScale = 1.0;
-    List<_WordPlacement> placements = const [];
-    for (var attempt = 0; attempt < 4; attempt++) {
-      placements = _placeWords(
-        words: words,
-        heroIndices: heroIndices,
-        splitIndex: globalHeroIndex,
-        semiHeroes: semiHeroes,
-        scales: scales,
-        baseFontSize: baseFontSize * fitScale,
-        flowGap: flowGap * fitScale,
-        stackGap: stackGap * fitScale,
-        size: size,
-      );
-      final bounds = _boundsOf(placements);
-      final scaleX = (size.width * 0.82) / math.max(1, bounds.width);
-      final scaleY = (size.height * 0.82) / math.max(1, bounds.height);
-      final needed = math.min(scaleX, scaleY);
-      if (needed >= 1) break;
-      fitScale *= needed;
+    // Secondary hero for editorial variant 3: the best remaining
+    // word-like segment, +50 when it is not adjacent to the global
+    // hero (sonnetTypographyLayout.ts).
+    var secondaryHeroIndex = -1;
+    var secondaryHeroScore = double.negativeInfinity;
+    for (var i = 0; i < words.length; i++) {
+      if (i == globalHeroIndex) continue;
+      final word = words[i].word;
+      if (!word.isWordLike || word.visibleLength == 0) continue;
+      final score =
+          sonnetHeroScore(word) +
+          ((i - globalHeroIndex).abs() > 1 ? 50 : 0);
+      if (score > secondaryHeroScore) {
+        secondaryHeroScore = score;
+        secondaryHeroIndex = i;
+      }
     }
-    return _ShotLayout(
-      size: size,
-      shot: shot,
-      placements: placements,
-      heroIndex: globalHeroIndex,
-      baseFontSize: baseFontSize * fitScale,
-    );
-  }
 
-  List<_WordPlacement> _placeWords({
-    required List<_FlowWord> words,
-    required Set<int> heroIndices,
-    required int splitIndex,
-    required Set<int> semiHeroes,
-    required ({double hero, double support}) scales,
-    required double baseFontSize,
-    required double flowGap,
-    required double stackGap,
-    required Size size,
-  }) {
-    // Measure every word at its role size.
+    final layoutVariantSeed = sonnetLayoutVariantSeed([
+      for (final flowWord in words) flowWord.word.text.trim().length,
+    ]);
+    final editorialVariant = shot.kind == FoliaShotKind.editorial
+        ? sonnetEditorialVariant(
+            layoutVariantSeed,
+            words.length,
+            secondaryHeroIndex,
+          )
+        : 0;
+    final scales = sonnetFontScales(
+      shot.kind,
+      editorialVariant: editorialVariant,
+    );
+    final baseFontSize = size.height * 0.052;
+    final paragraphKind = program.paragraphs
+        .where((paragraph) => paragraph.shots.contains(shot))
+        .map((paragraph) => paragraph.kind)
+        .firstOrNull;
+    final isChorus = paragraphKind == FoliaParagraphKind.chorus;
+    final programSeed = sonnetSeedHash(program.songId);
+    final shotSeed = sonnetSeedHash(
+      '${program.songId}:${shot.startMs}',
+    );
+    final posterSeed = sonnetSeedHash(
+      [
+        for (final flowWord in words) flowWord.word.text,
+      ].join('␟'),
+    );
+
+    // Measure every word at its role size; CJK words also get a
+    // vertical-column measurement (glyphs stacked, one glyph wide,
+    // line height fontSize × 0.9) for the vertical layouts.
     final measured = <_MeasuredWord>[];
     for (var i = 0; i < words.length; i++) {
       final word = words[i].word;
-      final flowIndex = i;
       final role = heroIndices.contains(i)
           ? SonnetRole.hero
           : semiHeroes.contains(i)
@@ -314,78 +517,287 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
           ? FontWeight.w700
           : FontWeight.w900;
       final textSize = _measureText(word.text, fontSize, weight);
+      final isCjk = sonnetIsCjk(word.text);
       measured.add(
         _MeasuredWord(
           word: word,
           role: role,
-          flowIndex: flowIndex,
+          flowIndex: i,
           fontSize: fontSize,
           weight: weight,
           width: textSize.width,
           height: textSize.height,
+          verticalWidth: isCjk ? fontSize : null,
+          verticalHeight: isCjk
+              ? word.text.runes.length * fontSize * 0.9
+              : null,
+          verticalFontScale: isCjk ? fontScale : null,
         ),
       );
     }
-    if (measured.isEmpty) return const [];
-    // Editorial variant 3: two offset lines, left-to-right in
-    // timeline order; line 1 holds words up to and including the
-    // global hero, line 2 the rest (sonnetShotFlowLayouts.ts).
-    final split = splitIndex < 0 ? measured.length : splitIndex + 1;
-    final line1 = measured.sublist(0, split);
-    final line2 = measured.sublist(split);
-    double lineWidth(List<_MeasuredWord> line) =>
-        line.fold(0.0, (sum, item) => sum + item.width) +
-        flowGap * math.max(0, line.length - 1);
-    double lineHeight(List<_MeasuredWord> line) => line.fold(
-      0.0,
-      (max, item) => math.max(max, item.height),
-    );
-    final width1 = lineWidth(line1);
-    final width2 = lineWidth(line2);
-    final height1 = lineHeight(line1);
-    final height2 = lineHeight(line2);
-    final totalHeight =
-        height1 + (line2.isEmpty ? 0 : stackGap + height2);
-    var line1Y = -totalHeight / 2 + height1 / 2;
-    var line2Y = line1Y + height1 / 2 + stackGap + height2 / 2;
-    // Staggered-stairs offset between the two lines.
-    final offsetAmount = math.max(width1, width2) * 0.12;
+    if (measured.isEmpty) {
+      return _ShotLayout(
+        size: size,
+        shot: shot,
+        placements: const [],
+        decorations: const [],
+        textFixedGeoSpecs: const [],
+        frameDecorSpecs: const [],
+        heroIndex: globalHeroIndex,
+        baseFontSize: baseFontSize,
+        editorialVariant: editorialVariant,
+        isChorus: isChorus,
+        shotSeed: shotSeed,
+        sceneSeed: programSeed,
+        programSeed: programSeed,
+      );
+    }
 
-    final placements = <_WordPlacement>[];
-    void layLine(
-      List<_MeasuredWord> line,
-      double lineY,
-      double xShift,
-      double enterX,
-    ) {
-      if (line.isEmpty) return;
-      var currentX = -lineWidth(line) / 2 + xShift;
-      for (final item in line) {
-        placements.add(
-          _WordPlacement(
-            word: item.word,
-            role: item.role,
-            flowIndex: item.flowIndex,
-            fontSize: item.fontSize,
-            weight: item.weight,
-            x: size.width / 2 + currentX,
-            y: size.height / 2 + lineY - item.height / 2,
-            width: item.width,
-            height: item.height,
-            enterX: enterX,
-            enterY: item.role == SonnetRole.hero ? size.height * 0.15 : 0,
-            entryRotation:
-                ((item.flowIndex.isEven ? 1 : -1) *
-                    (item.role == SonnetRole.support ? 0.035 : 0.055)),
-          ),
-        );
-        currentX += item.width + flowGap;
+    // Which words stand in a vertical column is decided by the
+    // layout kind and variant, before the layout pass, so the fit
+    // ladder measures the true footprint. Collage decides per word
+    // from the polar angle inside the layout, so it stays
+    // horizontal here and the stage derives the rotation after.
+    bool isPreVertical(int index) {
+      final item = measured[index];
+      if (item.verticalWidth == null) return false;
+      switch (shot.kind) {
+        case FoliaShotKind.editorial:
+          return editorialVariant == 0 || editorialVariant == 1;
+        case FoliaShotKind.tableau:
+          final tableauVariant = layoutVariantSeed % 4;
+          return tableauVariant == 0 || tableauVariant == 1;
+        case FoliaShotKind.impact:
+        case FoliaShotKind.reveal:
+          final beforeCount = globalHeroIndex;
+          final topCount = beforeCount ~/ 2;
+          final afterCount = words.length - 1 - globalHeroIndex;
+          final rightCount = (afterCount + 1) ~/ 2;
+          return index < topCount ||
+              index > globalHeroIndex + rightCount;
+        default:
+          return false;
       }
     }
 
-    layLine(line1, line1Y, -offsetAmount, 30);
-    layLine(line2, line2Y, offsetAmount, -30);
-    return placements;
+    final layoutBoxes = <SonnetLayoutWord>[];
+    for (var i = 0; i < measured.length; i++) {
+      final item = measured[i];
+      final preVertical = isPreVertical(i);
+      layoutBoxes.add(
+        SonnetLayoutWord(
+          index: i,
+          isHero: heroIndices.contains(i),
+          isSemiHero: semiHeroes.contains(i),
+          fontScale: item.fontSize / baseFontSize,
+          measuredWidth: preVertical ? item.verticalWidth! : item.width,
+          measuredHeight: preVertical
+              ? item.verticalHeight!
+              : item.height,
+          vertical: preVertical,
+          verticalMeasuredWidth: item.verticalWidth,
+          verticalMeasuredHeight: item.verticalHeight,
+          verticalFontScale: item.verticalFontScale,
+        ),
+      );
+    }
+    final outcome = sonnetLayoutShot(
+      boxes: layoutBoxes,
+      heroIndex: globalHeroIndex < 0 ? 0 : globalHeroIndex,
+      secondaryHeroIndex: secondaryHeroIndex,
+      kind: shot.kind,
+      width: size.width,
+      height: size.height,
+      baseFontSize: baseFontSize,
+      layoutVariantSeed: layoutVariantSeed,
+      posterSeed: posterSeed,
+    );
+
+    // The global hero's entrance always starts at (0, 15% of the
+    // stage height), whatever the layout set
+    // (sonnetTypographyLayout.ts buildSonnetTextView).
+    if (globalHeroIndex >= 0) {
+      outcome.boxes[globalHeroIndex].enterX = 0;
+      outcome.boxes[globalHeroIndex].enterY = size.height * 0.15;
+    }
+
+    final placements = <_WordPlacement>[];
+    for (var i = 0; i < measured.length; i++) {
+      final item = measured[i];
+      final box = outcome.boxes[i];
+      final fontSize = baseFontSize * box.fontScale;
+      // Display footprint: poster already returns display dims;
+      // a vertical CJK column is one glyph wide; a rotated
+      // non-CJK word in a vertical column swaps w/h.
+      final isVerticalColumn =
+          box.layoutDirection == SonnetLayoutDirection.vertical;
+      final isCjkColumn =
+          isVerticalColumn && item.verticalWidth != null;
+      final isRotated =
+          isVerticalColumn &&
+          item.verticalWidth == null &&
+          shot.kind != FoliaShotKind.poster;
+      final displayWidth = shot.kind == FoliaShotKind.poster
+          ? box.measuredWidth
+          : isCjkColumn
+          ? fontSize
+          : isRotated
+          ? box.measuredHeight
+          : box.measuredWidth;
+      final displayHeight = shot.kind == FoliaShotKind.poster
+          ? box.measuredHeight
+          : isCjkColumn
+          ? item.word.text.runes.length * fontSize * 0.9
+          : isRotated
+          ? box.measuredWidth
+          : box.measuredHeight;
+      var centerX = size.width / 2 + box.x;
+      var centerY = size.height / 2 + box.y;
+      // Support words get a small perpendicular jitter
+      // (sonnetGlyphLayout.ts resolveSonnetSegmentNormalOffset):
+      // (rand × 2 − 1) × fontSize × 0.3 along the layout normal.
+      if (item.role == SonnetRole.support) {
+        final normalSeed = sonnetSeedHash(
+          '${item.word.text}:${item.flowIndex}:normal-offset',
+        );
+        final jitter =
+            ((normalSeed / 4294967296) * 2 - 1) * fontSize * 0.3;
+        if (isVerticalColumn) {
+          centerX += jitter;
+        } else {
+          centerY += jitter;
+        }
+      }
+      placements.add(
+        _WordPlacement(
+          word: item.word,
+          role: item.role,
+          flowIndex: item.flowIndex,
+          fontSize: fontSize,
+          weight: item.weight,
+          x: centerX - displayWidth / 2,
+          y: centerY - displayHeight / 2,
+          width: displayWidth,
+          height: displayHeight,
+          enterX: box.enterX,
+          enterY: box.enterY,
+          entryRotation:
+              ((item.flowIndex.isEven ? 1 : -1) *
+                  (item.role == SonnetRole.support ? 0.035 : 0.055)),
+          rotation: isRotated ? math.pi / 2 : box.rotation,
+          vertical: isCjkColumn || box.vertical,
+          layoutDirection: box.layoutDirection,
+        ),
+      );
+    }
+
+    // Giant decorative text (sonnetTypographyLayout.ts): hollow
+    // oversized copies of the heroes, never for tableau or poster.
+    final decorations = <_DecorationPlacement>[];
+    if (SonnetMgSettings.blueprintDefaults.showGiantDecorativeText) {
+      for (final decoration in sonnetDecorations(
+        boxes: outcome.boxes,
+        heroFontScale: scales.hero,
+        width: size.width,
+        height: size.height,
+        kind: shot.kind,
+      )) {
+        final source = measured[decoration.sourceIndex];
+        final sourceBox = outcome.boxes[decoration.sourceIndex];
+        // The decoration shares its source word's fit rung.
+        final rungFactor =
+            sourceBox.fontScale / (source.fontSize / baseFontSize);
+        final fontSize = baseFontSize * decoration.fontScale * rungFactor;
+        final textSize = _measureText(
+          source.word.text,
+          fontSize,
+          source.weight,
+        );
+        final decorSeed = sonnetSeedHash(
+          'decor:${decoration.sourceIndex}:${shot.startMs}',
+        );
+        final decorRng = sonnetMulberry32(decorSeed);
+        final zDepth = decorRng() > 0.5
+            ? 0.5 + decorRng() * 0.8
+            : -0.5 - decorRng() * 0.8;
+        decorations.add(
+          _DecorationPlacement(
+            word: source.word,
+            fontSize: fontSize,
+            weight: source.weight,
+            x:
+                size.width / 2 +
+                decoration.x -
+                textSize.width / 2,
+            y:
+                size.height / 2 +
+                decoration.y -
+                textSize.height / 2,
+            enterX: decoration.enterX,
+            enterY: decoration.enterY,
+            rotation: decoration.rotation,
+            zDepthBlur: math.min(40, zDepth.abs() * fontSize * 0.12),
+          ),
+        );
+      }
+    }
+
+    // Per-word frames: a word gets either the traced open frame
+    // (40% chance, sonnetTextViewBuilder.ts) or, when the shot
+    // has enough words, the fixed geometry — never both.
+    final textFixedGeoSpecs = <SonnetTextFixedGeoSpec>[];
+    final frameDecorSpecs = <_FrameDecorSpec>[];
+    final fixedGeoThreshold = sonnetTextFixedGeoMinWords(isChorus);
+    for (var i = 0; i < placements.length; i++) {
+      final placement = placements[i];
+      final wordSeed = sonnetMixSeed(shotSeed, i + 1);
+      final hasFrame = sonnetMulberry32(wordSeed)() < 0.4;
+      final center = Offset(
+        placement.x + placement.width / 2 - size.width / 2,
+        placement.y + placement.height / 2 - size.height / 2,
+      );
+      if (hasFrame) {
+        frameDecorSpecs.add(
+          _FrameDecorSpec(
+            center: center,
+            width: placement.width * 1.3,
+            height: placement.height * 1.3,
+            rotation: placement.rotation,
+            fontSize: placement.fontSize,
+            variant: wordSeed % 4,
+          ),
+        );
+      } else if (measured.length >= fixedGeoThreshold) {
+        textFixedGeoSpecs.add(
+          SonnetTextFixedGeoSpec(
+            center: center,
+            width: placement.width * 1.2,
+            height: placement.height * 1.2,
+            rotation: placement.rotation,
+            fontSize: placement.fontSize,
+            variant: sonnetTextFixedGeoVariant(wordSeed),
+            seed: wordSeed,
+            isChorus: isChorus,
+          ),
+        );
+      }
+    }
+
+    return _ShotLayout(
+      size: size,
+      shot: shot,
+      placements: placements,
+      decorations: decorations,
+      textFixedGeoSpecs: textFixedGeoSpecs,
+      frameDecorSpecs: frameDecorSpecs,
+      heroIndex: globalHeroIndex,
+      baseFontSize: baseFontSize,
+      editorialVariant: editorialVariant,
+      isChorus: isChorus,
+      shotSeed: shotSeed,
+      sceneSeed: programSeed,
+      programSeed: programSeed,
+    );
   }
 
   Size _measureText(String text, double fontSize, FontWeight weight) {
@@ -397,30 +809,6 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       textDirection: TextDirection.ltr,
     )..layout();
     return painter.size;
-  }
-
-  ({double left, double top, double width, double height}) _boundsOf(
-    List<_WordPlacement> placements,
-  ) {
-    if (placements.isEmpty) {
-      return (left: 0, top: 0, width: 0, height: 0);
-    }
-    var left = double.infinity;
-    var top = double.infinity;
-    var right = double.negativeInfinity;
-    var bottom = double.negativeInfinity;
-    for (final placement in placements) {
-      left = math.min(left, placement.x);
-      top = math.min(top, placement.y);
-      right = math.max(right, placement.x + placement.width);
-      bottom = math.max(bottom, placement.y + placement.height);
-    }
-    return (
-      left: left,
-      top: top,
-      width: right - left,
-      height: bottom - top,
-    );
   }
 
   ({double x, double y}) _focusAt(
@@ -540,13 +928,15 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     return (hash % 1024) / 1024 * math.pi * 2;
   }
 
-  double _transitionAlpha(FoliaShot shot, int nowMs) {
+  SonnetTransitionFrame _transitionFrame(FoliaShot shot, int nowMs) {
     final program = _program;
-    if (program == null) return 1;
+    if (program == null) return kSonnetIdleTransitionFrame;
     final shots = program.shots;
     final index = shots.indexOf(shot);
-    if (index < 0) return 1;
-    // Enter: first 0.14–0.24s of the shot (camera-pull fade).
+    if (index < 0) return kSonnetIdleTransitionFrame;
+    final programSeed = sonnetSeedHash(program.songId);
+    // Enter: first 0.14–0.24s of the shot; the kind comes from the
+    // boundary before this shot (sonnetTransitions.ts).
     if (index > 0) {
       final previous = shots[index - 1];
       final duration = sonnetTransitionDurationSeconds(
@@ -554,12 +944,13 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       );
       final elapsed = (nowMs - shot.startMs) / 1000;
       if (elapsed >= 0 && elapsed <= duration) {
+        final kind = sonnetBoundaryKind(programSeed, index - 1);
         return resolveSonnetTransitionFrame(
-          SonnetTransitionKind.cameraPull,
+          kind,
           'enter',
           elapsed / duration,
-          shot.startMs,
-        ).alpha;
+          programSeed + index * 97,
+        );
       }
     }
     // Exit: last 0.14–0.24s before the next shot.
@@ -570,15 +961,65 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       );
       final remaining = (next.startMs - nowMs) / 1000;
       if (remaining >= 0 && remaining <= duration) {
+        final kind = sonnetBoundaryKind(programSeed, index);
         return resolveSonnetTransitionFrame(
-          SonnetTransitionKind.cameraPull,
+          kind,
           'exit',
           1 - remaining / duration,
-          shot.startMs,
-        ).alpha;
+          programSeed + (index + 1) * 97,
+        );
       }
     }
-    return 1;
+    return kSonnetIdleTransitionFrame;
+  }
+
+  Widget _decorationWidget(
+    _DecorationPlacement decoration,
+    _ShotLayout layout,
+    int nowMs,
+    FoliaTheme theme,
+  ) {
+    final glyph = resolveSonnetGlyphFrame(
+      startMs: decoration.word.startMs,
+      settleMs: decoration.word.endMs,
+      nowMs: nowMs,
+      isEmphasis: true,
+      shotKind: layout.shot.kind,
+    );
+    if (glyph.alpha <= 0) return const SizedBox.shrink();
+    // Hollow outline at alpha 0.2 with the zDepth soft glow
+    // (sonnetTextViewBuilder.ts).
+    final style = TextStyle(
+      fontSize: decoration.fontSize,
+      fontWeight: decoration.weight,
+      foreground: Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1, math.min(8, decoration.fontSize * 0.006))
+        ..color = theme.primary.withValues(alpha: 0.2 * glyph.alpha),
+      shadows: [
+        Shadow(
+          color: theme.accent.withValues(alpha: 0.5 * glyph.alpha),
+          blurRadius: decoration.zDepthBlur,
+        ),
+      ],
+    );
+    return Positioned(
+      left: decoration.x,
+      top: decoration.y,
+      child: Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..translateByDouble(
+            decoration.enterX * glyph.offsetFactor,
+            decoration.enterY * glyph.offsetFactor,
+            0,
+            1,
+          )
+          ..rotateZ(decoration.rotation)
+          ..scaleByDouble(glyph.scale, glyph.scale, 1, 1),
+        child: Text(decoration.word.text, style: style),
+      ),
+    );
   }
 
   Widget _wordWidget(
@@ -615,13 +1056,24 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       color: color,
       shadows: [glow],
     );
-    final core = Text(word.text, style: style);
+    // Vertical columns stack the glyphs (sonnetGlyphLayout.ts).
+    final displayText = placement.vertical
+        ? word.text.runes.map(String.fromCharCode).join('\n')
+        : word.text;
+    final core = Text(
+      displayText,
+      textAlign: TextAlign.center,
+      style: style.copyWith(height: placement.vertical ? 0.9 : null),
+    );
     final children = <Widget>[];
     // Semi-hero echo ghosts: hollow stroke-only copies split
-    // along the layout normal (sonnetTextViewBuilder.ts).
+    // along the layout normal — vertical for a vertical column,
+    // horizontal otherwise (sonnetTextViewBuilder.ts).
     if (placement.role == SonnetRole.semiHero) {
       final spread = fontSize * kSonnetGhostSpreadFactor;
       final side = placement.flowIndex.isEven ? 1.0 : -1.0;
+      final isVertical =
+          placement.layoutDirection == SonnetLayoutDirection.vertical;
       for (var layer = 0; layer < 2; layer++) {
         final ghostStyle = TextStyle(
           fontSize: fontSize,
@@ -635,8 +1087,16 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         );
         children.add(
           Transform.translate(
-            offset: Offset(0, side * (layer + 1) * spread),
-            child: Text(word.text, style: ghostStyle),
+            offset: isVertical
+                ? Offset(side * (layer + 1) * spread, 0)
+                : Offset(0, side * (layer + 1) * spread),
+            child: Text(
+              displayText,
+              textAlign: TextAlign.center,
+              style: ghostStyle.copyWith(
+                height: placement.vertical ? 0.9 : null,
+              ),
+            ),
           ),
         );
       }
@@ -656,30 +1116,43 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         Transform.translate(
           offset: Offset(-mergeOffset, 0),
           child: Text(
-            word.text,
+            displayText,
+            textAlign: TextAlign.center,
             style: style.copyWith(
               color: Color(kSonnetCaCyan).withValues(
                 alpha: 0.8 * glyph.alpha,
               ),
               shadows: const [],
+              height: placement.vertical ? 0.9 : null,
             ),
           ),
         ),
         Transform.translate(
           offset: Offset(mergeOffset, 0),
           child: Text(
-            word.text,
+            displayText,
+            textAlign: TextAlign.center,
             style: style.copyWith(
               color: Color(kSonnetCaRed).withValues(
                 alpha: 0.8 * glyph.alpha,
               ),
               shadows: const [],
+              height: placement.vertical ? 0.9 : null,
             ),
           ),
         ),
       ]);
     }
     children.add(core);
+    // Per-glyph entrance stagger (sonnetGlyphLayout.ts): a
+    // vertical column staggers along x, a horizontal line along y.
+    final stagger = placement.flowIndex.isEven ? -1.0 : 1.0;
+    final enterX =
+        placement.enterX +
+        (placement.vertical ? stagger * fontSize * 0.28 : 0);
+    final enterY =
+        placement.enterY +
+        (placement.vertical ? 0 : stagger * fontSize * 0.24);
     return Positioned(
       left: placement.x,
       top: placement.y,
@@ -687,12 +1160,14 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         alignment: Alignment.center,
         transform: Matrix4.identity()
           ..translateByDouble(
-            placement.enterX * glyph.offsetFactor,
-            placement.enterY * glyph.offsetFactor,
+            enterX * glyph.offsetFactor,
+            enterY * glyph.offsetFactor,
             0,
             1,
           )
-          ..rotateZ(placement.entryRotation * glyph.offsetFactor)
+          ..rotateZ(
+            placement.rotation + placement.entryRotation * glyph.offsetFactor,
+          )
           ..scaleByDouble(glyph.scale, glyph.scale, 1, 1),
         child: Stack(children: children),
       ),
@@ -722,6 +1197,9 @@ class _MeasuredWord {
     required this.weight,
     required this.width,
     required this.height,
+    this.verticalWidth,
+    this.verticalHeight,
+    this.verticalFontScale,
   });
 
   final SonnetWord word;
@@ -734,6 +1212,12 @@ class _MeasuredWord {
   final FontWeight weight;
   final double width;
   final double height;
+
+  /// Vertical-column footprint for CJK words (one glyph wide,
+  /// glyphs stacked at fontSize × 0.9). Null for non-CJK words.
+  final double? verticalWidth;
+  final double? verticalHeight;
+  final double? verticalFontScale;
 }
 
 class _WordPlacement {
@@ -750,6 +1234,9 @@ class _WordPlacement {
     required this.enterX,
     required this.enterY,
     required this.entryRotation,
+    this.rotation = 0,
+    this.vertical = false,
+    this.layoutDirection = SonnetLayoutDirection.horizontal,
   });
 
   final SonnetWord word;
@@ -764,6 +1251,61 @@ class _WordPlacement {
   final double enterX;
   final double enterY;
   final double entryRotation;
+
+  /// Base rotation (π/2 for a rotated non-CJK word in a vertical
+  /// column); the entry rotation decays on top of it.
+  final double rotation;
+
+  /// Whether the word renders as a stacked CJK column.
+  final bool vertical;
+  final SonnetLayoutDirection layoutDirection;
+}
+
+class _DecorationPlacement {
+  const _DecorationPlacement({
+    required this.word,
+    required this.fontSize,
+    required this.weight,
+    required this.x,
+    required this.y,
+    required this.enterX,
+    required this.enterY,
+    required this.rotation,
+    required this.zDepthBlur,
+  });
+
+  final SonnetWord word;
+  final double fontSize;
+  final FontWeight weight;
+
+  /// Top-left position (the decoration is centered on it).
+  final double x;
+  final double y;
+  final double enterX;
+  final double enterY;
+  final double rotation;
+
+  /// Soft glow blur: |zDepth| × fontSize × 0.12, capped at 40.
+  final double zDepthBlur;
+}
+
+class _FrameDecorSpec {
+  const _FrameDecorSpec({
+    required this.center,
+    required this.width,
+    required this.height,
+    required this.rotation,
+    required this.fontSize,
+    required this.variant,
+  });
+
+  /// Center in stage coordinates (0, 0 = stage center).
+  final Offset center;
+  final double width;
+  final double height;
+  final double rotation;
+  final double fontSize;
+  final int variant;
 }
 
 class _ShotLayout {
@@ -771,13 +1313,29 @@ class _ShotLayout {
     required this.size,
     required this.shot,
     required this.placements,
+    required this.decorations,
+    required this.textFixedGeoSpecs,
+    required this.frameDecorSpecs,
     required this.heroIndex,
     required this.baseFontSize,
+    required this.editorialVariant,
+    required this.isChorus,
+    required this.shotSeed,
+    required this.sceneSeed,
+    required this.programSeed,
   });
 
   final Size size;
   final FoliaShot shot;
   final List<_WordPlacement> placements;
+  final List<_DecorationPlacement> decorations;
+  final List<SonnetTextFixedGeoSpec> textFixedGeoSpecs;
+  final List<_FrameDecorSpec> frameDecorSpecs;
   final int heroIndex;
   final double baseFontSize;
+  final int editorialVariant;
+  final bool isChorus;
+  final int shotSeed;
+  final int sceneSeed;
+  final int programSeed;
 }
