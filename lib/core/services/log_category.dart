@@ -4,7 +4,13 @@ enum AppLogCategory {
   download('下载', '下载队列、文件保存与音乐标签写入'),
   musicSource('音源', '音源脚本、播放地址解析与音源更新'),
   search('搜索', '平台搜索、搜索结果与封面加载'),
-  application('应用运行', '启动、前后台切换、权限、主题与应用更新');
+  application('应用运行', '启动、前后台切换、权限、主题与应用更新'),
+
+  /// Temporary diagnostic category (2026-11-28, sonnet timing):
+  /// its own category + scope, so the whole diagnostic can be
+  /// removed in one place when the investigation ends. Do not mix
+  /// diagnostic scopes into the standing categories.
+  sonnetTiming('商籁时序诊断', '商籁舞台时序诊断日志（临时）');
 
   const AppLogCategory(this.label, this.description);
 
@@ -18,6 +24,7 @@ Set<AppLogCategory> decodeLogCategories(List<String>? names) => {
 };
 
 AppLogCategory logCategoryForScope(String scope) {
+  if (scope == 'sonnet-timing') return AppLogCategory.sonnetTiming;
   if (scope == 'groove-shift' || scope.startsWith('groove-shift-')) {
     return AppLogCategory.smartTransition;
   }

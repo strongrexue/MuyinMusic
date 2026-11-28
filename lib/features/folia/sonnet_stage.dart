@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../core/services/app_logger.dart';
 import 'audio_analysis.dart';
 import 'folia_stage_registry.dart';
 import 'folia_storyboard.dart';
@@ -15,9 +16,10 @@ import 'sonnet_motion.dart';
 
 /// Temporary timing diagnostic for the 2026-11-28 second-round
 /// blank/flash report （偏偏喜欢你： lines blank ~5s, flash ~1s).
-/// Flip to true for ONE diagnostic build, reproduce, capture logcat
-/// filtered on `[sonnet-timing]`, then flip back to false. Default
-/// off: no logging in normal builds. It logs (a) the lyrics object
+/// Flip to true for ONE diagnostic build, reproduce, capture the
+/// `[sonnet-timing]` lines — from logcat, or from the in-app journal
+/// (Settings → 调试 → 记录分类 → 商籁时序诊断， then 日志控制台 → 导出） —
+/// then flip back to false. Default off: no logging in normal builds. It logs (a) the lyrics object
 /// the stage actually received (line/word timings) at compile time,
 /// (b) a 1Hz sample of raw vs effective clock, active shot and how
 /// many of its words are visible, and (c) backward-jump decisions.
@@ -180,19 +182,34 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
     if (kSonnetTimingDiagnostics) _logLyricsFingerprint();
   }
 
+  /// Mirror one timing diagnostic line to both logcat (debugPrint,
+  /// kept byte-identical) and the in-app file journal (AppLogger,
+  /// scope 'sonnet-timing' → 商籁时序诊断 category), so the user can
+  /// capture it from Settings without adb. The file line is
+  /// `ISO8601 [sonnet-timing] <message>` (the scope supplies the tag,
+  /// so it is not repeated in the message). AppLogger gates on the
+  /// recording-category switch; the 1Hz samples differ every second
+  /// and fingerprint lines differ per line, so the dedup policy never
+  /// collapses them, and every line is far below the 1200-char
+  /// compact cap (samples ~150 chars, fingerprint lines < 600).
+  void _logTiming(String message) {
+    debugPrint('[sonnet-timing] $message');
+    unawaited(AppLogger.write('sonnet-timing', message));
+  }
+
   void _logLyricsFingerprint() {
     final lyrics = widget.stage.lyrics;
     final withTiming =
         lyrics.lines.where((line) => line.hasWordTiming).length;
-    debugPrint(
-      '[sonnet-timing] lyrics songId=${widget.stage.songId} '
+    _logTiming(
+      'lyrics songId=${widget.stage.songId} '
       'lines=${lyrics.lines.length} withWordTiming=$withTiming',
     );
     for (var i = 0; i < lyrics.lines.length && i < 10; i++) {
       final line = lyrics.lines[i];
       final wordStarts = line.words.map((w) => w.startMs).join(',');
-      debugPrint(
-        '[sonnet-timing] line $i ${line.startMs}-${line.endMs} '
+      _logTiming(
+        'line $i ${line.startMs}-${line.endMs} '
         'words=${line.words.length} starts=[$wordStarts] '
         'text=${line.text}',
       );
@@ -228,8 +245,8 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
       );
       if (glyph.alpha > 0) visible++;
     }
-    debugPrint(
-      '[sonnet-timing] raw=${widget.stage.positionNow().inMilliseconds} '
+    _logTiming(
+      'raw=${widget.stage.positionNow().inMilliseconds} '
       'now=$nowMs playing=${widget.stage.playingNow()} '
       'shot=${shot.startMs}-${shot.endMs} kind=${shot.kind} '
       'words=$visible/${layout.placements.length} '
@@ -261,10 +278,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         // confirmation (a real seek) or a jump back up (stale read).
         _pendingBackwardRawMs = raw;
         if (kSonnetTimingDiagnostics) {
-          debugPrint(
-            '[sonnet-timing] hold backward jump: '
-            'anchor=$_anchorMs raw=$raw',
-          );
+          _logTiming('hold backward jump: anchor=$_anchorMs raw=$raw');
         }
       } else if (raw >= _pendingBackwardRawMs! &&
           raw - _pendingBackwardRawMs! <= _maxBackwardJumpMs) {
@@ -274,7 +288,7 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         _anchorWallMs = wall;
         _pendingBackwardRawMs = null;
         if (kSonnetTimingDiagnostics) {
-          debugPrint('[sonnet-timing] accept backward seek: raw=$raw');
+          _logTiming('accept backward seek: raw=$raw');
         }
       } else if (raw > _anchorMs) {
         // The position jumped back up: the candidate was a stale
@@ -285,8 +299,8 @@ class _SonnetStageWidgetState extends State<SonnetStageWidget>
         _anchorMs = raw;
         _anchorWallMs = wall;
         if (kSonnetTimingDiagnostics) {
-          debugPrint(
-            '[sonnet-timing] discard stale backward candidate: '
+          _logTiming(
+            'discard stale backward candidate: '
             'anchor=$heldAnchor candidate=$heldCandidate raw=$raw',
           );
         }
