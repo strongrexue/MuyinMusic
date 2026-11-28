@@ -72,10 +72,8 @@ class FoliaStageStyle {
   builder;
 }
 
-/// One registered stage background: reserved for phase 2, when
-/// Folia-style background layers (Monet, roaming, …) may be ported.
-/// Phase 1 registers none — the backdrop stays the player page's
-/// existing background layer.
+/// One registered stage background. The folia stage page renders
+/// the registered 'common' background as its opaque bottom layer.
 @immutable
 class FoliaStageBackground {
   const FoliaStageBackground({
@@ -110,8 +108,8 @@ class FoliaStageRegistry {
 
   void unregister(String id) => _styles.remove(id);
 
-  /// Background slot, reserved for phase 2. The stage page does not
-  /// read it yet — the backdrop is the player page's background layer.
+  /// Background slot. The stage page renders the registered
+  /// 'common' background as its opaque bottom layer.
   List<FoliaStageBackground> get backgrounds =>
       List.unmodifiable(_backgrounds.values);
 

@@ -13,10 +13,11 @@ import 'folia_chrome.dart';
 import 'folia_stage_registry.dart';
 import 'folia_theme.dart';
 
-/// The folia mode's full-screen landscape stage shell. It is a
-/// transparent layer over the player page's existing background (KTV
-/// photo / flowing light — phase 1 builds no backgrounds): styles draw
-/// the lyric layer only.
+/// The folia mode's full-screen landscape stage shell. It draws its
+/// own background (Folia's built-in 'common': a dark cover-derived
+/// base + geometric layer) as an opaque bottom layer, so the player
+/// page's background (the KTV photo) does not show through; styles
+/// draw the lyric layer on top of it.
 ///
 /// The shell owns the [AudioAnalysisService], resolves the per-song
 /// theme from the cover, and hosts the style selected in settings
@@ -32,6 +33,10 @@ class FoliaStagePage extends ConsumerStatefulWidget {
 
 class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
   late final AudioAnalysisService _analysis;
+  // Captured in initState: ref.read is not usable in dispose (the
+  // element is already marked disposed), so the chrome notifier is
+  // kept here for the dispose-time restore.
+  late final FoliaChromeNotifier _chrome;
 
   @override
   void initState() {
@@ -44,15 +49,15 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
     // Enter immersive: the chrome starts hidden while playing so the
     // stage fills the whole screen; a paused song keeps it visible.
     final playing = ref.read(playerControllerProvider).playing;
-    final chrome = ref.read(foliaChromeProvider.notifier);
-    chrome.syncPlaying(playing);
-    if (playing) chrome.hide();
+    _chrome = ref.read(foliaChromeProvider.notifier);
+    _chrome.syncPlaying(playing);
+    if (playing) _chrome.hide();
   }
 
   @override
   void dispose() {
     // Leaving folia mode restores the normal chrome.
-    ref.read(foliaChromeProvider.notifier).show();
+    _chrome.show();
     unawaited(_analysis.dispose());
     super.dispose();
   }
@@ -78,12 +83,6 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
     final theme =
         ref.watch(playerArtworkColorsProvider).valueOrNull?.foliaTheme ??
         FoliaTheme.fallback;
-    if (vm.lyricLoading) return const _FoliaStatus(text: '歌词加载中');
-    if (vm.lyrics.isEmpty) {
-      return _FoliaStatus(
-        text: vm.localWithoutLyrics ? '本地播放 · 未找到歌词' : '暂无歌词',
-      );
-    }
     final foliaStyleId = ref.watch(
       settingsProvider.select((s) => s.foliaStyleId),
     );
@@ -98,9 +97,37 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
       positionNow: () => ref.read(playerControllerProvider).position,
       playingNow: () => ref.read(playerControllerProvider).playing,
     );
+    // The folia background (Folia's built-in 'common'): an opaque
+    // bottom layer that replaces the player page's background (the
+    // KTV photo) while in folia mode. KTV and portrait keep their
+    // own backgrounds — this layer only exists in this page.
+    final background = foliaStageRegistry.backgroundById('common');
+    final backgroundLayer = background == null
+        ? const SizedBox.shrink()
+        : Positioned.fill(
+            child: background.builder(context, stageContext),
+          );
+    if (vm.lyricLoading) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [backgroundLayer, const _FoliaStatus(text: '歌词加载中')],
+      );
+    }
+    if (vm.lyrics.isEmpty) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          backgroundLayer,
+          _FoliaStatus(
+            text: vm.localWithoutLyrics ? '本地播放 · 未找到歌词' : '暂无歌词',
+          ),
+        ],
+      );
+    }
     return Stack(
       fit: StackFit.expand,
       children: [
+        backgroundLayer,
         // A tap on the empty stage toggles the chrome (top bar +
         // bottom bar). Taps on the transport bar's own buttons win
         // the gesture arena, so they keep working as controls.

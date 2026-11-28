@@ -1,3 +1,4 @@
+import 'folia_common_background.dart';
 import 'folia_stage_registry.dart';
 import 'sonnet_stage.dart';
 
@@ -12,8 +13,12 @@ FoliaStageStyle sonnetStageStyle() => FoliaStageStyle(
   builder: (context, stage) => SonnetStageWidget(stage: stage),
 );
 
-/// Registers every built-in folia style. Called once at startup
-/// from main.dart, before runApp.
-void registerFoliaStyles() {
-  foliaStageRegistry.register(sonnetStageStyle());
+/// Registers every built-in folia style and background. Called once
+/// at startup from main.dart, before runApp. The background is
+/// Folia's built-in 'common' (通用) — the dark cover-derived base +
+/// geometric layer the folia stage sits on.
+void registerFoliaStyles([FoliaStageRegistry? registry]) {
+  final target = registry ?? foliaStageRegistry;
+  target.register(sonnetStageStyle());
+  target.registerBackground(commonStageBackground());
 }
