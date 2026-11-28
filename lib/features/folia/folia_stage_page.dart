@@ -81,8 +81,13 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
       ),
     );
     final theme =
-        ref.watch(playerArtworkColorsProvider).valueOrNull?.foliaTheme ??
-        FoliaTheme.fallback;
+        (ref.watch(playerArtworkColorsProvider).valueOrNull?.foliaTheme ??
+                FoliaTheme.fallback)
+            // The stage (background + lyrics) follows the app's
+            // current brightness: the blueprint's common background
+            // base is daylight #f5f5f4 in light mode and #09090b in
+            // dark mode (buildAppStyle.ts, baseThemes.ts).
+            .resolveForBrightness(Theme.of(context).brightness);
     final foliaStyleId = ref.watch(
       settingsProvider.select((s) => s.foliaStyleId),
     );

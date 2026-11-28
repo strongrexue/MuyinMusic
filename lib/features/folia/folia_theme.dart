@@ -2,10 +2,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-/// Per-song stage theme: a dark [background] the lyrics sit on, a
-/// near-white [primary] for the sung text, and a saturated [accent]
-/// for glows and highlights. The background is always dark, so the
-/// primary stays white; the song's own color rides on the accent.
+/// Per-song stage theme: a [background] the lyrics sit on, a
+/// [primary] for the sung text, and a saturated [accent] for glows
+/// and highlights. In dark mode the background is dark (the
+/// cover-derived swatch darkened) and the primary is white; in
+/// light mode ([resolveForBrightness]) the background is the
+/// blueprint daylight base and the primary is dark ink. The song's
+/// own color rides on the accent in both modes.
 @immutable
 class FoliaTheme {
   const FoliaTheme({
@@ -13,6 +16,32 @@ class FoliaTheme {
     required this.primary,
     required this.accent,
   });
+
+  /// Blueprint daylight base (stone-100): Folia's
+  /// `DAYLIGHT_THEME.backgroundColor`
+  /// (src/services/baseThemes.ts), used when the app is light.
+  static const Color daylightBackground = Color(0xFFF5F5F4);
+
+  /// Blueprint daylight ink (stone-900): Folia's
+  /// `DAYLIGHT_THEME.primaryColor` (src/services/baseThemes.ts),
+  /// the lyric text color on the daylight base.
+  static const Color daylightPrimary = Color(0xFF1C1917);
+
+  /// Returns this theme resolved for the app's current brightness.
+  /// Dark is unchanged (cover-derived dark base, white primary —
+  /// the blueprint's default dark base is #09090b, zinc-950,
+  /// `DEFAULT_THEME.backgroundColor`). Light swaps the base and
+  /// the lyric ink to the blueprint daylight pair above and keeps
+  /// the cover-derived accent, so the geometric shapes, glows and
+  /// highlights keep the song's own color on the light base.
+  FoliaTheme resolveForBrightness(Brightness brightness) {
+    if (brightness == Brightness.dark) return this;
+    return FoliaTheme(
+      background: daylightBackground,
+      primary: daylightPrimary,
+      accent: accent,
+    );
+  }
 
   static const FoliaTheme fallback = FoliaTheme(
     background: Color(0xFF0D0D12),

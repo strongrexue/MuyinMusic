@@ -13,7 +13,11 @@ import 'folia_theme.dart';
 /// CommonBackgroundSettingsCard.tsx).
 ///
 /// Layers, in order (all full-screen, like the blueprint):
-/// 1. Base colour: the theme's dark cover-derived background, opaque.
+/// 1. Base colour: the resolved theme background, opaque — the
+///    blueprint daylight base (#f5f5f4) in light mode, the
+///    cover-derived dark base in dark mode (see
+///    FoliaTheme.resolveForBrightness; buildAppStyle.ts,
+///    baseThemes.ts).
 /// 2. Geometric layer: 15 drifting shapes + 20 rising particles,
 ///    pulsing gently with the audio bands, over a vignette.
 ///
@@ -25,10 +29,10 @@ import 'folia_theme.dart';
 /// The blueprint's cover-colour fluid layer (FluidBackground: a
 /// blurred cover under a gradient) is OFF by default and is NOT
 /// ported here: it needs cover-image plumbing plus a settings entry,
-/// neither of which exists yet. The base colour below already comes
-/// from the cover (FoliaTheme.background is the cover's darkest
-/// swatch darkened), so the stage is dark and the lyrics stay
-/// readable — the reason this background was ported.
+/// neither of which exists yet. The base colour below is the
+/// brightness-resolved theme background (blueprint daylight base in
+/// light mode, cover-derived dark base in dark mode), so the lyrics
+/// stay readable in both — the reason this background was ported.
 ///
 /// What is common's own layer vs the sonnet style's MG decor: the
 /// geometric shapes / particles / vignette below are common's. The
@@ -51,7 +55,7 @@ FoliaStageBackground commonStageBackground() => FoliaStageBackground(
   ),
 );
 
-/// The common background: dark cover-derived base + geometric layer
+/// The common background: brightness-resolved base + geometric layer
 /// + vignette. Opaque: it covers the player page's background
 /// (the KTV photo) when used as the folia stage's bottom layer.
 class FoliaCommonBackground extends StatelessWidget {
@@ -65,7 +69,8 @@ class FoliaCommonBackground extends StatelessWidget {
     this.disableVignette = false,
   });
 
-  /// Dark cover-derived base colour (blueprint theme.backgroundColor).
+  /// Brightness-resolved base colour (blueprint theme.backgroundColor,
+  /// resolved by FoliaTheme.resolveForBrightness).
   final FoliaTheme theme;
 
   /// Song id: the geometric layout is derived from it alone, so the

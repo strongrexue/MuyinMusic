@@ -13,6 +13,7 @@ import 'package:panghu_music/features/folia/folia_common_background.dart';
 import 'package:panghu_music/features/folia/folia_stage_page.dart';
 import 'package:panghu_music/features/folia/folia_stage_registry.dart';
 import 'package:panghu_music/features/folia/folia_theme.dart';
+import 'package:panghu_music/features/folia/sonnet_stage.dart';
 import 'package:panghu_music/features/folia/sonnet_style.dart';
 import 'package:panghu_music/features/player/lyric_parser.dart';
 import 'package:panghu_music/features/player/player_audio_handler.dart';
@@ -302,6 +303,143 @@ void main() {
       // Pump the page away so its timers (analysis, geometry) are
       // cancelled in dispose.
       await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    });
+  });
+
+  group('brightness resolution', () {
+    // The stage follows the app's light/dark mode (2026-11-28):
+    // light base is the blueprint daylight base (#f5f5f4) with dark
+    // lyric ink (#1c1917); dark keeps the cover-derived base with
+    // white lyrics (buildAppStyle.ts, baseThemes.ts). The geometric
+    // layer stays on top in both modes, and the lyric ink must keep
+    // WCAG AA contrast (4.5:1) against the base in both modes.
+    double contrastRatio(Color a, Color b) {
+      final l1 = a.computeLuminance();
+      final l2 = b.computeLuminance();
+      final hi = l1 > l2 ? l1 : l2;
+      final lo = l1 > l2 ? l2 : l1;
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    test('light resolves to the blueprint daylight pair', () {
+      const coverTheme = FoliaTheme(
+        background: Color(0xFF0D0D12),
+        primary: Colors.white,
+        accent: Color(0xFFFFB547),
+      );
+      final light = coverTheme.resolveForBrightness(Brightness.light);
+      expect(light.background, const Color(0xFFF5F5F4));
+      expect(light.primary, const Color(0xFF1C1917));
+      // The song's own color still rides on the cover accent.
+      expect(light.accent, const Color(0xFFFFB547));
+    });
+
+    test('dark is unchanged', () {
+      const coverTheme = FoliaTheme(
+        background: Color(0xFF0D0D12),
+        primary: Colors.white,
+        accent: Color(0xFFFFB547),
+      );
+      expect(
+        coverTheme.resolveForBrightness(Brightness.dark),
+        coverTheme,
+      );
+    });
+
+    test('lyric ink keeps AA contrast against the base in both modes',
+        () {
+      const coverTheme = FoliaTheme(
+        background: Color(0xFF0D0D12),
+        primary: Colors.white,
+        accent: Color(0xFFFFB547),
+      );
+      final light = coverTheme.resolveForBrightness(Brightness.light);
+      final dark = coverTheme.resolveForBrightness(Brightness.dark);
+      expect(contrastRatio(light.primary, light.background),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.primary, dark.background),
+          greaterThanOrEqualTo(4.5));
+    });
+
+    testWidgets('light base is daylight and the geometric layer stays',
+        (tester) async {
+      final light =
+          FoliaTheme.fallback.resolveForBrightness(Brightness.light);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FoliaCommonBackground(
+            theme: light,
+            seed: 'song-a',
+            analysis: const Stream<AudioAnalysisFrame>.empty(),
+            playingNow: () => true,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Container && w.color == const Color(0xFFF5F5F4),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(FoliaGeometricBackground), findsOneWidget);
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    });
+
+    testWidgets('lyrics render in dark ink on the light base',
+        (tester) async {
+      final light =
+          FoliaTheme.fallback.resolveForBrightness(Brightness.light);
+      final lyrics = KaraokeLyrics([
+        KaraokeLyricLine(
+          startMs: 93807,
+          endMs: 99440,
+          text: '为何你一点都不记起',
+          words: [
+            KaraokeWordTiming(text: '为', startMs: 93807, endMs: 94190),
+            KaraokeWordTiming(text: '何', startMs: 94190, endMs: 94607),
+            KaraokeWordTiming(text: '你', startMs: 94607, endMs: 95646),
+            KaraokeWordTiming(text: '一', startMs: 95646, endMs: 96011),
+          ],
+        ),
+      ]);
+      const nowMs = 96000; // mid-line: 为何你一 are settled.
+      final stage = FoliaStageContext(
+        lyrics: lyrics,
+        theme: light,
+        analysis: const Stream.empty(),
+        songId: 'qq-147057',
+        positionNow: () => const Duration(milliseconds: nowMs),
+        playingNow: () => false,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 800,
+              height: 400,
+              child: SonnetStageWidget(stage: stage),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // The core copy of a settled word carries the theme primary
+      // as its text color (giant-decor copies use a stroke
+      // foreground instead, so they do not match this filter).
+      final copies = tester.widgetList<Text>(find.text('为'));
+      expect(copies, isNotEmpty);
+      expect(
+        copies.any(
+          (text) => text.style?.color == const Color(0xFF1C1917),
+        ),
+        isTrue,
+      );
+      expect(
+        copies.any((text) => text.style?.color == Colors.white),
+        isFalse,
+      );
     });
   });
 }
