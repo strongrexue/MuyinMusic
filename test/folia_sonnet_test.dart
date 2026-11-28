@@ -351,10 +351,21 @@ void main() {
       expect(find.text('后来'), findsNWidgets(3));
       expect(find.text('无论'), findsOneWidget);
       expect(find.text('故事'), findsNothing);
-      // Hero font size: base 400 × 0.052 = 20.8, editorial
-      // variant 3 hero ×3.8.
+      // Hero font size: base 400 × 0.052 = 20.8 times the
+      // compiled shot kind's hero scale (the compiler picks the
+      // kind deterministically from the song id).
+      final program = const FoliaStoryboardCompiler().compile(
+        lyrics,
+        'test-song',
+      );
+      final expectedHeroSize =
+          20.8 *
+          sonnetFontScales(
+            program.shots.single.kind,
+            editorialVariant: 3,
+          ).hero;
       final hero = tester.widget<Text>(find.text('后来').first);
-      expect(hero.style?.fontSize, closeTo(20.8 * 3.8, 0.5));
+      expect(hero.style?.fontSize, closeTo(expectedHeroSize, 0.5));
     });
 
     testWidgets('shows nothing before the first word starts', (
