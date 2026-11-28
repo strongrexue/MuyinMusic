@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../features/folia/folia_theme.dart';
 import 'flow_palette.dart';
 import 'lyric_ink.dart';
 
@@ -15,11 +16,16 @@ class ArtworkColors {
     required this.baseColor,
     required this.palette,
     required this.lyricInk,
+    this.foliaTheme = FoliaTheme.fallback,
   });
 
   final Color baseColor;
   final FlowPalette palette;
   final Color? lyricInk;
+
+  /// Per-song stage theme for the folia lyric stage; falls back to
+  /// [FoliaTheme.fallback] when the cover gives nothing usable.
+  final FoliaTheme foliaTheme;
 
   Color? get accent =>
       palette == FlowPalette.fallback ? null : Color(palette.accentsArgb.first);
@@ -170,6 +176,10 @@ Future<ArtworkColors?> _extractNative(Map<String, Object> arguments) async {
             accentsArgb: List<int>.unmodifiable(accents),
           ),
     lyricInk: ink == null ? null : Color(ink),
+    foliaTheme: FoliaTheme.fromArtwork(
+      base: Color(base),
+      accents: accents.map(Color.new).toList(),
+    ),
   );
 }
 
@@ -205,6 +215,7 @@ ArtworkColors _extractFlutter(_Pixels pixels) {
     baseColor: Color.fromARGB(255, red ~/ 25, green ~/ 25, blue ~/ 25),
     palette: extractFlowPalette(bytes, pixels.width, pixels.height),
     lyricInk: extractLyricInk(bytes),
+    foliaTheme: extractFoliaTheme(bytes),
   );
 }
 
