@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:panghu_music/features/folia/folia_stage_registry.dart';
 import 'package:panghu_music/features/folia/folia_storyboard.dart';
 import 'package:panghu_music/features/folia/folia_theme.dart';
+import 'package:panghu_music/features/folia/sonnet_layout.dart';
+import 'package:panghu_music/features/folia/sonnet_mg.dart';
 import 'package:panghu_music/features/folia/sonnet_motion.dart';
 import 'package:panghu_music/features/folia/sonnet_stage.dart';
 import 'package:panghu_music/features/folia/sonnet_style.dart';
@@ -345,27 +347,77 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
-      // 后来 is the line's hero: core text plus two
-      // chromatic-aberration copies. 无论 has started too; 故事
-      // has not.
-      expect(find.text('后来'), findsNWidgets(3));
-      expect(find.text('无论'), findsOneWidget);
+      // 后来 is the line's hero: core text, two
+      // chromatic-aberration copies, and one giant hollow
+      // decorative copy. 是 has started too (left row,
+      // horizontal); 无论 is a vertical column here so its
+      // rendered text is stacked; 故事 has not started.
+      expect(find.text('后来'), findsNWidgets(4));
+      expect(find.text('是'), findsOneWidget);
       expect(find.text('故事'), findsNothing);
       // Hero font size: base 400 × 0.052 = 20.8 times the
       // compiled shot kind's hero scale (the compiler picks the
-      // kind deterministically from the song id).
+      // kind deterministically from the song id), modulated by
+      // the fit ladder's rung (0.52–1.0). The support word shares
+      // the rung, so the hero/support ratio is exact.
       final program = const FoliaStoryboardCompiler().compile(
         lyrics,
         'test-song',
       );
-      final expectedHeroSize =
-          20.8 *
-          sonnetFontScales(
-            program.shots.single.kind,
-            editorialVariant: 3,
-          ).hero;
-      final hero = tester.widget<Text>(find.text('后来').first);
-      expect(hero.style?.fontSize, closeTo(expectedHeroSize, 0.5));
+      final kind = program.shots.single.kind;
+      var editorialVariant = 0;
+      if (kind == FoliaShotKind.editorial) {
+        final flat = [
+          for (final line in lyrics.lines)
+            ...sonnetWordsForLine(line, limitMs: line.endMs),
+        ];
+        final heroIndex = findSonnetHeroIndex(flat);
+        var secondary = -1;
+        var best = double.negativeInfinity;
+        for (var i = 0; i < flat.length; i++) {
+          if (i == heroIndex) continue;
+          final word = flat[i];
+          if (!word.isWordLike || word.visibleLength == 0) continue;
+          final score =
+              sonnetHeroScore(word) +
+              ((i - heroIndex).abs() > 1 ? 50 : 0);
+          if (score > best) {
+            best = score;
+            secondary = i;
+          }
+        }
+        editorialVariant = sonnetEditorialVariant(
+          sonnetLayoutVariantSeed([
+            for (final word in flat) word.text.trim().length,
+          ]),
+          flat.length,
+          secondary,
+        );
+      }
+      final scales = sonnetFontScales(
+        kind,
+        editorialVariant: editorialVariant,
+      );
+      final heroTexts = tester.widgetList<Text>(find.text('后来')).toList();
+      // Core: no stroke foreground, and it carries the glow
+      // shadow (the CA copies have none, the decoration is a
+      // stroke foreground).
+      final core = heroTexts.firstWhere(
+        (text) =>
+            text.style?.foreground == null &&
+            (text.style?.shadows?.isNotEmpty ?? false),
+      );
+      final decoration = heroTexts.firstWhere(
+        (text) => text.style?.foreground != null,
+      );
+      final support = tester.widget<Text>(find.text('是'));
+      final heroSize = core.style!.fontSize!;
+      final supportSize = support.style!.fontSize!;
+      expect(heroSize / supportSize, closeTo(scales.hero / scales.support, 0.05));
+      expect(heroSize, lessThanOrEqualTo(20.8 * scales.hero));
+      expect(heroSize, greaterThanOrEqualTo(20.8 * scales.hero * 0.52));
+      // The giant decoration is hollow and larger than the hero.
+      expect(decoration.style!.fontSize!, greaterThan(heroSize));
     });
 
     testWidgets('shows nothing before the first word starts', (
@@ -397,6 +449,402 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('后来'), findsNothing);
+    });
+  });
+
+  group('sonnet seeds', () {
+    test('FNV-1a hash is deterministic and order-sensitive', () {
+      expect(sonnetSeedHash('后来'), sonnetSeedHash('后来'));
+      expect(sonnetSeedHash('后来'), isNot(sonnetSeedHash('后來')));
+      expect(sonnetSeedHash(''), 2166136261);
+    });
+
+    test('mix and hash01 stay in range and are deterministic', () {
+      for (final seed in [0, 1, 42, 0x9e3779b1]) {
+        expect(sonnetMixSeed(seed, 0x9e3779b9), greaterThanOrEqualTo(0));
+        expect(sonnetMixSeed(seed, 0x9e3779b9), lessThan(4294967296));
+        final jitter = sonnetHash01(seed, 3, 0x1234);
+        expect(jitter, greaterThanOrEqualTo(0));
+        expect(jitter, lessThan(1));
+        expect(sonnetHash01(seed, 3, 0x1234), jitter);
+      }
+    });
+
+    test('mulberry32 streams are deterministic per seed', () {
+      final a = sonnetMulberry32(12345);
+      final b = sonnetMulberry32(12345);
+      for (var i = 0; i < 10; i++) {
+        expect(a(), b());
+      }
+      expect(sonnetMulberry32(1)(), isNot(sonnetMulberry32(2)()));
+    });
+
+    test('glyph motion duration clamps to the shot window', () {
+      expect(sonnetGlyphMotionDurationSeconds(0.5), closeTo(0.36, 1e-9));
+      expect(sonnetGlyphMotionDurationSeconds(2), closeTo(0.84, 1e-9));
+      expect(sonnetGlyphMotionDurationSeconds(10), closeTo(1.8, 1e-9));
+    });
+
+    test('elastic-out ends near 1 and overshoots in the middle', () {
+      expect(sonnetElasticOut(0), closeTo(0, 1e-9));
+      // The blueprint formula lands at 1.0005 at v = 1, not
+      // exactly 1 (2^-10 × sin(19.37) ≈ 0.0005).
+      expect(sonnetElasticOut(1), closeTo(1, 1e-3));
+      expect(sonnetElasticOut(0.2), greaterThan(1));
+    });
+  });
+
+  group('sonnet layout variants', () {
+    List<SonnetLayoutWord> boxes({int count = 5, int hero = 2}) => [
+      for (var i = 0; i < count; i++)
+        SonnetLayoutWord(
+          index: i,
+          isHero: i == hero,
+          isSemiHero: i == hero + 1,
+          fontScale: i == hero ? 4.0 : 1.2,
+          measuredWidth: i == hero ? 200 : 80,
+          measuredHeight: i == hero ? 120 : 48,
+        ),
+    ];
+
+    SonnetLayoutOutcome layout(
+      List<SonnetLayoutWord> input, {
+      FoliaShotKind kind = FoliaShotKind.editorial,
+      int seed = 0,
+      int posterSeed = 0,
+      int hero = 2,
+      int secondary = 4,
+    }) => sonnetLayoutShot(
+      boxes: input,
+      heroIndex: hero,
+      secondaryHeroIndex: secondary,
+      kind: kind,
+      width: 800,
+      height: 450,
+      baseFontSize: 24,
+      layoutVariantSeed: seed,
+      posterSeed: posterSeed,
+    );
+
+    test('variant seed is the trimmed-length sum plus the count', () {
+      expect(sonnetLayoutVariantSeed([3, 5, 2]), 13);
+      expect(sonnetLayoutVariantSeed([]), 0);
+    });
+
+    test('editorial variant follows seed % 5 with the fallbacks', () {
+      expect(sonnetEditorialVariant(0, 5, 4), 0);
+      expect(sonnetEditorialVariant(1, 5, 4), 1);
+      expect(sonnetEditorialVariant(2, 5, 4), 2);
+      expect(sonnetEditorialVariant(3, 5, 4), 3);
+      expect(sonnetEditorialVariant(4, 5, 4), 4);
+      // Variant 3 needs > 2 segments and a secondary hero.
+      expect(sonnetEditorialVariant(3, 2, 1), 0);
+      expect(sonnetEditorialVariant(3, 5, -1), 0);
+      // Variant 4 with < 2 segments falls back to the magazine
+      // header.
+      expect(sonnetEditorialVariant(4, 1, -1), 2);
+    });
+
+    test('every shot kind lays out inside the safe area', () {
+      for (final kind in FoliaShotKind.values) {
+        final outcome = layout(boxes(), kind: kind, seed: 7);
+        for (final box in outcome.boxes) {
+          expect(
+            box.x.abs() + box.measuredWidth / 2,
+            lessThanOrEqualTo(800 * 0.48 + 1),
+            reason: '$kind box ${box.index} x',
+          );
+          expect(
+            box.y.abs() + box.measuredHeight / 2,
+            lessThanOrEqualTo(450 * 0.46 + 1),
+            reason: '$kind box ${box.index} y',
+          );
+        }
+      }
+    });
+
+    test('editorial variant 0 stacks a vertical pillar', () {
+      final outcome = layout(boxes(), seed: 0);
+      expect(outcome.editorialVariant, 0);
+      for (final box in outcome.boxes) {
+        expect(box.layoutDirection, SonnetLayoutDirection.vertical);
+      }
+      // The hero pillar sits left of center.
+      expect(outcome.boxes[2].x, lessThan(0));
+    });
+
+    test('editorial variant 3 keeps the two offset lines', () {
+      final outcome = layout(boxes(), seed: 3);
+      expect(outcome.editorialVariant, 3);
+      expect(outcome.boxes[2].x, closeTo(0, 120));
+      // Line 1 (up to the hero) sits above line 2.
+      expect(outcome.boxes[0].y, lessThan(outcome.boxes[3].y));
+      // The lines are offset in opposite directions.
+      expect(outcome.boxes[0].x, lessThan(outcome.boxes[4].x));
+    });
+
+    test('editorial variant 4 puts the hero pillar on a side', () {
+      final outcome = layout(boxes(), seed: 4);
+      expect(outcome.editorialVariant, 4);
+      expect(outcome.boxes[2].layoutDirection,
+          SonnetLayoutDirection.vertical);
+      expect(outcome.boxes[0].layoutDirection,
+          SonnetLayoutDirection.horizontal);
+    });
+
+    test('ribbon variants keep one row around the hero', () {
+      for (final seed in [0, 1, 2]) {
+        final outcome = layout(boxes(), kind: FoliaShotKind.ribbon, seed: seed);
+        expect(outcome.ribbonVariant, seed);
+        final heroY = outcome.boxes[2].y;
+        for (final box in outcome.boxes) {
+          expect((box.y - heroY).abs(), lessThanOrEqualTo(80));
+        }
+        expect(outcome.boxes[0].x, lessThan(outcome.boxes[2].x));
+        expect(outcome.boxes[4].x, greaterThan(outcome.boxes[2].x));
+      }
+    });
+
+    test('tableau stacks vertically around the hero', () {
+      // Small boxes: with the shared sizes the column wraps to a
+      // second column (the blueprint's overflow rule), which is
+      // covered by the safe-area test above.
+      final small = [
+        for (var i = 0; i < 5; i++)
+          SonnetLayoutWord(
+            index: i,
+            isHero: i == 2,
+            isSemiHero: i == 3,
+            fontScale: i == 2 ? 3.0 : 1.15,
+            measuredWidth: i == 2 ? 120 : 60,
+            measuredHeight: i == 2 ? 60 : 24,
+          ),
+      ];
+      final outcome = layout(
+        small,
+        kind: FoliaShotKind.tableau,
+        seed: 0,
+      );
+      expect(outcome.tableauVariant, 0);
+      expect(outcome.boxes[0].y, lessThan(outcome.boxes[2].y));
+      expect(outcome.boxes[4].y, greaterThan(outcome.boxes[2].y));
+      expect(outcome.boxes[0].x, closeTo(outcome.boxes[2].x, 120));
+    });
+
+    test('cross-stack puts words on all four sides of the hero', () {
+      for (final kind in [FoliaShotKind.impact, FoliaShotKind.reveal]) {
+        final outcome = layout(boxes(), kind: kind, seed: 0);
+        final hero = outcome.boxes[2];
+        expect(outcome.boxes[0].y, lessThan(hero.y));
+        expect(outcome.boxes[1].x, lessThan(hero.x));
+        expect(outcome.boxes[3].x, greaterThan(hero.x));
+        expect(outcome.boxes[4].y, greaterThan(hero.y));
+      }
+    });
+
+    test('collage spreads the supports on a ring around the hero', () {
+      final outcome = layout(boxes(), kind: FoliaShotKind.collage, seed: 0);
+      final hero = outcome.boxes[2];
+      for (var i = 0; i < outcome.boxes.length; i++) {
+        if (i == 2) continue;
+        final box = outcome.boxes[i];
+        final distance = (box.x - hero.x).abs() + (box.y - hero.y).abs();
+        expect(distance, greaterThan(60));
+      }
+    });
+
+    test('poster flow stays inside its canvas and rotates by seed', () {
+      final horizontal = layout(
+        boxes(),
+        kind: FoliaShotKind.poster,
+        posterSeed: 0,
+      );
+      expect(horizontal.posterOrientation, 0);
+      final vertical = layout(
+        boxes(),
+        kind: FoliaShotKind.poster,
+        posterSeed: 1,
+      );
+      expect(vertical.posterOrientation, 1);
+      for (final outcome in [horizontal, vertical]) {
+        for (final box in outcome.boxes) {
+          expect(box.x.abs(), lessThanOrEqualTo(800 * 0.42 + 1));
+          expect(box.y.abs(), lessThanOrEqualTo(450 * 0.40 + 1));
+        }
+      }
+      // The orientation changes the composition.
+      expect(
+        horizontal.boxes[0].x != vertical.boxes[0].x ||
+            horizontal.boxes[0].y != vertical.boxes[0].y,
+        isTrue,
+      );
+    });
+
+    test('layout is deterministic for the same seed', () {
+      final first = layout(boxes(), kind: FoliaShotKind.collage, seed: 5);
+      final second = layout(boxes(), kind: FoliaShotKind.collage, seed: 5);
+      for (var i = 0; i < first.boxes.length; i++) {
+        expect(second.boxes[i].x, first.boxes[i].x);
+        expect(second.boxes[i].y, first.boxes[i].y);
+        expect(second.boxes[i].fontScale, first.boxes[i].fontScale);
+      }
+      // A different seed rotates the variants.
+      final other = layout(boxes(), kind: FoliaShotKind.editorial, seed: 6);
+      expect(other.editorialVariant, isNot(first.editorialVariant));
+    });
+
+    test('CJK detection drives the vertical column rule', () {
+      expect(sonnetIsCjk('后来'), isTrue);
+      expect(sonnetIsCjk('hello'), isFalse);
+      expect(sonnetIsCjk('後'), isTrue);
+    });
+  });
+
+  group('sonnet transitions', () {
+    test('transition duration clamps to 0.14–0.24s', () {
+      expect(sonnetTransitionDurationSeconds(0), closeTo(0.14, 1e-9));
+      expect(sonnetTransitionDurationSeconds(1000), closeTo(0.18, 1e-9));
+      expect(sonnetTransitionDurationSeconds(10000), closeTo(0.24, 1e-9));
+    });
+
+    test('fast-blur peaks at blur 14 with the enter alpha 0.18', () {
+      final enter = resolveSonnetTransitionFrame(
+        SonnetTransitionKind.fastBlur,
+        'enter',
+        0,
+        100,
+      );
+      expect(enter.blur, closeTo(14, 1e-9));
+      expect(enter.alpha, closeTo(0.18, 1e-9));
+      final exit = resolveSonnetTransitionFrame(
+        SonnetTransitionKind.fastBlur,
+        'exit',
+        1,
+        100,
+      );
+      expect(exit.blur, closeTo(14, 1e-9));
+      expect(exit.alpha, closeTo(0, 1e-9));
+    });
+
+    test('mono-glitch steps in 14 slices and holds alpha until 0.86', () {
+      final early = resolveSonnetTransitionFrame(
+        SonnetTransitionKind.monoGlitch,
+        'exit',
+        0.5,
+        100,
+      );
+      expect(early.glitch, greaterThan(0));
+      expect(early.alpha, 1);
+      expect(early.glitchSeed, closeTo(100 * 0.0001 + 7 * 0.173, 1e-9));
+      final late = resolveSonnetTransitionFrame(
+        SonnetTransitionKind.monoGlitch,
+        'exit',
+        0.95,
+        100,
+      );
+      expect(late.alpha, lessThan(1));
+      expect(late.glitchSeed, closeTo(100 * 0.0001 + 13 * 0.173, 1e-9));
+    });
+
+    test('boundary kinds are deterministic and cover all three', () {
+      final kinds = <SonnetTransitionKind>{};
+      for (var seed = 0; seed < 40; seed++) {
+        for (var boundary = 0; boundary < 5; boundary++) {
+          final kind = sonnetBoundaryKind(seed, boundary);
+          expect(sonnetBoundaryKind(seed, boundary), kind);
+          kinds.add(kind);
+        }
+      }
+      expect(kinds.length, 3);
+    });
+  });
+
+  group('sonnet MG decorations', () {
+    test('blueprint defaults are all on with the full outer frame', () {
+      const settings = SonnetMgSettings.blueprintDefaults;
+      expect(settings.showGuide, isTrue);
+      expect(settings.showBackgroundMg, isTrue);
+      expect(settings.showFixedGeo, isTrue);
+      expect(settings.showGiantDecorativeText, isTrue);
+      expect(settings.showBackgroundDecor, isTrue);
+      expect(settings.outerFrameMode, SonnetOuterFrameMode.full);
+      expect(settings.showFrameOverlay, isTrue);
+    });
+
+    test('MG variant selectors stay in their blueprint ranges', () {
+      for (var seed = 0; seed < 50; seed++) {
+        expect(sonnetBackgroundHudVariant(seed), inInclusiveRange(0, 7));
+        expect(sonnetFixedGeoShotVariant(seed), inInclusiveRange(0, 7));
+        expect(sonnetBackgroundDecorVariant(seed), inInclusiveRange(0, 5));
+        expect(sonnetTextFixedGeoVariant(seed), inInclusiveRange(0, 6));
+        expect(
+          sonnetSceneHairlineCount(seed),
+          inInclusiveRange(9, 14),
+        );
+      }
+    });
+
+    test('text fixed geo needs 26 words in a chorus, 15 elsewhere', () {
+      expect(sonnetTextFixedGeoMinWords(true), 26);
+      expect(sonnetTextFixedGeoMinWords(false), 15);
+    });
+
+    test('guide lead clamps to 0.2–0.38s', () {
+      expect(sonnetGuideLeadSeconds(0), closeTo(0.2, 1e-9));
+      expect(sonnetGuideLeadSeconds(1), closeTo(0.28, 1e-9));
+      expect(sonnetGuideLeadSeconds(10), closeTo(0.38, 1e-9));
+    });
+
+    test('giant decorations skip tableau and poster, scale 2.8–5.5', () {
+      final boxes = [
+        SonnetLayoutWord(
+          index: 0,
+          isHero: true,
+          isSemiHero: false,
+          fontScale: 4.0,
+          measuredWidth: 200,
+          measuredHeight: 120,
+        ),
+        SonnetLayoutWord(
+          index: 1,
+          isHero: false,
+          isSemiHero: false,
+          fontScale: 1.2,
+          measuredWidth: 80,
+          measuredHeight: 48,
+        ),
+      ];
+      final editorial = sonnetDecorations(
+        boxes: boxes,
+        heroFontScale: 4.0,
+        width: 800,
+        height: 450,
+        kind: FoliaShotKind.editorial,
+      );
+      expect(editorial, isNotEmpty);
+      for (final decoration in editorial) {
+        expect(decoration.fontScale, inInclusiveRange(1.8, 5.5));
+      }
+      expect(
+        sonnetDecorations(
+          boxes: boxes,
+          heroFontScale: 4.0,
+          width: 800,
+          height: 450,
+          kind: FoliaShotKind.tableau,
+        ),
+        isEmpty,
+      );
+      expect(
+        sonnetDecorations(
+          boxes: boxes,
+          heroFontScale: 4.0,
+          width: 800,
+          height: 450,
+          kind: FoliaShotKind.poster,
+        ),
+        isEmpty,
+      );
     });
   });
 }
