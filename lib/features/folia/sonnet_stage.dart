@@ -26,7 +26,7 @@ import 'sonnet_motion.dart';
 /// mid-line would be a stage bug; bunched word timings would be a
 /// lyrics-data problem; a frozen/jumping clock would be a
 /// position-source problem.
-const bool kSonnetTimingDiagnostics = false;
+const bool kSonnetTimingDiagnostics = true;
 
 /// Sonnet (商籁) stage: the deterministic Japanese MG lyric-PV
 /// director, ported from the Folia blueprint
