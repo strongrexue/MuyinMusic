@@ -6,10 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/storage/settings_store.dart';
 import '../player/player_audio_handler.dart';
 import '../player/player_controller.dart';
-import '../player/widgets/immersive_chrome.dart';
 import '../player/widgets/player_control_color.dart';
 import '../player/widgets/transport_bar.dart';
 import 'audio_analysis.dart';
+import 'folia_chrome.dart';
 import 'folia_stage_registry.dart';
 import 'folia_theme.dart';
 
@@ -41,16 +41,30 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
       fetchFft: handler.getFft,
       positionNow: () => ref.read(playerControllerProvider).position,
     )..start();
+    // Enter immersive: the chrome starts hidden while playing so the
+    // stage fills the whole screen; a paused song keeps it visible.
+    final playing = ref.read(playerControllerProvider).playing;
+    final chrome = ref.read(foliaChromeProvider.notifier);
+    chrome.syncPlaying(playing);
+    if (playing) chrome.hide();
   }
 
   @override
   void dispose() {
+    // Leaving folia mode restores the normal chrome.
+    ref.read(foliaChromeProvider.notifier).show();
     unawaited(_analysis.dispose());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Keep the chrome's auto-hide in step with playback.
+    ref.listen<bool>(
+      playerControllerProvider.select((s) => s.playing),
+      (_, playing) =>
+          ref.read(foliaChromeProvider.notifier).syncPlaying(playing),
+    );
     final vm = ref.watch(
       playerControllerProvider.select(
         (s) => (
@@ -87,23 +101,80 @@ class _FoliaStagePageState extends ConsumerState<FoliaStagePage> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (style != null)
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            child: KeyedSubtree(
-              key: ValueKey(style.id),
-              child: style.builder(context, stageContext),
+        // A tap on the empty stage toggles the chrome (top bar +
+        // bottom bar). Taps on the transport bar's own buttons win
+        // the gesture arena, so they keep working as controls.
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(foliaChromeProvider.notifier).toggle(),
+            child: style != null
+                ? AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: KeyedSubtree(
+                      key: ValueKey(style.id),
+                      child: style.builder(context, stageContext),
+                    ),
+                  )
+                : const _FoliaStatus(text: 'Folia 模式 · 舞台效果即将到来'),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FoliaChromeFade(
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) =>
+                  ref.read(foliaChromeProvider.notifier).poke(),
+              child: const TransportBar(compact: true),
             ),
-          )
-        else
-          const _FoliaStatus(text: 'Folia 模式 · 舞台效果即将到来'),
+          ),
+        ),
+        // The only bottom element while the chrome is hidden: a thin
+        // progress line, like the blueprint's full-screen stage.
         const Positioned(
           left: 0,
           right: 0,
           bottom: 0,
-          child: ImmersiveFade(child: TransportBar(compact: true)),
+          child: _FoliaProgressLine(),
         ),
       ],
+    );
+  }
+}
+
+/// Thin progress line pinned to the bottom edge, visible only while
+/// the folia chrome is hidden. A separate consumer so position ticks
+/// rebuild just this 2px strip, not the stage.
+class _FoliaProgressLine extends ConsumerWidget {
+  const _FoliaProgressLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chromeVisible = ref.watch(foliaChromeProvider);
+    final progress = ref.watch(
+      playerControllerProvider.select(
+        (s) => (position: s.position, duration: s.duration),
+      ),
+    );
+    final totalMs = progress.duration.inMilliseconds;
+    final fraction = totalMs <= 0
+        ? 0.0
+        : (progress.position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    return AnimatedOpacity(
+      opacity: chromeVisible ? 0 : 1,
+      duration: const Duration(milliseconds: 300),
+      child: SizedBox(
+        height: 2,
+        child: LinearProgressIndicator(
+          value: fraction,
+          backgroundColor: Colors.white.withValues(alpha: 0.25),
+          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+          minHeight: 2,
+        ),
+      ),
     );
   }
 }

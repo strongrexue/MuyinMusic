@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/settings_store.dart';
 import '../../theme/app_motion.dart';
+import '../folia/folia_chrome.dart';
 import '../folia/folia_stage_page.dart';
 import '../shell/player_transition.dart';
 import 'player_controller.dart';
@@ -57,11 +58,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   /// adaptive foreground follows.
   final ValueNotifier<double> _compactPageProgress = ValueNotifier(0);
 
-  /// Landscape KTV is a full-screen stage, so the system bars hide while
-  /// it is on screen; every other player state keeps the app-wide
-  /// edge-to-edge mode set at startup. Guarded by [_systemBarsHidden] so
-  /// the platform call only fires on transitions.
-  void _syncKtvSystemUi(bool hide) {
+  /// Landscape KTV and Folia are full-screen stages, so the system
+  /// bars hide while either is on screen; every other player state
+  /// keeps the app-wide edge-to-edge mode set at startup. Guarded by
+  /// [_systemBarsHidden] so the platform call only fires on transitions.
+  void _syncStageSystemUi(bool hide) {
     if (hide == _systemBarsHidden) return;
     _systemBarsHidden = hide;
     SystemChrome.setEnabledSystemUIMode(
@@ -71,7 +72,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   /// Applies or releases the force-landscape lock. Guarded by
   /// [_orientationLockApplied] so the platform call only fires on
-  /// transitions, same as [_syncKtvSystemUi].
+  /// transitions, same as [_syncStageSystemUi].
   void _syncOrientationLock(bool locked) {
     if (locked == _orientationLockApplied) return;
     _orientationLockApplied = locked;
@@ -117,22 +118,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final showEmpty = ref.watch(
       playerControllerProvider.select((s) => s.track == null && !s.loading),
     );
-    // In landscape KTV and Folia mode the top chrome (title, quality /
-    // timer / equalizer) stays on screen in immersive mode; only the
-    // transport bar fades. Both are full-screen stages.
-    final stageChromePinned =
-        (ref.watch(
-              settingsProvider.select((settings) => settings.ktvModeEnabled),
-            ) ||
-            ref.watch(
-              settingsProvider.select(
-                (settings) => settings.playerStyle == PlayerStyle.folia,
-              ),
-            )) &&
+    // In landscape KTV the top chrome (title, quality / timer /
+    // equalizer) stays on screen in immersive mode; only the
+    // transport bar fades. Folia mode is different: it is a
+    // full-screen stage whose top chrome floats over the stage and
+    // fades with the folia chrome state (tap the stage to toggle),
+    // so the stage reaches every screen edge.
+    final isLandscape =
         MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
+    final isFolia =
+        ref.watch(
+          settingsProvider.select(
+            (settings) => settings.playerStyle == PlayerStyle.folia,
+          ),
+        );
+    final foliaLandscape = isFolia && isLandscape;
+    final stageChromePinned =
+        ref.watch(
+          settingsProvider.select((settings) => settings.ktvModeEnabled),
+        ) &&
+        isLandscape;
     // Hide the system bars only while a landscape stage is actually the
     // active page; the page stays mounted (inactive) under other routes.
-    _syncKtvSystemUi(stageChromePinned && widget.active);
+    _syncStageSystemUi((stageChromePinned || foliaLandscape) && widget.active);
     // The force-landscape lock likewise applies only while this page is
     // the active route.
     final landscapeLocked = ref.watch(landscapeLockProvider);
@@ -230,7 +238,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   // Landscape KTV stretches full-bleed like mainstream KTV
                   // apps: only the top chrome keeps its safe-area insets,
                   // the body reaches every screen edge.
-                  child: stageChromePinned
+                  //
+                  // Folia mode is a full-screen stage like the blueprint:
+                  // the stage fills the whole screen and the top chrome
+                  // floats over it, fading with the folia chrome state
+                  // (tap the stage to toggle; a thin progress line is the
+                  // only bottom element while hidden).
+                  child: foliaLandscape
+                      ? Stack(
+                          key: const ValueKey('player-chrome'),
+                          fit: StackFit.expand,
+                          children: [
+                            showEmpty
+                                ? const _EmptyPlayer()
+                                : _NowPlayingBody(
+                                    pageProgress: _compactPageProgress,
+                                  ),
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: SafeArea(
+                                bottom: false,
+                                child: Listener(
+                                  behavior: HitTestBehavior.translucent,
+                                  onPointerDown: (_) => ref
+                                      .read(foliaChromeProvider.notifier)
+                                      .poke(),
+                                  child: FoliaChromeFade(child: topChromeRow),
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : stageChromePinned
                       ? Column(
                           key: const ValueKey('player-chrome'),
                           children: [
